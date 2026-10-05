@@ -150,6 +150,38 @@ def confidence_bp(note: dict) -> int:
     return scaled
 
 
+def acceptance_window_us(snapshot: dict) -> int | None:
+    """The snapshot's own acceptance window, in guest microseconds.
+
+    This is a duration from the two guest timestamps. It is not a comparison
+    of the guest clock with the host clock.
+    """
+    captured = snapshot.get("captured_guest_us")
+    until = snapshot.get("accept_until_guest_us")
+    if isinstance(captured, bool) or isinstance(until, bool):
+        return None
+    if not isinstance(captured, int) or not isinstance(until, int) or until < captured:
+        return None
+    return until - captured
+
+
+def withhold_expired(decision: dict, note: dict, window_us: int | None) -> dict:
+    """Drop a choice whose forward already used up the snapshot window.
+
+    A structural abstain is left as it is. A forward inside the window is
+    still a proposal; the guest clock decides whether the frame arrives late.
+    Confidence is not consulted.
+    """
+    if decision.get("kind") != "proposal" or window_us is None:
+        return decision
+    forward = note.get("forward_us")
+    if isinstance(forward, bool) or not isinstance(forward, int):
+        return decision
+    if forward > window_us:
+        return {"kind": "abstain", "reason": "expired"}
+    return decision
+
+
 def decide_live(note: dict) -> dict:
     """The frame to send after the forward.
 
@@ -177,8 +209,8 @@ def live_line(note: dict) -> str:
 
 
 def live_trace_line(notes: list) -> str:
-    proposed = sum(note["kind"] != "abstain" for note in notes)
-    abstain = sum(note["kind"] == "abstain" for note in notes)
+    proposed = sum(note.get("sent") == "proposal" for note in notes)
+    abstain = sum(note.get("sent") == "abstain" for note in notes)
     return f"LIVE_TRACE rounds={len(notes)} proposed={proposed} abstain={abstain}"
 
 

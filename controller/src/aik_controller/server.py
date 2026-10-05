@@ -25,8 +25,10 @@ from aik_controller.features import FeatureError, FeatureHistory, feature_line, 
 from aik_controller.heuristic import choose, load_thresholds
 from aik_controller.laya_offline import model_state
 from aik_controller.shadow import (
+    acceptance_window_us,
     decide_live,
     live_line,
+    withhold_expired,
     live_trace_line,
     send_heuristic_then_shadow,
     shadow_line,
@@ -160,9 +162,13 @@ def exchange_round(
         # deadline, so the forward has to finish before the proposal is sent.
         note = live.score(model_state(state, include_profile=True), heuristic)
         print(live_line(note), flush=True)
+        decision = withhold_expired(
+            decide_live(note), note, acceptance_window_us(snapshot)
+        )
         if notes is not None:
-            notes.append(note)
-        decision = decide_live(note)
+            recorded = dict(note)
+            recorded["sent"] = decision["kind"]
+            notes.append(recorded)
         if decision["kind"] == "abstain":
             write_payload(
                 conn,

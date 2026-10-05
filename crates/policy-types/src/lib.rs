@@ -258,6 +258,7 @@ pub enum AbstainReason {
     TruncatedInput,
     ModelBusy,
     BackendError,
+    Expired,
 }
 
 impl AbstainReason {
@@ -268,6 +269,7 @@ impl AbstainReason {
             Self::TruncatedInput => "truncated_input",
             Self::ModelBusy => "model_busy",
             Self::BackendError => "backend_error",
+            Self::Expired => "expired",
         }
     }
 
@@ -278,6 +280,7 @@ impl AbstainReason {
             "truncated_input" => Some(Self::TruncatedInput),
             "model_busy" => Some(Self::ModelBusy),
             "backend_error" => Some(Self::BackendError),
+            "expired" => Some(Self::Expired),
             _ => None,
         }
     }

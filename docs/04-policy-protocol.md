@@ -66,7 +66,7 @@ The JSON below is an illustrative payload with synthetic identities and hashes; 
 
 The response deliberately contains no writable TTL, arbitrary weights, memory addresses, task IDs, or numeric resource limits. The guest resolves the profile against its compiled catalog. Confidence is diagnostic metadata after host calibration, not an independent capability.
 
-An `abstain` message identifies the same request and has an enumerated reason such as `low_confidence`, `out_of_distribution`, `truncated_input`, `model_busy`, or `backend_error`. Abstention never renews the active lease. Low-confidence choice labels may be logged on the host, but must not be hidden inside an actionable proposal.
+An `abstain` message identifies the same request and has an enumerated reason such as `low_confidence`, `out_of_distribution`, `truncated_input`, `model_busy`, `backend_error`, or `expired`. Abstention never renews the active lease. Low-confidence choice labels may be logged on the host, but must not be hidden inside an actionable proposal.
 
 ## Validation and staging
 
