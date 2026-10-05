@@ -35,7 +35,7 @@ The host reference model cannot prove the kernel port obeys its algorithm. Guest
 | Task blocks/exits while proposal is pending | Consistent queue state, no use-after-free, valid class policy |
 | Invalid, oversized, duplicate, unauthenticated frame | Explicit rejection, bounded memory, no activation |
 | High-confidence invalid proposal | Rejected identically to a low-confidence invalid proposal |
-| Late response | Rejected using the guest's original deadline |
+| Late response | Rejected using the guest's original deadline. The live trial reads guest time after the proposal arrives |
 | Reply from previous boot/session | Rejected regardless of matching request sequence |
 | Repeated same-profile renewals | Lease renews, but the minimum-dwell timer does not restart |
 | VM pause/resume or severe host descheduling | Expiry checked before resumed model control; no false wall-clock liveness claim |

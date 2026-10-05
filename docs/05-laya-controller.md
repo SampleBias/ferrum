@@ -102,4 +102,6 @@ Account for model CPU/GPU resources separately from guest resources. Pin or othe
 6. Enable live profiles in isolated QEMU trials only after kernel fault gates pass.
 7. Evaluate held-out closed-loop performance and publish negative results too.
 
+Step 6 is one isolated round. The controller proposes Laya's choice after the forward, or abstains when the result is truncated, busy, or otherwise not a profile. The guest reads its clock after that frame arrives and rejects `late` against the published 750 ms deadline. That deadline stays. A late choice is reported and not staged. Confidence is copied onto the proposal and is not a gate. The declared 2 s budget is not installed.
+
 No online reinforcement learning or weight updates occur in the live kernel experiment. A changed model is a new artifact requiring a fresh qualification run.

@@ -116,6 +116,72 @@ def warmup_features(root):
     return encode(cases(root)[0]["snapshot"], edges)
 
 
+def live_choice(note: dict) -> str | None:
+    """The profile a live trial may propose. Structural failures have none.
+
+    Confidence is not consulted. There is no calibration split, so a threshold
+    would be an unmeasured operating point.
+    """
+    if note.get("kind") == "abstain" or not note.get("choice"):
+        return None
+    return note["choice"]
+
+
+def abstain_reason(note: dict) -> str:
+    return {
+        "truncated": "truncated_input",
+        "model_busy": "model_busy",
+        "backend": "backend_error",
+        "outside": "backend_error",
+        "missing": "backend_error",
+    }.get(note.get("structural") or "", "backend_error")
+
+
+def confidence_bp(note: dict) -> int:
+    """Diagnostic basis points copied onto a proposal. This does not gate it."""
+    value = note.get("answer_confidence")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    scaled = int(round(float(value) * 10_000))
+    if scaled < 0:
+        return 0
+    if scaled > 10_000:
+        return 10_000
+    return scaled
+
+
+def decide_live(note: dict) -> dict:
+    """The frame to send after the forward.
+
+    A choice becomes a `model_choice` proposal. A structural failure becomes
+    an abstain and is not turned into a profile.
+    """
+    chosen = live_choice(note)
+    if chosen is None:
+        return {"kind": "abstain", "reason": abstain_reason(note)}
+    return {
+        "kind": "proposal",
+        "profile": chosen,
+        "reason_code": "model_choice",
+        "answer_confidence_bp": confidence_bp(note),
+    }
+
+
+def live_line(note: dict) -> str:
+    return (
+        f"LIVE choice={note['choice']} kind={note['kind']} "
+        f"structural={note['structural']} heuristic={note['heuristic']} "
+        f"confidence={note['answer_confidence']} forward_us={note['forward_us']} "
+        f"tokens={note['input_tokens']}"
+    )
+
+
+def live_trace_line(notes: list) -> str:
+    proposed = sum(note["kind"] != "abstain" for note in notes)
+    abstain = sum(note["kind"] == "abstain" for note in notes)
+    return f"LIVE_TRACE rounds={len(notes)} proposed={proposed} abstain={abstain}"
+
+
 def prepare(root, directory=None) -> ShadowWorker:
     """Load the pinned checkpoint. Refuse if the files are not already local."""
     directory = directory if directory is not None else checkpoint_dir(root)

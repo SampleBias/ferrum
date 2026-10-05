@@ -554,17 +554,55 @@ fn send(stream: &mut TcpStream, direction: Direction, payload: &[u8]) -> Result<
     Ok(())
 }
 
+/// What the guest decided after the proposal frame had arrived.
+///
+/// `decision_us` is the clock read used for that decision. A staged ticket
+/// still has to be installed by the scheduler. A rejection has already been
+/// reported. An abstention is not a profile and has no report.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LiveOutcome {
+    Staged {
+        ticket: ProposalTicket,
+        decision_us: u64,
+    },
+    Rejected {
+        reason: RejectReason,
+        profile: ProfileId,
+        decision_us: u64,
+    },
+    Abstained {
+        decision_us: u64,
+    },
+}
+
 /// One controller session that can issue a proposal for every snapshot.
 ///
-/// The engine stages each proposal. The caller installs it in the scheduler,
-/// then [`LiveSession::commit_applied`] records the kernel's activation time
-/// so the next snapshot's generation and dwell match the scheduler.
+/// The engine stages each proposal that arrives inside the snapshot's
+/// acceptance deadline. The caller installs it in the scheduler, then
+/// [`LiveSession::commit_applied`] records the kernel's activation time so
+/// the next snapshot's generation and dwell match the scheduler.
 pub struct LiveSession {
     engine: PolicyEngine,
 }
 
 impl LiveSession {
     pub fn open(stream: &mut TcpStream, boot_id: BootId) -> Result<Self, SessionError> {
+        Self::open_mode(stream, boot_id, RunMode::Mock)
+    }
+
+    /// Same session as [`LiveSession::open`], with hello mode `live`.
+    pub fn open_live(stream: &mut TcpStream, boot_id: BootId) -> Result<Self, SessionError> {
+        Self::open_mode(stream, boot_id, RunMode::Live)
+    }
+
+    fn open_mode(
+        stream: &mut TcpStream,
+        boot_id: BootId,
+        mode: RunMode,
+    ) -> Result<Self, SessionError> {
+        if !mode.allows_network_activation() {
+            return Err(SessionError::Protocol("mode cannot activate"));
+        }
         prepare(stream);
         let mut engine = PolicyEngine::boot(EngineConfig {
             catalog: CatalogId::CpuV1,
@@ -572,54 +610,94 @@ impl LiveSession {
             objective: ObjectiveId::MixedLatencyV1,
             approved_model: Hash32::repeat(0xcc),
             approved_calibration: Hash32::repeat(0xdd),
-            run_mode: RunMode::Mock,
+            run_mode: mode,
             manual_rearm: false,
         });
-        exchange_hello(stream, &mut engine, boot_id, RunMode::Mock)?;
+        exchange_hello(stream, &mut engine, boot_id, mode)?;
         engine
             .promote_to_active()
             .map_err(|_| SessionError::Protocol("promote rejected"))?;
         Ok(Self { engine })
     }
 
+    pub fn status(&self) -> policy_core::PolicyStatus {
+        self.engine.status()
+    }
+
     /// Send `observation` and stage the controller's proposal.
     ///
-    /// `now_us` is the guest monotonic clock. A rejected proposal is reported
-    /// on the session so the controller can finish the round.
+    /// `now_us` is both the capture clock and the decision clock. A caller
+    /// that waited for inference must use [`LiveSession::request_judged`]
+    /// and read the clock after the proposal arrives.
     pub fn request(
         &mut self,
         stream: &mut TcpStream,
         now_us: u64,
         observation: Observation,
     ) -> Result<ProposalTicket, SessionError> {
+        match self.request_judged(stream, now_us, observation, || Ok(now_us))? {
+            LiveOutcome::Staged { ticket, .. } => Ok(ticket),
+            LiveOutcome::Rejected { reason, .. } => Err(SessionError::Protocol(reason.as_str())),
+            LiveOutcome::Abstained { .. } => Err(SessionError::Protocol("abstain")),
+        }
+    }
+
+    /// Capture at `captured_us`, then judge the reply with `decision_clock`.
+    ///
+    /// The clock runs after the frame has been received. Reusing `captured_us`
+    /// would hide the time spent waiting for the controller.
+    pub fn request_judged<F>(
+        &mut self,
+        stream: &mut TcpStream,
+        captured_us: u64,
+        observation: Observation,
+        decision_clock: F,
+    ) -> Result<LiveOutcome, SessionError>
+    where
+        F: FnOnce() -> Result<u64, SessionError>,
+    {
         let Capture::Send { snapshot, .. } = self
             .engine
-            .capture(now_us, observation)
+            .capture(captured_us, observation)
             .map_err(|_| SessionError::Protocol("capture failed"))?
         else {
             return Err(SessionError::Protocol("snapshot was retained"));
         };
         send(stream, Direction::GuestToController, &encode_snapshot(&snapshot)?)?;
-        let proposal = match decode_message(&recv(stream, Direction::ControllerToGuest)?)? {
-            Decoded::Proposal(proposal) => proposal,
-            _ => return Err(SessionError::Protocol("expected proposal")),
-        };
-        let ticket = ProposalTicket {
-            boot_id: proposal.boot_id,
-            session_id: proposal.session_id,
-            request_seq: proposal.request_seq,
-            profile: proposal.profile,
-            base_generation: proposal.base_generation,
-        };
-        match self.engine.on_proposal(now_us, &proposal) {
-            ProposalOutcome::Staged => Ok(ticket),
-            ProposalOutcome::Rejected(reason) => {
-                report_reject(stream, &ticket, reason)?;
-                Err(SessionError::Protocol(reason.as_str()))
+        let frame = recv(stream, Direction::ControllerToGuest)?;
+        let decision_us = decision_clock()?;
+        match decode_message(&frame)? {
+            Decoded::Proposal(proposal) => {
+                let ticket = ProposalTicket {
+                    boot_id: proposal.boot_id,
+                    session_id: proposal.session_id,
+                    request_seq: proposal.request_seq,
+                    profile: proposal.profile,
+                    base_generation: proposal.base_generation,
+                };
+                match self.engine.on_proposal(decision_us, &proposal) {
+                    ProposalOutcome::Staged => Ok(LiveOutcome::Staged { ticket, decision_us }),
+                    ProposalOutcome::Rejected(reason) => {
+                        report_reject(stream, &ticket, reason)?;
+                        Ok(LiveOutcome::Rejected {
+                            reason,
+                            profile: proposal.profile,
+                            decision_us,
+                        })
+                    }
+                    ProposalOutcome::ShadowNoted | ProposalOutcome::Cached(_) => {
+                        Err(SessionError::Protocol("proposal was not staged"))
+                    }
+                }
             }
-            ProposalOutcome::ShadowNoted | ProposalOutcome::Cached(_) => {
-                Err(SessionError::Protocol("proposal was not staged"))
-            }
+            Decoded::Abstain(abstain) => match self.engine.on_abstain(decision_us, &abstain) {
+                ProposalOutcome::ShadowNoted | ProposalOutcome::Cached(_) => {
+                    Ok(LiveOutcome::Abstained { decision_us })
+                }
+                ProposalOutcome::Rejected(reason) => Err(SessionError::Protocol(reason.as_str())),
+                ProposalOutcome::Staged => Err(SessionError::Protocol("abstain was staged")),
+            },
+            _ => Err(SessionError::Protocol("expected proposal")),
         }
     }
 
@@ -1075,6 +1153,68 @@ mod tests {
                 && log.contains("generation=3 previous=2")
                 && log.contains("ROUNDS 2"),
             "controller log did not record the renewal: {log}"
+        );
+    }
+
+    #[test]
+    fn a_proposal_is_rejected_when_it_arrives_after_the_deadline() {
+        use policy_types::{RejectReason, ACCEPTANCE_DEADLINE_US, MIN_DWELL_US};
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut child = Command::new("python3")
+            .arg("-m")
+            .arg("aik_controller.server")
+            .arg("--once")
+            .arg("--bind")
+            .arg("127.0.0.1:0")
+            .arg("--root")
+            .arg(&root)
+            .env("PYTHONPATH", root.join("controller/src"))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start mock controller");
+        let stdout = child.stdout.take().unwrap();
+        let mut lines = BufReader::new(stdout).lines();
+        let listening = lines.next().unwrap().unwrap();
+        let port: u16 = listening.split_whitespace().nth(2).unwrap().parse().unwrap();
+        let boot = BootId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let mut session = LiveSession::open_live(&mut stream, boot).unwrap();
+        let captured = MIN_DWELL_US;
+        let outcome = session
+            .request_judged(
+                &mut stream,
+                captured,
+                workloads::measured(
+                    workloads::mixed_v1()[0],
+                    workloads::SAMPLE_US,
+                    [100_000, 10_000, 1_000],
+                ),
+                || Ok(captured + ACCEPTANCE_DEADLINE_US + 50_000),
+            )
+            .unwrap();
+        assert!(matches!(
+            outcome,
+            LiveOutcome::Rejected {
+                reason: RejectReason::Late,
+                profile: ProfileId::Latency,
+                ..
+            }
+        ));
+        let status = session.status();
+        assert_eq!(status.generation, 1);
+        assert_eq!(status.profile, ProfileId::Balanced);
+        assert_eq!(status.lease_until_guest_us, None);
+        drop(stream);
+        let exit = child.wait().unwrap();
+        let mut err = String::new();
+        child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+        assert!(exit.success(), "controller failed: {err}");
+        let log: String = lines.map(|line| line.unwrap()).collect::<Vec<_>>().join("\n");
+        assert!(
+            log.contains("REJECTED reason=late") && !log.contains("APPLIED"),
+            "controller log staged a late proposal: {log}"
         );
     }
 }

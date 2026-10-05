@@ -1,4 +1,8 @@
-"""Mock controller. It speaks the guest protocol and chooses with the heuristic."""
+"""Mock controller. It speaks the guest protocol and chooses with the heuristic.
+
+`--live` is a separate session: it proposes the pinned model's choice, or
+abstains when that choice is not usable. The default path stays the heuristic.
+"""
 
 import argparse
 import hashlib
@@ -19,7 +23,15 @@ from aik_controller.framing import (
 )
 from aik_controller.features import FeatureError, FeatureHistory, feature_line, laya_status, load_edges
 from aik_controller.heuristic import choose, load_thresholds
-from aik_controller.shadow import send_heuristic_then_shadow, shadow_line, shadow_trace_line
+from aik_controller.laya_offline import model_state
+from aik_controller.shadow import (
+    decide_live,
+    live_line,
+    live_trace_line,
+    send_heuristic_then_shadow,
+    shadow_line,
+    shadow_trace_line,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -117,6 +129,7 @@ def exchange_round(
     history: FeatureHistory,
     shadow=None,
     notes=None,
+    live=None,
 ) -> int:
     snapshot = read_payload(conn, key)
     if snapshot.get("kind") != "snapshot":
@@ -138,10 +151,39 @@ def exchange_round(
         print(f"rejected features: {err}", file=sys.stderr)
         return 1
     print(feature_line(state), flush=True)
-    profile = choose(body, thresholds)
-    print(proposal_line(snapshot, profile), flush=True)
-
-    def write_proposal(chosen: str) -> None:
+    heuristic = choose(body, thresholds)
+    if live is not None and shadow is not None:
+        print("live and shadow are different sessions", file=sys.stderr)
+        return 2
+    if live is not None:
+        # Score first. The guest judges this frame against the snapshot
+        # deadline, so the forward has to finish before the proposal is sent.
+        note = live.score(model_state(state, include_profile=True), heuristic)
+        print(live_line(note), flush=True)
+        if notes is not None:
+            notes.append(note)
+        decision = decide_live(note)
+        if decision["kind"] == "abstain":
+            write_payload(
+                conn,
+                key,
+                {
+                    "protocol": 1,
+                    "kind": "abstain",
+                    "boot_id": hello["boot_id"],
+                    "session_id": session_id,
+                    "request_seq": snapshot["request_seq"],
+                    "snapshot_hash": digest,
+                    "reason": decision["reason"],
+                },
+            )
+            print(
+                f"ABSTAIN reason={decision['reason']} seq={snapshot['request_seq']}",
+                flush=True,
+            )
+            return 0
+        profile = decision["profile"]
+        print(proposal_line(snapshot, profile), flush=True)
         write_payload(
             conn,
             key,
@@ -155,19 +197,44 @@ def exchange_round(
                 "catalog_id": catalog["id"],
                 "catalog_hash": catalog["hash"],
                 "snapshot_hash": digest,
-                "profile": chosen,
-                "answer_confidence_bp": 10000,
+                "profile": profile,
+                "answer_confidence_bp": decision["answer_confidence_bp"],
                 "model_manifest_hash": identity["model_manifest_hash"],
                 "calibration_hash": identity["calibration_hash"],
-                "reason_code": "heuristic",
+                "reason_code": decision["reason_code"],
             },
         )
+    else:
+        profile = heuristic
+        print(proposal_line(snapshot, profile), flush=True)
 
-    note = send_heuristic_then_shadow(write_proposal, shadow, state, profile)
-    if note is not None:
-        print(shadow_line(note), flush=True)
-        if notes is not None:
-            notes.append(note)
+        def write_proposal(chosen: str) -> None:
+            write_payload(
+                conn,
+                key,
+                {
+                    "protocol": 1,
+                    "kind": "proposal",
+                    "boot_id": hello["boot_id"],
+                    "session_id": session_id,
+                    "request_seq": snapshot["request_seq"],
+                    "base_generation": snapshot["base_generation"],
+                    "catalog_id": catalog["id"],
+                    "catalog_hash": catalog["hash"],
+                    "snapshot_hash": digest,
+                    "profile": chosen,
+                    "answer_confidence_bp": 10000,
+                    "model_manifest_hash": identity["model_manifest_hash"],
+                    "calibration_hash": identity["calibration_hash"],
+                    "reason_code": "heuristic",
+                },
+            )
+
+        note = send_heuristic_then_shadow(write_proposal, shadow, state, profile)
+        if note is not None:
+            print(shadow_line(note), flush=True)
+            if notes is not None:
+                notes.append(note)
 
     report = read_payload(conn, key)
     return accept_scheduler_report(
@@ -256,12 +323,13 @@ def serve_once(
     hold: bool,
     edges: dict,
     shadow=None,
+    live=None,
 ) -> int:
     opened = accept_hello(conn, key, catalog, identity)
     if opened is None:
         return 1
     hello, session_id = opened
-    notes = [] if shadow is not None else None
+    notes = [] if shadow is not None or live is not None else None
     status = exchange_round(
         conn,
         key,
@@ -274,9 +342,10 @@ def serve_once(
         FeatureHistory(),
         shadow,
         notes,
+        live,
     )
     if status == 0 and notes is not None:
-        print(shadow_trace_line(notes), flush=True)
+        emit_trace(notes, live is not None)
     if status == 0 and hold:
         # Stay connected for the rest of the lease so a kill is a dead peer,
         # not a controller that already finished and closed the socket.
@@ -298,6 +367,7 @@ def serve_follow(
     identity: dict,
     edges: dict,
     shadow=None,
+    live=None,
 ) -> int:
     """One session. Keep exchanging rounds until the guest closes."""
     opened = accept_hello(conn, key, catalog, identity)
@@ -305,7 +375,7 @@ def serve_follow(
         return 1
     hello, session_id = opened
     history = FeatureHistory()
-    notes = [] if shadow is not None else None
+    notes = [] if shadow is not None or live is not None else None
     rounds = 0
     while True:
         try:
@@ -321,13 +391,14 @@ def serve_follow(
                 history,
                 shadow,
                 notes,
+                live,
             )
         except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError, OSError) as err:
             if rounds == 0:
                 print(f"session failed: {err}", file=sys.stderr)
                 return 1
             if notes is not None:
-                print(shadow_trace_line(notes), flush=True)
+                emit_trace(notes, live is not None)
             print(f"ROUNDS {rounds}", flush=True)
             return 0
         if status != 0:
@@ -344,14 +415,15 @@ def serve_rounds(
     rounds: int,
     edges: dict,
     shadow=None,
+    live=None,
 ) -> int:
-    """One session. Each round is a snapshot, a heuristic proposal, and the scheduler report."""
+    """One session. Each round is a snapshot, a proposal, and the scheduler report."""
     opened = accept_hello(conn, key, catalog, identity)
     if opened is None:
         return 1
     hello, session_id = opened
     history = FeatureHistory()
-    notes = [] if shadow is not None else None
+    notes = [] if shadow is not None or live is not None else None
     for _ in range(rounds):
         status = exchange_round(
             conn,
@@ -365,13 +437,19 @@ def serve_rounds(
             history,
             shadow,
             notes,
+            live,
         )
         if status != 0:
             return status
     if notes is not None:
-        print(shadow_trace_line(notes), flush=True)
+        emit_trace(notes, live is not None)
     print(f"ROUNDS {rounds}", flush=True)
     return 0
+
+
+def emit_trace(notes: list, live: bool) -> None:
+    line = live_trace_line(notes) if live else shadow_trace_line(notes)
+    print(line, flush=True)
 
 
 def propose_once(
@@ -613,7 +691,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="score each snapshot with Laya after the heuristic proposal is sent",
     )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="propose Laya's choice for an isolated trial; abstain instead of inventing a profile",
+    )
     args = parser.parse_args(argv)
+    if args.live and (args.shadow or args.lose_ack or args.reject_frames):
+        print("live is a separate session", file=sys.stderr)
+        return 2
 
     root = args.root
     host, port_text = args.bind.rsplit(":", 1)
@@ -625,12 +711,18 @@ def main(argv: list[str] | None = None) -> int:
     edges = load_edges(root / "configs" / "features-v0.json")
     identity = json.loads((root / "configs" / "lab-identity.json").read_text())
     shadow = None
-    if args.shadow:
+    live = None
+    if args.shadow or args.live:
         from aik_controller.shadow import prepare, warmup_features
 
-        shadow = prepare(root)
-        warm_us = shadow.warmup(warmup_features(root))
-        print(f"SHADOW_READY warm_us={warm_us} device=cpu", flush=True)
+        worker = prepare(root)
+        warm_us = worker.warmup(warmup_features(root))
+        if args.live:
+            live = worker
+            print(f"LIVE_READY warm_us={warm_us} device=cpu", flush=True)
+        else:
+            shadow = worker
+            print(f"SHADOW_READY warm_us={warm_us} device=cpu", flush=True)
 
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -639,7 +731,11 @@ def main(argv: list[str] | None = None) -> int:
     bound_host, bound_port = listener.getsockname()
     print(f"LISTENING {bound_host} {bound_port}", flush=True)
     shadow_flag = "on" if shadow is not None else "off"
-    print(f"LAYA checkpoint={laya_status(root)} live=heuristic shadow={shadow_flag}", flush=True)
+    live_flag = "laya" if live is not None else "heuristic"
+    print(
+        f"LAYA checkpoint={laya_status(root)} live={live_flag} shadow={shadow_flag}",
+        flush=True,
+    )
     try:
         if args.lose_ack:
             return serve_lost_ack(listener, key, catalog, thresholds, identity, edges, shadow)
@@ -653,7 +749,7 @@ def main(argv: list[str] | None = None) -> int:
             conn.settimeout(60)
             with conn:
                 try:
-                    return serve_follow(conn, key, catalog, thresholds, identity, edges, shadow)
+                    return serve_follow(conn, key, catalog, thresholds, identity, edges, shadow, live)
                 except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
                     print(f"session failed: {err}", file=sys.stderr)
                     return 1
@@ -666,7 +762,7 @@ def main(argv: list[str] | None = None) -> int:
             with conn:
                 try:
                     return serve_rounds(
-                        conn, key, catalog, thresholds, identity, args.rounds, edges, shadow
+                        conn, key, catalog, thresholds, identity, args.rounds, edges, shadow, live
                     )
                 except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
                     print(f"session failed: {err}", file=sys.stderr)
@@ -679,7 +775,7 @@ def main(argv: list[str] | None = None) -> int:
             with conn:
                 try:
                     status = serve_once(
-                        conn, key, catalog, thresholds, identity, args.hold, edges, shadow
+                        conn, key, catalog, thresholds, identity, args.hold, edges, shadow, live
                     )
                 except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
                     print(f"session failed: {err}", file=sys.stderr)

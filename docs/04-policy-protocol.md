@@ -75,7 +75,7 @@ Perform checks in this order:
 1. Verify frame bounds, authentication, schema, and primitive types.
 2. Match boot/session/request identity to the sole locally pending request.
 3. Match catalog, snapshot hash, and experiment-approved model/calibration identity.
-4. Check current guest monotonic time against locally recorded acceptance deadline.
+4. Check current guest monotonic time against locally recorded acceptance deadline. The live trial reads that clock after the proposal arrives. The capture timestamp is not reused, so time spent waiting on the controller counts against the snapshot's original deadline.
 5. Require the current generation to equal `base_generation`; a local override or another activation makes the request stale.
 6. Resolve the label to the immutable profile and recheck capability and resource invariants.
 7. Apply mode, emergency, and dwell rules. A different profile during dwell is rejected; an identical fresh profile may renew the lease. Track `last_profile_change` separately from `last_renewal` so renewals cannot perpetually restart the dwell interval.
