@@ -57,12 +57,15 @@ def resource_question() -> dict:
     }
 
 
-def model_state(features: dict) -> dict:
-    """Flat measurement state. Empty windows omit a share instead of inventing zero."""
+def model_state(features: dict, include_profile: bool = True) -> dict:
+    """Flat measurement state. Empty windows omit a share instead of inventing zero.
+
+    `include_profile` keeps the installed profile in the state. The offline
+    ablation turns it off so a choice cannot copy that field.
+    """
     groups = features["groups"]
     pressure = features["pressure"]
     state = {
-        "profile": features["current_profile"],
         "window_valid": features["window_valid"],
         "latency_queue_bin": groups["latency"]["queue_bin"],
         "latency_queue_len": groups["latency"]["queue_len"],
@@ -80,6 +83,8 @@ def model_state(features: dict) -> dict:
         "evictable_cache_bin": pressure["backlog_bin"],
         "emergency": pressure["emergency"],
     }
+    if include_profile:
+        state = {"profile": features["current_profile"], **state}
     for name, key in (
         ("latency", "latency_service_share_bp"),
         ("batch", "batch_service_share_bp"),
@@ -150,7 +155,7 @@ def cases(root: Path) -> list[dict]:
     return built
 
 
-def evaluate(agent, root: Path) -> dict:
+def evaluate(agent, root: Path, include_profile: bool = True) -> dict:
     edges = load_edges(root / "configs" / "features-v0.json")
     thresholds = load_thresholds(root / "configs" / "heuristic-v0.json")
     question = resource_question()
@@ -158,7 +163,7 @@ def evaluate(agent, root: Path) -> dict:
     for case in cases(root):
         heuristic = choose(case["snapshot"], thresholds)
         features = encode(case["snapshot"], edges)
-        state = model_state(features)
+        state = model_state(features, include_profile=include_profile)
         print(f"PREDICT {case['name']}", flush=True)
         result = agent.predict(state, question)
         row = classify(result, heuristic)
@@ -168,7 +173,11 @@ def evaluate(agent, root: Path) -> dict:
     counts = {kind: sum(row["kind"] == kind for row in rows) for kind in (
         "agree", "disagree", "truncated", "outside", "missing"
     )}
-    return {"cases": rows, "counts": counts}
+    return {
+        "cases": rows,
+        "counts": counts,
+        "profile_field": "present" if include_profile else "omitted",
+    }
 
 
 def _case(name: str, phase: dict, profile: str, service: tuple[int, int, int]) -> dict:
@@ -247,14 +256,14 @@ def fetch(root: Path, directory: Path) -> None:
         print(f"FETCHED {rel}", flush=True)
 
 
-def run_checkpoint(root: Path, directory: Path) -> dict:
+def run_checkpoint(root: Path, directory: Path, include_profile: bool = True) -> dict:
     status = assess(root, directory)
     if status != "ready":
         raise SystemExit(f"checkpoint {status}; refusing to load")
     import laya
 
     agent = laya.load(str(directory), device="cpu")
-    report = evaluate(agent, root)
+    report = evaluate(agent, root, include_profile=include_profile)
     report["revision"] = load_pin(root / "configs" / "laya-pin.json")["revision"]
     report["device"] = "cpu"
     report["checkpoint"] = str(directory)
@@ -267,6 +276,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--fetch", action="store_true")
     parser.add_argument("--run", action="store_true")
+    parser.add_argument(
+        "--omit-profile",
+        action="store_true",
+        help="leave the installed profile out of the model state",
+    )
     parser.add_argument("--report", type=Path)
     args = parser.parse_args(argv)
     root = args.root
@@ -275,10 +289,11 @@ def main(argv: list[str] | None = None) -> int:
         fetch(root, directory)
         print(f"CHECKPOINT {assess(root, directory)}", flush=True)
     if args.run:
-        report = run_checkpoint(root, directory)
+        report = run_checkpoint(root, directory, include_profile=not args.omit_profile)
         counts = report["counts"]
         print(
             "ZERO_SHOT "
+            + f"profile_field={report['profile_field']} "
             + " ".join(f"{kind}={counts[kind]}" for kind in counts)
             + f" cases={len(report['cases'])}",
             flush=True,

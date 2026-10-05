@@ -107,6 +107,24 @@ class OfflineTests(unittest.TestCase):
         self.assertEqual(sum(report["counts"].values()), 19)
         self.assertEqual(agent.seen[0][1], resource_question())
         self.assertNotIn("stage", report)
+        self.assertEqual(report["profile_field"], "present")
+        self.assertIn("profile", agent.seen[0][0])
+
+    def test_omitted_profile_stays_out_of_the_model_state(self):
+        from aik_controller.features import encode, load_edges
+
+        edges = load_edges(ROOT / "configs" / "features-v0.json")
+        features = encode(cases(ROOT)[0]["snapshot"], edges)
+        state = model_state(features, include_profile=False)
+        self.assertNotIn("profile", state)
+        self.assertIn("latency_queue_bin", state)
+        self.assertIn("managed_memory_pressure_bin", state)
+        self.assertIn("emergency", state)
+        agent = FakeAgent([answer("reclaim")] * 19)
+        report = evaluate(agent, ROOT, include_profile=False)
+        self.assertEqual(report["profile_field"], "omitted")
+        self.assertNotIn("profile", agent.seen[0][0])
+        self.assertEqual(report["counts"]["agree"] + report["counts"]["disagree"], 19)
 
     def test_readiness_requires_every_pinned_digest(self):
         pin = {
