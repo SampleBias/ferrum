@@ -1292,14 +1292,17 @@ fn mixed_v1_run() -> Result<(), String> {
     Err("mixed-v1 runs inside the hermit guest".to_string())
 }
 
-/// Walk `mixed-v1`. Each phase parks or runs the eight-thread pool and installs
-/// the heuristic profile for that phase's queues and pressure. The sample is
-/// one [`workloads::SAMPLE_US`] window after the phase is in force. The spec
-/// durations stay the later experiment horizon; this boot checks the mechanism.
+/// Walk `mixed-v1` against the controller. Each phase's queues and pressure
+/// are the snapshot. The controller's heuristic proposes the profile, and the
+/// scheduler installs that proposal. The sample is one [`workloads::SAMPLE_US`]
+/// window after the acknowledgment. The spec durations stay the later
+/// experiment horizon.
 ///
-/// `steady` leaves batch ahead in virtual runtime. The memory phase waits
-/// [`workloads::memory_catch_up_us`] before sampling, so the measured window
-/// is the reclaim share after that debt has been paid.
+/// A different profile has to wait out the two-second dwell. The threads park
+/// during that wait so it does not add virtual-runtime debt. `steady` still
+/// leaves batch ahead for its own sample. The memory phase waits
+/// [`workloads::memory_catch_up_us`] after reclaim is installed, so the
+/// measured window is the reclaim share after that debt has been paid.
 #[cfg(target_os = "hermit")]
 fn mixed_v1_run() -> Result<(), String> {
     use std::hint::spin_loop;
@@ -1307,7 +1310,7 @@ fn mixed_v1_run() -> Result<(), String> {
     use std::thread;
 
     use policy_core::{catalog_spec, choose_heuristic, HEURISTIC_V0};
-    use policy_types::CatalogId;
+    use policy_types::{CatalogId, ACCEPTANCE_DEADLINE_US, MIN_DWELL_US, PROFILE_LEASE_US};
 
     const LATENCY: u8 = 1;
     const BATCH: u8 = 2;
@@ -1315,10 +1318,46 @@ fn mixed_v1_run() -> Result<(), String> {
 
     unsafe extern "C" {
         fn sys_policy_register(class: u8) -> i32;
-        fn sys_policy_set_weights(latency: u32, batch: u32, maintenance: u32) -> i32;
+        fn sys_policy_stage(
+            latency: u32,
+            batch: u32,
+            maintenance: u32,
+            accept_us: u64,
+            lease_us: u64,
+            base_generation: u64,
+        ) -> i32;
         fn sys_policy_generation(generation: *mut u64) -> i32;
+        fn sys_policy_read_ack(ack: *mut PolicyAck) -> i32;
         fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
+        fn sys_clock_gettime(clock_id: i32, tp: *mut Timespec) -> i32;
         fn sys_usleep(usecs: u64);
+    }
+
+    #[repr(C)]
+    struct Timespec {
+        tv_sec: i64,
+        tv_nsec: i32,
+    }
+
+    fn monotonic_us() -> Result<u64, String> {
+        let mut time = Timespec { tv_sec: 0, tv_nsec: 0 };
+        // CLOCK_MONOTONIC is the scheduler's guest timer, in microseconds.
+        let rc = unsafe { sys_clock_gettime(4, &mut time) };
+        if rc != 0 {
+            return Err(format!("clock returned {rc}"));
+        }
+        let usec = (time.tv_nsec / 1000) as u64;
+        Ok((time.tv_sec as u64).saturating_mul(1_000_000).saturating_add(usec))
+    }
+
+    fn wait_until(ready_us: u64) -> Result<(), String> {
+        loop {
+            let now = monotonic_us()?;
+            if now >= ready_us {
+                return Ok(());
+            }
+            unsafe { sys_usleep((ready_us - now).min(100_000)) };
+        }
     }
 
     static LATENCY_DUTY: AtomicU8 = AtomicU8::new(0);
@@ -1388,69 +1427,176 @@ fn mixed_v1_run() -> Result<(), String> {
     let snapshot = || -> Result<(u64, u64, u64), String> {
         Ok((read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?))
     };
-
-    println!("FERRUM_MIXED phases={}", workloads::mixed_v1().len());
-    for phase in workloads::mixed_v1() {
-        let profile = choose_heuristic(&workloads::observation(*phase), &HEURISTIC_V0);
-        let weights = catalog_spec(CatalogId::CpuV1).profile(profile).weights();
-        let duty = phase.duty();
-        println!(
-            "FERRUM_PHASE_BEGIN name={} profile={}",
-            phase.name,
-            profile.as_str()
-        );
-        let rc = unsafe { sys_policy_set_weights(weights[0], weights[1], weights[2]) };
-        if rc != 0 {
-            return Err(format!("{} weights returned {rc}", phase.name));
+    let pull_applied_ack = || -> Result<PolicyAck, String> {
+        for _ in 0..50 {
+            let mut ack = PolicyAck {
+                kind: 0,
+                reason: 0,
+                profile: 0,
+                _pad0: 0,
+                _pad1: 0,
+                previous_generation: 0,
+                generation: 0,
+                guest_us: 0,
+                lease_until_guest_us: 0,
+            };
+            let rc = unsafe { sys_policy_read_ack(&mut ack) };
+            if rc == 0 {
+                if ack.kind != 1 {
+                    return Err(format!(
+                        "scheduler ack kind {} reason {}",
+                        ack_kind_name(ack.kind),
+                        ack_reason_name(ack.reason)
+                    ));
+                }
+                return Ok(ack);
+            }
+            if rc != 1 {
+                return Err(format!("read ack returned {rc}"));
+            }
+            unsafe { sys_usleep(10_000) };
         }
-        LATENCY_DUTY.store(duty.latency, Ordering::Release);
-        BATCH_DUTY.store(duty.batch, Ordering::Release);
-        MAINTENANCE_DUTY.store(duty.maintenance, Ordering::Release);
-        let catch_up = if phase.name == "memory" {
-            workloads::memory_catch_up_us()
-        } else {
-            0
-        };
-        // Two park intervals, so a thread that just went to sleep observes the new duty.
-        unsafe { sys_usleep(100_000 + catch_up) };
-        let before = snapshot()?;
-        unsafe { sys_usleep(workloads::SAMPLE_US) };
-        let after = snapshot()?;
-        let sample = [
-            after.0.saturating_sub(before.0),
-            after.1.saturating_sub(before.1),
-            after.2.saturating_sub(before.2),
-        ];
-        println!(
-            "FERRUM_PHASE name={} profile={} spec_us={} held_us={} catch_up_us={} queue={}/{} emergency={} managed={} backlog={} runnable={}/{}/{} latency={} batch={} maintenance={}",
-            phase.name,
-            profile.as_str(),
-            phase.duration_us,
-            workloads::SAMPLE_US,
-            catch_up,
-            phase.latency_queue,
-            phase.batch_queue,
-            u8::from(phase.emergency),
-            phase.managed_used_bytes,
-            phase.evictable_backlog_bytes,
-            duty.latency,
-            duty.batch,
-            duty.maintenance,
-            sample[0],
-            sample[1],
-            sample[2]
-        );
-        if let Err(fault) = workloads::service_follows(sample, duty, weights) {
-            return Err(format!("{}: {fault}", phase.name));
-        }
-    }
+        Err("scheduler wrote no acknowledgment".to_string())
+    };
 
-    let mut generation = 0u64;
-    if unsafe { sys_policy_generation(&mut generation) } != 0 || generation != 1 {
-        return Err(format!("generation moved to {generation}"));
-    }
-    println!("FERRUM_MIXED_OK");
-    Ok(())
+    let mut stream = connect_controller(&default_controller())?;
+    let boot = BootId::from_hex("00112233445566778899aabbccddeeff").expect("boot id");
+    let mut session = policy_guest::LiveSession::open(&mut stream, boot).map_err(|err| err.to_string())?;
+    // The engine treats time zero as a profile change. The kernel does not arm
+    // dwell until the first staged profile, so this wait only satisfies the engine.
+    wait_until(MIN_DWELL_US)?;
+
+    let outcome = (|| {
+        println!("FERRUM_MIXED phases={}", workloads::mixed_v1().len());
+        let mut expect_generation = 1u64;
+        let mut dwell_ready_us = 0u64;
+        for phase in workloads::mixed_v1() {
+            if dwell_ready_us != 0 {
+                wait_until(dwell_ready_us)?;
+            }
+            let mut kernel_generation = 0u64;
+            if unsafe { sys_policy_generation(&mut kernel_generation) } != 0 {
+                return Err("generation read failed".to_string());
+            }
+            if kernel_generation != expect_generation {
+                return Err(format!(
+                    "{} generation was {kernel_generation}, expected {expect_generation}",
+                    phase.name
+                ));
+            }
+            let observation = workloads::observation(*phase);
+            let reference = choose_heuristic(&observation, &HEURISTIC_V0);
+            let now = monotonic_us()?;
+            println!(
+                "FERRUM_PHASE_BEGIN name={} reference={}",
+                phase.name,
+                reference.as_str()
+            );
+            let ticket = session
+                .request(&mut stream, now, observation)
+                .map_err(|err| format!("{}: {err}", phase.name))?;
+            if ticket.profile != reference {
+                return Err(format!(
+                    "{} controller proposed {} and the reference is {}",
+                    phase.name,
+                    ticket.profile.as_str(),
+                    reference.as_str()
+                ));
+            }
+            if ticket.base_generation != kernel_generation {
+                return Err(format!(
+                    "{} proposal base {} is not the scheduler generation {kernel_generation}",
+                    phase.name, ticket.base_generation
+                ));
+            }
+            let weights = catalog_spec(CatalogId::CpuV1).profile(ticket.profile).weights();
+            let rc = unsafe {
+                sys_policy_stage(
+                    weights[0],
+                    weights[1],
+                    weights[2],
+                    ACCEPTANCE_DEADLINE_US,
+                    PROFILE_LEASE_US,
+                    kernel_generation,
+                )
+            };
+            if rc != 0 {
+                return Err(format!("{} stage returned {rc}", phase.name));
+            }
+            let ack = pull_applied_ack()?;
+            if ack.profile != ticket.profile as u8 || ack.generation != kernel_generation + 1 {
+                return Err(format!(
+                    "{} scheduler applied profile {} generation {}",
+                    phase.name, ack.profile, ack.generation
+                ));
+            }
+            publish_scheduler(&mut stream, &ticket, &ack)?;
+            session
+                .commit_applied(ack.guest_us)
+                .map_err(|err| format!("{} commit: {err}", phase.name))?;
+            let duty = phase.duty();
+            LATENCY_DUTY.store(duty.latency, Ordering::Release);
+            BATCH_DUTY.store(duty.batch, Ordering::Release);
+            MAINTENANCE_DUTY.store(duty.maintenance, Ordering::Release);
+            let catch_up = if phase.name == "memory" {
+                workloads::memory_catch_up_us()
+            } else {
+                0
+            };
+            // Two park intervals, so a thread that just went to sleep observes the new duty.
+            unsafe { sys_usleep(100_000 + catch_up) };
+            let before = snapshot()?;
+            unsafe { sys_usleep(workloads::SAMPLE_US) };
+            let after = snapshot()?;
+            let sample = [
+                after.0.saturating_sub(before.0),
+                after.1.saturating_sub(before.1),
+                after.2.saturating_sub(before.2),
+            ];
+            println!(
+                "FERRUM_PHASE name={} profile={} spec_us={} held_us={} catch_up_us={} queue={}/{} emergency={} managed={} backlog={} runnable={}/{}/{} latency={} batch={} maintenance={}",
+                phase.name,
+                ticket.profile.as_str(),
+                phase.duration_us,
+                workloads::SAMPLE_US,
+                catch_up,
+                phase.latency_queue,
+                phase.batch_queue,
+                u8::from(phase.emergency),
+                phase.managed_used_bytes,
+                phase.evictable_backlog_bytes,
+                duty.latency,
+                duty.batch,
+                duty.maintenance,
+                sample[0],
+                sample[1],
+                sample[2]
+            );
+            if let Err(fault) = workloads::service_follows(sample, duty, weights) {
+                return Err(format!("{}: {fault}", phase.name));
+            }
+            // Park before the dwell wait so the wait does not keep charging the phase.
+            LATENCY_DUTY.store(0, Ordering::Release);
+            BATCH_DUTY.store(0, Ordering::Release);
+            MAINTENANCE_DUTY.store(0, Ordering::Release);
+            expect_generation = ack.generation;
+            dwell_ready_us = ack.guest_us.saturating_add(MIN_DWELL_US);
+            if dwell_ready_us >= ack.lease_until_guest_us {
+                return Err(format!(
+                    "{} dwell reaches the lease (ready={} lease={})",
+                    phase.name, dwell_ready_us, ack.lease_until_guest_us
+                ));
+            }
+        }
+        let mut generation = 0u64;
+        if unsafe { sys_policy_generation(&mut generation) } != 0 || generation != expect_generation {
+            return Err(format!("generation was {generation}, expected {expect_generation}"));
+        }
+        println!("FERRUM_MIXED_OK");
+        Ok(())
+    })();
+    std::mem::forget(stream);
+    outcome
 }
 
 fn fair_demo_exit() -> ExitCode {

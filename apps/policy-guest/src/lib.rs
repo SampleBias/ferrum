@@ -401,6 +401,85 @@ fn send(stream: &mut TcpStream, direction: Direction, payload: &[u8]) -> Result<
     Ok(())
 }
 
+/// One controller session that can issue a proposal for every snapshot.
+///
+/// The engine stages each proposal. The caller installs it in the scheduler,
+/// then [`LiveSession::commit_applied`] records the kernel's activation time
+/// so the next snapshot's generation and dwell match the scheduler.
+pub struct LiveSession {
+    engine: PolicyEngine,
+}
+
+impl LiveSession {
+    pub fn open(stream: &mut TcpStream, boot_id: BootId) -> Result<Self, SessionError> {
+        prepare(stream);
+        let mut engine = PolicyEngine::boot(EngineConfig {
+            catalog: CatalogId::CpuV1,
+            boot_id,
+            objective: ObjectiveId::MixedLatencyV1,
+            approved_model: Hash32::repeat(0xcc),
+            approved_calibration: Hash32::repeat(0xdd),
+            run_mode: RunMode::Mock,
+            manual_rearm: false,
+        });
+        exchange_hello(stream, &mut engine, boot_id)?;
+        engine
+            .promote_to_active()
+            .map_err(|_| SessionError::Protocol("promote rejected"))?;
+        Ok(Self { engine })
+    }
+
+    /// Send `observation` and stage the controller's proposal.
+    ///
+    /// `now_us` is the guest monotonic clock. A rejected proposal is reported
+    /// on the session so the controller can finish the round.
+    pub fn request(
+        &mut self,
+        stream: &mut TcpStream,
+        now_us: u64,
+        observation: Observation,
+    ) -> Result<ProposalTicket, SessionError> {
+        let Capture::Send { snapshot, .. } = self
+            .engine
+            .capture(now_us, observation)
+            .map_err(|_| SessionError::Protocol("capture failed"))?
+        else {
+            return Err(SessionError::Protocol("snapshot was retained"));
+        };
+        send(stream, Direction::GuestToController, &encode_snapshot(&snapshot)?)?;
+        let proposal = match decode_message(&recv(stream, Direction::ControllerToGuest)?)? {
+            Decoded::Proposal(proposal) => proposal,
+            _ => return Err(SessionError::Protocol("expected proposal")),
+        };
+        let ticket = ProposalTicket {
+            boot_id: proposal.boot_id,
+            session_id: proposal.session_id,
+            request_seq: proposal.request_seq,
+            profile: proposal.profile,
+            base_generation: proposal.base_generation,
+        };
+        match self.engine.on_proposal(now_us, &proposal) {
+            ProposalOutcome::Staged => Ok(ticket),
+            ProposalOutcome::Rejected(reason) => {
+                report_reject(stream, &ticket, reason)?;
+                Err(SessionError::Protocol(reason.as_str()))
+            }
+            ProposalOutcome::ShadowNoted | ProposalOutcome::Cached(_) => {
+                Err(SessionError::Protocol("proposal was not staged"))
+            }
+        }
+    }
+
+    /// Record that the scheduler installed the staged proposal at `kernel_guest_us`.
+    pub fn commit_applied(&mut self, kernel_guest_us: u64) -> Result<policy_core::Ack, SessionError> {
+        match self.engine.activate(kernel_guest_us) {
+            ActivateOutcome::Applied(ack) => Ok(ack),
+            ActivateOutcome::Dropped(_) => Err(SessionError::Protocol("activation dropped")),
+            ActivateOutcome::Idle => Err(SessionError::Protocol("nothing staged")),
+        }
+    }
+}
+
 fn recv(stream: &mut TcpStream, direction: Direction) -> Result<Vec<u8>, SessionError> {
     let mut decoder = FrameDecoder::new();
     let mut buf = [0u8; 1024];
@@ -566,6 +645,75 @@ mod tests {
         assert!(
             log.contains("REJECTED_FRAMES unauthenticated duplicate invalid oversized"),
             "controller log did not list the rejected frames: {log}"
+        );
+    }
+
+    #[test]
+    fn mixed_v1_controller_proposes_each_phase() {
+        use policy_types::MIN_DWELL_US;
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut child = Command::new("python3")
+            .arg("-m")
+            .arg("aik_controller.server")
+            .arg("--rounds")
+            .arg("5")
+            .arg("--bind")
+            .arg("127.0.0.1:0")
+            .arg("--root")
+            .arg(&root)
+            .env("PYTHONPATH", root.join("controller/src"))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start mock controller");
+        let stdout = child.stdout.take().unwrap();
+        let mut lines = BufReader::new(stdout).lines();
+        let listening = lines.next().unwrap().unwrap();
+        let port: u16 = listening.split_whitespace().nth(2).unwrap().parse().unwrap();
+        let boot = BootId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let mut session = LiveSession::open(&mut stream, boot).unwrap();
+        let expected = [
+            ProfileId::Latency,
+            ProfileId::Throughput,
+            ProfileId::Balanced,
+            ProfileId::Reclaim,
+            ProfileId::Balanced,
+        ];
+        let mut now = MIN_DWELL_US;
+        for (phase, profile) in workloads::mixed_v1().iter().zip(expected) {
+            let ticket = session
+                .request(&mut stream, now, workloads::observation(*phase))
+                .unwrap_or_else(|err| panic!("{} request: {err}", phase.name));
+            assert_eq!(ticket.profile, profile, "{}", phase.name);
+            let ack = session.commit_applied(now).unwrap();
+            assert_eq!(ack.profile, profile);
+            report_applied(
+                &mut stream,
+                &ticket,
+                ack.previous_generation,
+                ack.generation,
+                ack.guest_us,
+                ack.lease_until_guest_us,
+            )
+            .unwrap();
+            now = now.saturating_add(MIN_DWELL_US);
+        }
+        drop(stream);
+        let status = child.wait().unwrap();
+        let mut err = String::new();
+        child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+        assert!(status.success(), "controller failed: {err}");
+        let log: String = lines.map(|line| line.unwrap()).collect::<Vec<_>>().join("\n");
+        assert!(
+            log.contains("PROPOSAL profile=latency seq=1")
+                && log.contains("PROPOSAL profile=throughput seq=2")
+                && log.contains("PROPOSAL profile=balanced seq=3")
+                && log.contains("PROPOSAL profile=reclaim seq=4")
+                && log.contains("PROPOSAL profile=balanced seq=5")
+                && log.contains("ROUNDS 5"),
+            "controller log did not follow the phases: {log}"
         );
     }
 }

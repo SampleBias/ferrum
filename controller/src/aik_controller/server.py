@@ -58,19 +58,19 @@ def catalog_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def serve_once(
-    conn: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict, hold: bool
-) -> int:
+def accept_hello(
+    conn: socket.socket, key: bytes, catalog: dict, identity: dict
+) -> tuple[dict, str] | None:
     hello = read_payload(conn, key)
     if hello.get("kind") != "hello" or hello.get("protocol") != 1:
         print("rejected hello", file=sys.stderr)
-        return 1
+        return None
     if hello.get("catalog_id") != catalog["id"] or hello.get("catalog_hash") != catalog["hash"]:
         print("rejected catalog", file=sys.stderr)
-        return 1
+        return None
     if hello.get("telemetry_version") != 1:
         print("rejected telemetry version", file=sys.stderr)
-        return 1
+        return None
     session_id = secrets.token_hex(16)
     print(f"HELLO boot={hello['boot_id']} session={session_id}", flush=True)
     write_payload(
@@ -88,7 +88,18 @@ def serve_once(
             "ready": True,
         },
     )
+    return hello, session_id
 
+
+def exchange_round(
+    conn: socket.socket,
+    key: bytes,
+    catalog: dict,
+    thresholds: dict,
+    identity: dict,
+    hello: dict,
+    session_id: str,
+) -> int:
     snapshot = read_payload(conn, key)
     if snapshot.get("kind") != "snapshot":
         print("expected snapshot", file=sys.stderr)
@@ -127,18 +138,9 @@ def serve_once(
     )
 
     report = read_payload(conn, key)
-    status = accept_scheduler_report(report, hello["boot_id"], session_id, snapshot["request_seq"], profile)
-    if status == 0 and hold:
-        # Stay connected for the rest of the lease so a kill is a dead peer,
-        # not a controller that already finished and closed the socket.
-        print("HOLDING", flush=True)
-        conn.settimeout(None)
-        try:
-            while conn.recv(64):
-                pass
-        except OSError as err:
-            print(f"HOLD_ENDED {err}", file=sys.stderr)
-    return status
+    return accept_scheduler_report(
+        report, hello["boot_id"], session_id, snapshot["request_seq"], profile
+    )
 
 
 def accept_scheduler_report(
@@ -190,6 +192,48 @@ def accept_scheduler_report(
         return 0
     print(f"guest reported {kind} {report.get('reason', '')}", file=sys.stderr)
     return 1
+
+
+def serve_once(
+    conn: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict, hold: bool
+) -> int:
+    opened = accept_hello(conn, key, catalog, identity)
+    if opened is None:
+        return 1
+    hello, session_id = opened
+    status = exchange_round(conn, key, catalog, thresholds, identity, hello, session_id)
+    if status == 0 and hold:
+        # Stay connected for the rest of the lease so a kill is a dead peer,
+        # not a controller that already finished and closed the socket.
+        print("HOLDING", flush=True)
+        conn.settimeout(None)
+        try:
+            while conn.recv(64):
+                pass
+        except OSError as err:
+            print(f"HOLD_ENDED {err}", file=sys.stderr)
+    return status
+
+
+def serve_rounds(
+    conn: socket.socket,
+    key: bytes,
+    catalog: dict,
+    thresholds: dict,
+    identity: dict,
+    rounds: int,
+) -> int:
+    """One session. Each round is a snapshot, a heuristic proposal, and the scheduler report."""
+    opened = accept_hello(conn, key, catalog, identity)
+    if opened is None:
+        return 1
+    hello, session_id = opened
+    for _ in range(rounds):
+        status = exchange_round(conn, key, catalog, thresholds, identity, hello, session_id)
+        if status != 0:
+            return status
+    print(f"ROUNDS {rounds}", flush=True)
+    return 0
 
 
 def propose_once(
@@ -373,6 +417,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Ferrum mock policy controller")
     parser.add_argument("--bind", default="127.0.0.1:7777")
     parser.add_argument("--once", action="store_true")
+    parser.add_argument(
+        "--rounds",
+        type=int,
+        default=0,
+        help="one connection, this many snapshot/proposal/report rounds, then exit",
+    )
     parser.add_argument("--hold", action="store_true", help="keep the session open after the scheduler report")
     parser.add_argument(
         "--lose-ack",
@@ -407,6 +457,18 @@ def main(argv: list[str] | None = None) -> int:
             return serve_lost_ack(listener, key, catalog, thresholds, identity)
         if args.reject_frames:
             return serve_reject_frames(listener, key, catalog, identity)
+        if args.rounds:
+            if args.rounds < 1:
+                print("rounds must be positive", file=sys.stderr)
+                return 2
+            conn, _addr = listener.accept()
+            conn.settimeout(60)
+            with conn:
+                try:
+                    return serve_rounds(conn, key, catalog, thresholds, identity, args.rounds)
+                except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
+                    print(f"session failed: {err}", file=sys.stderr)
+                    return 1
         while True:
             conn, _addr = listener.accept()
             # The guest answers after the scheduler acknowledgment. A TCG
