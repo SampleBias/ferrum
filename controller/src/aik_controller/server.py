@@ -160,11 +160,10 @@ def exchange_round(
     if live is not None:
         # Score first. The guest judges this frame against the snapshot
         # deadline, so the forward has to finish before the proposal is sent.
-        note = live.score(model_state(state, include_profile=True), heuristic)
+        window = acceptance_window_us(snapshot)
+        note = live.score(model_state(state, include_profile=True), heuristic, window)
         print(live_line(note), flush=True)
-        decision = withhold_expired(
-            decide_live(note), note, acceptance_window_us(snapshot)
-        )
+        decision = withhold_expired(decide_live(note), note, window)
         if notes is not None:
             recorded = dict(note)
             recorded["sent"] = decision["kind"]

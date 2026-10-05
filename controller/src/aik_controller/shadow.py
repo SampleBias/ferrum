@@ -6,6 +6,7 @@ a profile. Confidence is stored and not gated: there is no calibration split
 yet, so a threshold would be an unmeasured operating point.
 """
 
+import threading
 import time
 
 from aik_controller.laya_offline import classify, model_state, resource_question
@@ -21,7 +22,8 @@ def shadow_line(note: dict) -> str:
         f"SHADOW choice={note['choice']} kind={note['kind']} "
         f"structural={note['structural']} heuristic={note['heuristic']} "
         f"confidence={note['answer_confidence']} forward_us={note['forward_us']} "
-        f"tokens={note['input_tokens']} staged={note['staged']}"
+        f"queue_wait_us={note['queue_wait_us']} tokens={note['input_tokens']} "
+        f"staged={note['staged']}"
     )
 
 
@@ -45,14 +47,47 @@ def send_heuristic_then_shadow(write_proposal, worker, features, heuristic: str)
     return worker.score(model_state(features, include_profile=True), heuristic)
 
 
+class _Waiter:
+    """One queued request. A newer arrival displaces it."""
+
+    def __init__(self, state, heuristic: str, window_us: int | None, enqueued: float) -> None:
+        self.state = state
+        self.heuristic = heuristic
+        self.window_us = window_us
+        self.enqueued = enqueued
+        self.ready = threading.Event()
+        self.note = None
+        self.displaced = False
+
+    def displace(self, note: dict) -> None:
+        self.displaced = True
+        self.note = note
+        self.ready.set()
+
+    def release(self) -> None:
+        self.ready.set()
+
+    def wait(self) -> tuple[dict | None, bool]:
+        self.ready.wait()
+        return self.note, self.displaced
+
+
 class ShadowWorker:
-    """One warmed agent. A second score while a forward is running abstains."""
+    """One warmed agent, one running forward, and one latest queued request.
+
+    A newer request replaces the queued one. The displaced request is
+    `model_busy`. The running forward is not cancelled. A queued request
+    whose wait already exceeds its snapshot window is `expired` and does
+    not start a forward.
+    """
 
     def __init__(self, agent, clock=time.perf_counter) -> None:
         self.agent = agent
         self.clock = clock
         self.warm = False
-        self.busy = False
+        self._lock = threading.Lock()
+        self._running = False
+        self._queued: _Waiter | None = None
 
     def warmup(self, features: dict) -> int:
         if str(getattr(self.agent, "device", "")) != "cpu":
@@ -61,19 +96,56 @@ class ShadowWorker:
         self.warm = True
         return elapsed
 
-    def score(self, state: dict, heuristic: str) -> dict:
+    def score(self, state: dict, heuristic: str, window_us: int | None = None) -> dict:
         if not self.warm:
             raise ShadowError("shadow worker is not warmed")
-        if self.busy:
-            return _note(None, heuristic, 0, structural="model_busy")
-        if str(getattr(self.agent, "device", "")) != "cpu":
-            return _note(None, heuristic, 0, structural="backend")
-        self.busy = True
+        waiter = None
+        displaced = None
+        with self._lock:
+            if not self._running:
+                self._running = True
+                owned = True
+            else:
+                owned = False
+                waiter = _Waiter(state, heuristic, window_us, self.clock())
+                displaced = self._queued
+                self._queued = waiter
+        if displaced is not None:
+            displaced.displace(_note(None, displaced.heuristic, 0, structural="model_busy"))
+        if owned:
+            try:
+                return self._execute(state, heuristic, window_us, 0)
+            finally:
+                self._handoff()
+        assert waiter is not None
+        note, was_displaced = waiter.wait()
+        if was_displaced:
+            assert note is not None
+            return note
+        wait_us = int((self.clock() - waiter.enqueued) * 1_000_000)
+        if wait_us < 0:
+            wait_us = 0
         try:
-            result, elapsed = self._forward(state)
+            return self._execute(waiter.state, waiter.heuristic, waiter.window_us, wait_us)
         finally:
-            self.busy = False
-        return _note(result, heuristic, elapsed)
+            self._handoff()
+
+    def _handoff(self) -> None:
+        with self._lock:
+            nxt = self._queued
+            self._queued = None
+            if nxt is None:
+                self._running = False
+                return
+        nxt.release()
+
+    def _execute(self, state: dict, heuristic: str, window_us: int | None, queue_wait_us: int) -> dict:
+        if str(getattr(self.agent, "device", "")) != "cpu":
+            return _note(None, heuristic, 0, structural="backend", queue_wait_us=queue_wait_us)
+        if window_us is not None and queue_wait_us > window_us:
+            return _note(None, heuristic, 0, structural="expired", queue_wait_us=queue_wait_us)
+        result, elapsed = self._forward(state)
+        return _note(result, heuristic, elapsed, queue_wait_us=queue_wait_us)
 
     def _forward(self, state) -> tuple[dict, int]:
         start = self.clock()
@@ -81,7 +153,13 @@ class ShadowWorker:
         return result, int((self.clock() - start) * 1_000_000)
 
 
-def _note(result, heuristic: str, forward_us: int, structural: str | None = None) -> dict:
+def _note(
+    result,
+    heuristic: str,
+    forward_us: int,
+    structural: str | None = None,
+    queue_wait_us: int = 0,
+) -> dict:
     if structural is not None:
         return {
             "choice": None,
@@ -90,6 +168,7 @@ def _note(result, heuristic: str, forward_us: int, structural: str | None = None
             "heuristic": heuristic,
             "answer_confidence": None,
             "forward_us": forward_us,
+            "queue_wait_us": queue_wait_us,
             "input_tokens": None,
             "staged": False,
         }
@@ -102,6 +181,7 @@ def _note(result, heuristic: str, forward_us: int, structural: str | None = None
         "heuristic": heuristic,
         "answer_confidence": row["answer_confidence"],
         "forward_us": forward_us,
+        "queue_wait_us": queue_wait_us,
         "input_tokens": row["input_tokens"],
         "staged": False,
     }
@@ -131,6 +211,7 @@ def abstain_reason(note: dict) -> str:
     return {
         "truncated": "truncated_input",
         "model_busy": "model_busy",
+        "expired": "expired",
         "backend": "backend_error",
         "outside": "backend_error",
         "missing": "backend_error",
@@ -204,7 +285,7 @@ def live_line(note: dict) -> str:
         f"LIVE choice={note['choice']} kind={note['kind']} "
         f"structural={note['structural']} heuristic={note['heuristic']} "
         f"confidence={note['answer_confidence']} forward_us={note['forward_us']} "
-        f"tokens={note['input_tokens']}"
+        f"queue_wait_us={note['queue_wait_us']} tokens={note['input_tokens']}"
     )
 
 

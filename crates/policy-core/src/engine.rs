@@ -38,6 +38,20 @@ pub enum Capture {
     Retained,
 }
 
+/// What happened to the one retained snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Promote {
+    Empty,
+    Send { snapshot: Snapshot, hash: Hash32 },
+    Expired,
+}
+
+#[derive(Clone, Copy)]
+struct HeldObservation {
+    captured_us: u64,
+    observation: Observation,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProposalOutcome {
     Staged,
@@ -154,7 +168,7 @@ pub struct PolicyEngine {
     session: Option<SessionId>,
     next_seq: u64,
     inflight: Option<Pending>,
-    unsent: Option<Observation>,
+    unsent: Option<HeldObservation>,
     staged: Option<Staged>,
     shadow_streak: u8,
     rearm_required: bool,
@@ -317,23 +331,31 @@ impl PolicyEngine {
             return Err(PolicyError::NoSession);
         }
         if self.inflight.is_some() {
-            self.unsent = Some(obs);
+            self.unsent = Some(HeldObservation {
+                captured_us: now_us,
+                observation: obs,
+            });
             return Ok(Capture::Retained);
         }
         let (snapshot, hash) = self.seal(now_us, obs)?;
         Ok(Capture::Send { snapshot, hash })
     }
 
-    pub fn promote_unsent(&mut self, now_us: u64) -> Result<Option<Capture>, PolicyError> {
-        let Some(obs) = self.unsent.take() else {
-            return Ok(None);
+    pub fn promote_unsent(&mut self, now_us: u64) -> Result<Promote, PolicyError> {
+        let Some(held) = self.unsent.take() else {
+            return Ok(Promote::Empty);
         };
         if self.inflight.is_some() || self.session.is_none() {
-            self.unsent = Some(obs);
-            return Ok(None);
+            self.unsent = Some(held);
+            return Ok(Promote::Empty);
         }
-        let (snapshot, hash) = self.seal(now_us, obs)?;
-        Ok(Some(Capture::Send { snapshot, hash }))
+        let accept = checked_deadline(held.captured_us, ACCEPTANCE_DEADLINE_US)
+            .ok_or(PolicyError::Overflow)?;
+        if now_us > accept {
+            return Ok(Promote::Expired);
+        }
+        let (snapshot, hash) = self.seal(held.captured_us, held.observation)?;
+        Ok(Promote::Send { snapshot, hash })
     }
 
     pub fn on_proposal(&mut self, now_us: u64, proposal: &Proposal) -> ProposalOutcome {
@@ -956,6 +978,29 @@ mod tests {
         engine.promote_to_active().unwrap();
     }
 
+    fn queued(queue_len: u32) -> Observation {
+        let mut observation = Observation::quiet(1_000_000);
+        observation.groups[0].queue_len = queue_len;
+        observation
+    }
+
+    fn proposal_from(snapshot: &Snapshot, hash: Hash32) -> Proposal {
+        Proposal {
+            boot_id: snapshot.boot_id,
+            session_id: snapshot.session_id,
+            request_seq: snapshot.request_seq,
+            base_generation: snapshot.base_generation,
+            catalog_id: snapshot.catalog_id,
+            catalog_hash: snapshot.catalog_hash,
+            snapshot_hash: hash,
+            profile: ProfileId::Balanced,
+            answer_confidence_bp: 10_000,
+            model_manifest_hash: Hash32::repeat(0xcc),
+            calibration_hash: Hash32::repeat(0xdd),
+            reason_code: ReasonCode::MockScript,
+        }
+    }
+
     fn proposal_at(engine: &mut PolicyEngine, now: u64, profile: ProfileId, confidence: u16) -> Proposal {
         let Capture::Send { snapshot, hash } = engine
             .capture(now, Observation::quiet(1_000_000))
@@ -1064,6 +1109,42 @@ mod tests {
         low.catalog_hash = Hash32::repeat(0x11);
         assert_eq!(engine.on_proposal(MIN_DWELL_US, &low), reason);
         assert_eq!(engine.status().profile, ProfileId::Balanced);
+    }
+
+    #[test]
+    fn the_newest_retained_snapshot_keeps_its_capture_deadline() {
+        let mut engine = engine(RunMode::Shadow, CatalogId::CpuV1);
+        handshake(&mut engine);
+        let Capture::Send { snapshot, hash } = engine.capture(1_000, queued(1)).unwrap() else {
+            panic!("first snapshot is in flight");
+        };
+        assert!(matches!(engine.capture(2_000, queued(2)).unwrap(), Capture::Retained));
+        assert!(matches!(engine.capture(4_000, queued(4)).unwrap(), Capture::Retained));
+        assert_eq!(engine.promote_unsent(4_000).unwrap(), Promote::Empty);
+
+        assert_eq!(
+            engine.on_proposal(1_000, &proposal_from(&snapshot, hash)),
+            ProposalOutcome::ShadowNoted
+        );
+        let Promote::Send { snapshot: newest, hash: newest_hash } = engine.promote_unsent(4_000).unwrap()
+        else {
+            panic!("newest snapshot should be sent");
+        };
+        assert_eq!(newest.captured_guest_us, 4_000);
+        assert_eq!(newest.accept_until_guest_us, 4_000 + ACCEPTANCE_DEADLINE_US);
+        assert_eq!(newest.groups[0].queue_len, 4);
+        assert_eq!(newest.request_seq, snapshot.request_seq + 1);
+
+        assert!(matches!(engine.capture(10_000, queued(8)).unwrap(), Capture::Retained));
+        assert_eq!(
+            engine.on_proposal(4_000, &proposal_from(&newest, newest_hash)),
+            ProposalOutcome::ShadowNoted
+        );
+        assert_eq!(
+            engine.promote_unsent(10_000 + ACCEPTANCE_DEADLINE_US + 1).unwrap(),
+            Promote::Expired
+        );
+        assert_eq!(engine.promote_unsent(10_000).unwrap(), Promote::Empty);
     }
 
     #[test]

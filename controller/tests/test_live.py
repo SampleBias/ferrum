@@ -27,6 +27,7 @@ def note(**overrides):
         "heuristic": "balanced",
         "answer_confidence": 0.11,
         "forward_us": 900_000,
+        "queue_wait_us": 0,
         "input_tokens": 310,
         "staged": False,
     }
@@ -183,9 +184,10 @@ class Script:
     def __init__(self, scored: dict) -> None:
         self.scored = scored
 
-    def score(self, state: dict, heuristic: str) -> dict:
+    def score(self, state: dict, heuristic: str, window_us: int | None = None) -> dict:
         self.state = state
         self.heuristic = heuristic
+        self.window_us = window_us
         return self.scored
 
 

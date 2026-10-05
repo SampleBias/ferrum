@@ -80,6 +80,8 @@ The model selects one joint profile. Independent per-resource questions can prod
 
 Use an asynchronous protocol front end with a single bounded inference worker initially. Allow one running request and one latest queued request for the entire one-guest lab. Before dispatch and before returning, recheck the request deadline. Return explicit `model_busy`/abstain when unavailable; do not increase queue size to hide overload.
 
+The live worker keeps that bound. A request that arrives during a forward is the one latest request. A newer arrival displaces it with `model_busy`. The running forward is left to finish. Before the queued request starts, a wait longer than its snapshot window is an `expired` abstain and does not start a forward.
+
 A TCP timeout does not cancel a PyTorch operation already running. When a request times out, mark its result unusable and avoid launching an unlimited series of overlapping forwards. A supervised inference process can be restarted if it exceeds a separate hung-worker timeout. Model reload is a host event; the guest remains on its active lease or fallback.
 
 If the inference backend silently moves from GPU to CPU or changes precision, suspend live proposals until the timing/calibration configuration is requalified. Log backend, dtype, warm/cold status, token count, queue wait, forward time, and complete round trip for every decision.

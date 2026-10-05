@@ -12,7 +12,7 @@ Use one per-experiment pre-shared key, provisioned in the guest image and in a m
 
 The bridge verifies framing/authentication in ordinary thread context, then decodes into fixed-size typed fields. Reject duplicate keys, unknown fields, unsupported versions, excessive lengths, invalid UTF-8, floats where integers are required, and out-of-range values. Never cast network bytes to a Rust struct. The policy core receives a small decoded proposal and performs its own semantic validation.
 
-At most one snapshot is in flight, one newest unsent snapshot is retained, and one validated proposal may occupy the activation mailbox. New telemetry replaces stale unsent telemetry; it does not build an unbounded queue. Partial-frame reads have deadlines and use preallocated buffers. Repeated malformed frames close the connection with rate-limited diagnostics.
+At most one snapshot is in flight, one newest unsent snapshot is retained, and one validated proposal may occupy the activation mailbox. New telemetry replaces stale unsent telemetry; it does not build an unbounded queue. A retained snapshot keeps the guest time at which it was captured. If that deadline has already passed when the snapshot would be sent, it is dropped. Partial-frame reads have deadlines and use preallocated buffers. Repeated malformed frames close the connection with rate-limited diagnostics.
 
 ## Negotiation
 
