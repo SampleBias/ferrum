@@ -682,9 +682,18 @@ mod tests {
             ProfileId::Balanced,
         ];
         let mut now = MIN_DWELL_US;
-        for (phase, profile) in workloads::mixed_v1().iter().zip(expected) {
+        for (index, (phase, profile)) in workloads::mixed_v1().iter().zip(expected).enumerate() {
+            let seen = [
+                100_000 * (index as u64 + 1),
+                10_000 * (index as u64 + 1),
+                1_000 * (index as u64 + 1),
+            ];
             let ticket = session
-                .request(&mut stream, now, workloads::observation(*phase))
+                .request(
+                    &mut stream,
+                    now,
+                    workloads::measured(*phase, workloads::SAMPLE_US, seen),
+                )
                 .unwrap_or_else(|err| panic!("{} request: {err}", phase.name));
             assert_eq!(ticket.profile, profile, "{}", phase.name);
             let ack = session.commit_applied(now).unwrap();
@@ -707,11 +716,19 @@ mod tests {
         assert!(status.success(), "controller failed: {err}");
         let log: String = lines.map(|line| line.unwrap()).collect::<Vec<_>>().join("\n");
         assert!(
-            log.contains("PROPOSAL profile=latency seq=1")
-                && log.contains("PROPOSAL profile=throughput seq=2")
-                && log.contains("PROPOSAL profile=balanced seq=3")
-                && log.contains("PROPOSAL profile=reclaim seq=4")
-                && log.contains("PROPOSAL profile=balanced seq=5")
+            log.contains("PROPOSAL profile=latency seq=1 window_us=400000 service=100000/10000/1000")
+                && log.contains(
+                    "PROPOSAL profile=throughput seq=2 window_us=400000 service=200000/20000/2000"
+                )
+                && log.contains(
+                    "PROPOSAL profile=balanced seq=3 window_us=400000 service=300000/30000/3000"
+                )
+                && log.contains(
+                    "PROPOSAL profile=reclaim seq=4 window_us=400000 service=400000/40000/4000"
+                )
+                && log.contains(
+                    "PROPOSAL profile=balanced seq=5 window_us=400000 service=500000/50000/5000"
+                )
                 && log.contains("ROUNDS 5"),
             "controller log did not follow the phases: {log}"
         );

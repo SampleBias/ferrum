@@ -158,8 +158,9 @@ const fn clamp_queue(queue: u32, workers: u8) -> u8 {
     }
 }
 
-/// Counters the heuristic sees for this phase. Queue length stays the offered
-/// depth. `runnable` is the duty, which cannot exceed the eight-thread pool.
+/// Offered load for this phase. Queue length stays the generator depth.
+/// `runnable` is the duty, which cannot exceed the eight-thread pool.
+/// Service is zero until [`measured`] fills a real scheduler window.
 pub fn observation(phase: PhaseSpec) -> Observation {
     let duty = phase.duty();
     let mut obs = Observation::quiet(phase.duration_us);
@@ -173,6 +174,17 @@ pub fn observation(phase: PhaseSpec) -> Observation {
     obs.pressure.managed_used_bytes = phase.managed_used_bytes;
     obs.pressure.evictable_backlog_bytes = phase.evictable_backlog_bytes;
     obs.pressure.emergency = phase.emergency;
+    obs
+}
+
+/// Same offered load as [`observation`], with the scheduler window that was
+/// actually read. `service_us` is latency, batch, then maintenance.
+pub fn measured(phase: PhaseSpec, window_us: u64, service_us: [u64; 3]) -> Observation {
+    let mut obs = observation(phase);
+    obs.window_us = window_us;
+    for (group, service) in obs.groups.iter_mut().zip(service_us) {
+        group.cpu_service_us = service;
+    }
     obs
 }
 
@@ -327,5 +339,20 @@ mod tests {
         let wait = memory_catch_up_us();
         assert_eq!(wait, SAMPLE_US * 8 / 6 * 2);
         assert!(wait > SAMPLE_US);
+    }
+
+    #[test]
+    fn measured_window_keeps_the_offered_load_and_records_service() {
+        let burst = mixed_v1()[0];
+        let seen = [300_000, 100_000, 0];
+        let obs = measured(burst, SAMPLE_US, seen);
+        assert_eq!(obs.window_us, SAMPLE_US);
+        assert_eq!(obs.groups[0].cpu_service_us, 300_000);
+        assert_eq!(obs.groups[1].cpu_service_us, 100_000);
+        assert_eq!(obs.groups[2].cpu_service_us, 0);
+        assert_eq!(obs.groups[0].queue_len, burst.latency_queue);
+        assert_eq!(obs.groups[1].queue_len, burst.batch_queue);
+        assert_eq!(obs.pressure.managed_used_bytes, burst.managed_used_bytes);
+        assert!(observation(burst).groups.iter().all(|group| group.cpu_service_us == 0));
     }
 }

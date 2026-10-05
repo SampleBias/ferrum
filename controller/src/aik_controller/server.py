@@ -58,6 +58,18 @@ def catalog_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def proposal_line(snapshot: dict, profile: str) -> str:
+    """The proposal plus the scheduler window the snapshot actually carried."""
+    groups = {group["class"]: group for group in snapshot["groups"]}
+    service = "/".join(
+        str(groups[name]["cpu_service_us"]) for name in ("latency", "batch", "maintenance")
+    )
+    return (
+        f"PROPOSAL profile={profile} seq={snapshot['request_seq']} "
+        f"window_us={snapshot['window_us']} service={service}"
+    )
+
+
 def accept_hello(
     conn: socket.socket, key: bytes, catalog: dict, identity: dict
 ) -> tuple[dict, str] | None:
@@ -115,7 +127,7 @@ def exchange_round(
         print("snapshot hash mismatch", file=sys.stderr)
         return 1
     profile = choose(body, thresholds)
-    print(f"PROPOSAL profile={profile} seq={snapshot['request_seq']}", flush=True)
+    print(proposal_line(snapshot, profile), flush=True)
     write_payload(
         conn,
         key,
@@ -273,6 +285,7 @@ def propose_once(
     if snapshot.get("snapshot_hash") != digest:
         raise FrameError("snapshot hash mismatch")
     profile = choose(body, thresholds)
+    print(proposal_line(snapshot, profile), flush=True)
     proposal = {
         "protocol": 1,
         "kind": "proposal",
@@ -289,7 +302,6 @@ def propose_once(
         "calibration_hash": identity["calibration_hash"],
         "reason_code": "heuristic",
     }
-    print(f"PROPOSAL profile={profile} seq={snapshot['request_seq']}", flush=True)
     write_payload(conn, key, proposal)
     return proposal
 

@@ -1292,17 +1292,19 @@ fn mixed_v1_run() -> Result<(), String> {
     Err("mixed-v1 runs inside the hermit guest".to_string())
 }
 
-/// Walk `mixed-v1` against the controller. Each phase's queues and pressure
-/// are the snapshot. The controller's heuristic proposes the profile, and the
-/// scheduler installs that proposal. The sample is one [`workloads::SAMPLE_US`]
-/// window after the acknowledgment. The spec durations stay the later
-/// experiment horizon.
+/// Walk `mixed-v1` against the controller. Each phase sets its duty first and
+/// reads one [`workloads::SAMPLE_US`] scheduler window under the profile still
+/// in force. That window, not the spec duration, is the snapshot. The
+/// controller's heuristic proposes from the offered queues and pressure, and
+/// the scheduler installs that proposal. A second window checks the new
+/// weights. The spec durations stay the later experiment horizon.
 ///
 /// A different profile has to wait out the two-second dwell. The threads park
-/// during that wait so it does not add virtual-runtime debt. `steady` still
-/// leaves batch ahead for its own sample. The memory phase waits
+/// during that wait so it does not add virtual-runtime debt. The pre-decision
+/// sample has to finish before the current lease expires. `steady` still
+/// leaves batch ahead. The memory phase waits
 /// [`workloads::memory_catch_up_us`] after reclaim is installed, so the
-/// measured window is the reclaim share after that debt has been paid.
+/// outcome window is the reclaim share after that debt has been paid.
 #[cfg(target_os = "hermit")]
 fn mixed_v1_run() -> Result<(), String> {
     use std::hint::spin_loop;
@@ -1466,10 +1468,32 @@ fn mixed_v1_run() -> Result<(), String> {
     // dwell until the first staged profile, so this wait only satisfies the engine.
     wait_until(MIN_DWELL_US)?;
 
+    let set_duty = |latency: u8, batch: u8, maintenance: u8| {
+        LATENCY_DUTY.store(latency, Ordering::Release);
+        BATCH_DUTY.store(batch, Ordering::Release);
+        MAINTENANCE_DUTY.store(maintenance, Ordering::Release);
+    };
+    // Settle, then the sample. Leave this much of the current lease so the
+    // read cannot cross expiry and bump the generation underneath the stage.
+    const MEASURE_US: u64 = 100_000 + workloads::SAMPLE_US;
+    const LEASE_MARGIN_US: u64 = 200_000;
+    let sample_window = |settle_us: u64| -> Result<[u64; 3], String> {
+        unsafe { sys_usleep(settle_us) };
+        let before = snapshot()?;
+        unsafe { sys_usleep(workloads::SAMPLE_US) };
+        let after = snapshot()?;
+        Ok([
+            after.0.saturating_sub(before.0),
+            after.1.saturating_sub(before.1),
+            after.2.saturating_sub(before.2),
+        ])
+    };
+
     let outcome = (|| {
         println!("FERRUM_MIXED phases={}", workloads::mixed_v1().len());
         let mut expect_generation = 1u64;
         let mut dwell_ready_us = 0u64;
+        let mut lease_until_us = 0u64;
         for phase in workloads::mixed_v1() {
             if dwell_ready_us != 0 {
                 wait_until(dwell_ready_us)?;
@@ -1484,7 +1508,23 @@ fn mixed_v1_run() -> Result<(), String> {
                     phase.name
                 ));
             }
-            let observation = workloads::observation(*phase);
+            if lease_until_us != 0 {
+                let now = monotonic_us()?;
+                if now.saturating_add(MEASURE_US + LEASE_MARGIN_US) >= lease_until_us {
+                    return Err(format!(
+                        "{} measurement would cross the lease (now={now} lease={lease_until_us})",
+                        phase.name
+                    ));
+                }
+            }
+            let duty = phase.duty();
+            set_duty(duty.latency, duty.batch, duty.maintenance);
+            let seen = sample_window(100_000)?;
+            let observation = workloads::measured(*phase, workloads::SAMPLE_US, seen);
+            println!(
+                "FERRUM_SNAPSHOT name={} window_us={} latency={} batch={} maintenance={}",
+                phase.name, observation.window_us, seen[0], seen[1], seen[2]
+            );
             let reference = choose_heuristic(&observation, &HEURISTIC_V0);
             let now = monotonic_us()?;
             println!(
@@ -1534,25 +1574,13 @@ fn mixed_v1_run() -> Result<(), String> {
             session
                 .commit_applied(ack.guest_us)
                 .map_err(|err| format!("{} commit: {err}", phase.name))?;
-            let duty = phase.duty();
-            LATENCY_DUTY.store(duty.latency, Ordering::Release);
-            BATCH_DUTY.store(duty.batch, Ordering::Release);
-            MAINTENANCE_DUTY.store(duty.maintenance, Ordering::Release);
             let catch_up = if phase.name == "memory" {
                 workloads::memory_catch_up_us()
             } else {
                 0
             };
-            // Two park intervals, so a thread that just went to sleep observes the new duty.
-            unsafe { sys_usleep(100_000 + catch_up) };
-            let before = snapshot()?;
-            unsafe { sys_usleep(workloads::SAMPLE_US) };
-            let after = snapshot()?;
-            let sample = [
-                after.0.saturating_sub(before.0),
-                after.1.saturating_sub(before.1),
-                after.2.saturating_sub(before.2),
-            ];
+            // The duty is already in force. The extra wait pays virtual-runtime debt.
+            let sample = sample_window(100_000 + catch_up)?;
             println!(
                 "FERRUM_PHASE name={} profile={} spec_us={} held_us={} catch_up_us={} queue={}/{} emergency={} managed={} backlog={} runnable={}/{}/{} latency={} batch={} maintenance={}",
                 phase.name,
@@ -1576,10 +1604,9 @@ fn mixed_v1_run() -> Result<(), String> {
                 return Err(format!("{}: {fault}", phase.name));
             }
             // Park before the dwell wait so the wait does not keep charging the phase.
-            LATENCY_DUTY.store(0, Ordering::Release);
-            BATCH_DUTY.store(0, Ordering::Release);
-            MAINTENANCE_DUTY.store(0, Ordering::Release);
+            set_duty(0, 0, 0);
             expect_generation = ack.generation;
+            lease_until_us = ack.lease_until_guest_us;
             dwell_ready_us = ack.guest_us.saturating_add(MIN_DWELL_US);
             if dwell_ready_us >= ack.lease_until_guest_us {
                 return Err(format!(
