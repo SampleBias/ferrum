@@ -112,8 +112,11 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(held["groups"]["latency"]["queue_trend"], "flat")
         self.assertEqual(held["groups"]["latency"]["queue_ema"], 6)
 
-    def test_laya_manifest_is_absent(self):
-        self.assertEqual(laya_status(ROOT), "absent")
+    def test_checkpoint_status_does_not_invent_a_model(self):
+        from aik_controller.laya_pin import assess
+
+        self.assertEqual(laya_status(ROOT), assess(ROOT))
+        self.assertIn(laya_status(ROOT), {"absent", "incomplete", "mismatch", "ready"})
         self.assertFalse((ROOT / "configs" / "laya-manifest.json").exists())
 
 

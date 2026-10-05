@@ -23,14 +23,10 @@ def load_edges(path: Path) -> dict:
 
 
 def laya_status(root: Path) -> str:
-    """A checkpoint is ready only when a local manifest file exists.
+    """Whether the pinned English checkpoint is on disk. This does not download it."""
+    from aik_controller.laya_pin import assess
 
-    Absence is the honest state. This function does not download weights.
-    """
-    manifest = root / "configs" / "laya-manifest.json"
-    if not manifest.is_file():
-        return "absent"
-    return "present"
+    return assess(root)
 
 
 def encode(

@@ -527,7 +527,7 @@ def main(argv: list[str] | None = None) -> int:
     listener.listen(1)
     bound_host, bound_port = listener.getsockname()
     print(f"LISTENING {bound_host} {bound_port}", flush=True)
-    print(f"LAYA {laya_status(root)}", flush=True)
+    print(f"LAYA checkpoint={laya_status(root)} live=heuristic", flush=True)
     try:
         if args.lose_ack:
             return serve_lost_ack(listener, key, catalog, thresholds, identity, edges)
