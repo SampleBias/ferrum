@@ -1,0 +1,35 @@
+{
+  "id": "splits-v0",
+  "fit_allowed": false,
+  "development": {
+    "scenario": "mixed-v1",
+    "role": "screening",
+    "workload_sha256": "3f6726479cbabfddd17e354361620878429bfd218503f37daf2785b249644701",
+    "cases": [
+      "adaptive-burst",
+      "adaptive-steady",
+      "adaptive-idle",
+      "adaptive-memory",
+      "adaptive-recovery",
+      "fixed-burst-balanced",
+      "fixed-burst-latency",
+      "fixed-burst-throughput",
+      "fixed-burst-reclaim",
+      "fixed-memory-balanced",
+      "fixed-memory-latency",
+      "fixed-memory-throughput",
+      "fixed-memory-reclaim",
+      "control-burst-latency",
+      "control-burst-throughput",
+      "control-burst-reclaim",
+      "control-memory-latency",
+      "control-memory-throughput",
+      "control-memory-reclaim"
+    ]
+  },
+  "training": [],
+  "calibration": [],
+  "final_test": [],
+  "out_of_distribution": [],
+  "note": "One scenario family. The recorded windows and the mixed-v1 live trace are development evidence. There is no training, calibration, or final-test split. Do not fit on these windows."
+}

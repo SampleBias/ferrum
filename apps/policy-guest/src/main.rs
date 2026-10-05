@@ -13,8 +13,11 @@ use policy_types::BootId;
 
 fn main() -> ExitCode {
     println!("FERRUM_START policy-guest");
+    if env::args().skip(1).any(|arg| arg == "--live-trace") {
+        return live_exit(true);
+    }
     if env::args().skip(1).any(|arg| arg == "--live") {
-        return live_exit();
+        return live_exit(false);
     }
     if env::args().skip(1).any(|arg| arg == "--shadow-trace") {
         return shadow_trace_exit();
@@ -309,8 +312,8 @@ fn shadow_trace_run() -> Result<Vec<policy_guest::ShadowNote>, String> {
     Ok(notes)
 }
 
-fn live_exit() -> ExitCode {
-    match live_run() {
+fn live_exit(trace: bool) -> ExitCode {
+    match live_run(trace) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             println!("FERRUM_FAIL {err}");
@@ -325,9 +328,12 @@ fn live_exit() -> ExitCode {
 /// a Hermit scheduler sample. The decision clock is wall time added to the
 /// capture timestamp, read after the proposal arrives.
 #[cfg(not(target_os = "hermit"))]
-fn live_run() -> Result<(), String> {
+fn live_run(trace: bool) -> Result<(), String> {
     use std::time::Instant;
 
+    if trace {
+        return live_trace_host();
+    }
     let (controller, boot) = shadow_endpoint("--live")?;
     let mut stream = TcpStream::connect(&controller).map_err(|err| format!("connect {controller}: {err}"))?;
     let mut session = policy_guest::LiveSession::open_live(&mut stream, boot).map_err(|err| err.to_string())?;
@@ -383,13 +389,105 @@ fn live_run() -> Result<(), String> {
     }
 }
 
+/// Development mixed-v1 rounds on the reference engine.
+///
+/// The counters are the phase stand-in window, not a Hermit scheduler sample.
+/// The decision clock is wall time added to a guest timestamp that starts at
+/// the dwell and moves forward after each round.
+#[cfg(not(target_os = "hermit"))]
+fn live_trace_host() -> Result<(), String> {
+    use std::time::Instant;
+
+    let (controller, boot) = shadow_endpoint("--live-trace")?;
+    let mut stream = TcpStream::connect(&controller).map_err(|err| format!("connect {controller}: {err}"))?;
+    let mut session = policy_guest::LiveSession::open_live(&mut stream, boot).map_err(|err| err.to_string())?;
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(30)));
+    let mut guest_now = policy_types::MIN_DWELL_US;
+    let mut rejected = 0u32;
+    let mut late = 0u32;
+    let mut applied = 0u32;
+    let mut abstained = 0u32;
+    for (index, phase) in workloads::mixed_v1().iter().enumerate() {
+        let step = index as u64 + 1;
+        let observation = workloads::measured(
+            *phase,
+            workloads::SAMPLE_US,
+            [100_000 * step, 10_000 * step, 1_000 * step],
+        );
+        let captured = guest_now;
+        let start = Instant::now();
+        let outcome = session
+            .request_judged(&mut stream, captured, observation, || {
+                Ok(captured.saturating_add(start.elapsed().as_micros() as u64))
+            })
+            .map_err(|err| format!("{}: {err}", phase.name))?;
+        match outcome {
+            policy_guest::LiveOutcome::Rejected { reason, profile, decision_us } => {
+                rejected += 1;
+                if reason == policy_types::RejectReason::Late {
+                    late += 1;
+                }
+                println!(
+                    "FERRUM_LIVE_REJECTED name={} reason={} profile={} captured_us={} decision_us={}",
+                    phase.name,
+                    reason.as_str(),
+                    profile.as_str(),
+                    captured,
+                    decision_us
+                );
+                guest_now = decision_us.saturating_add(policy_types::MIN_DWELL_US);
+            }
+            policy_guest::LiveOutcome::Abstained { decision_us } => {
+                abstained += 1;
+                println!(
+                    "FERRUM_LIVE_ABSTAIN name={} captured_us={} decision_us={}",
+                    phase.name, captured, decision_us
+                );
+                guest_now = decision_us.saturating_add(policy_types::MIN_DWELL_US);
+            }
+            policy_guest::LiveOutcome::Staged { ticket, decision_us } => {
+                let ack = session.commit_applied(decision_us).map_err(|err| err.to_string())?;
+                policy_guest::report_applied(
+                    &mut stream,
+                    &ticket,
+                    ack.previous_generation,
+                    ack.generation,
+                    ack.guest_us,
+                    ack.lease_until_guest_us,
+                )
+                .map_err(|err| err.to_string())?;
+                applied += 1;
+                println!(
+                    "FERRUM_LIVE_APPLIED name={} profile={} generation={} reference=engine",
+                    phase.name,
+                    ticket.profile.as_str(),
+                    ack.generation
+                );
+                guest_now = decision_us.saturating_add(policy_types::MIN_DWELL_US);
+            }
+        }
+    }
+    let status = session.status();
+    println!(
+        "FERRUM_LIVE_TRACE rounds={} rejected={} late={} applied={} abstain={} active={} generation={} source=stand-in",
+        workloads::mixed_v1().len(),
+        rejected,
+        late,
+        applied,
+        abstained,
+        status.profile.as_str(),
+        status.generation
+    );
+    Ok(())
+}
+
 /// Measure one burst window under the boot profile and judge the reply.
 ///
 /// The clock for that judgment is read after the proposal arrives. A miss
 /// against the snapshot deadline is reported and not staged. An on-time
 /// choice is staged with only the time still left on that same deadline.
 #[cfg(target_os = "hermit")]
-fn live_run() -> Result<(), String> {
+fn live_run(trace: bool) -> Result<(), String> {
     use std::hint::spin_loop;
     use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
     use std::thread;
@@ -511,7 +609,7 @@ fn live_run() -> Result<(), String> {
         return Err("scheduler generation moved before the trial".to_string());
     }
 
-    let (controller, boot) = shadow_endpoint("--live")?;
+    let (controller, boot) = shadow_endpoint(if trace { "--live-trace" } else { "--live" })?;
     let mut stream = connect_controller(&controller)?;
     let mut session = policy_guest::LiveSession::open_live(&mut stream, boot).map_err(|err| err.to_string())?;
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(30)));
@@ -523,71 +621,205 @@ fn live_run() -> Result<(), String> {
         unsafe { sys_usleep((MIN_DWELL_US - now).min(100_000)) };
     }
 
-    let phase = workloads::mixed_v1()[0];
-    let duty = phase.duty();
-    LATENCY_DUTY.store(duty.latency, Ordering::Release);
-    BATCH_DUTY.store(duty.batch, Ordering::Release);
-    MAINTENANCE_DUTY.store(duty.maintenance, Ordering::Release);
-    unsafe { sys_usleep(100_000) };
-    let before = (
-        read_service(LATENCY)?,
-        read_service(BATCH)?,
-        read_service(MAINTENANCE)?,
-    );
-    unsafe { sys_usleep(workloads::SAMPLE_US) };
-    let after = (
-        read_service(LATENCY)?,
-        read_service(BATCH)?,
-        read_service(MAINTENANCE)?,
-    );
-    let sample = [
-        after.0.saturating_sub(before.0),
-        after.1.saturating_sub(before.1),
-        after.2.saturating_sub(before.2),
-    ];
-    println!(
-        "FERRUM_SNAPSHOT name={} window_us={} latency={} batch={} maintenance={}",
-        phase.name, workloads::SAMPLE_US, sample[0], sample[1], sample[2]
-    );
-    let weights = catalog_spec(CatalogId::CpuV1).profile(ProfileId::Balanced).weights();
-    if let Err(fault) = workloads::service_follows(sample, duty, weights) {
-        return Err(format!("burst boot profile: {fault}"));
-    }
-    if generation()? != 1 || unsafe { sys_policy_staged() } != 0 {
-        return Err("scheduler moved before the proposal".to_string());
-    }
+    let phases: Vec<_> = if trace {
+        workloads::mixed_v1().to_vec()
+    } else {
+        vec![workloads::mixed_v1()[0]]
+    };
+    let mut active = ProfileId::Balanced;
+    let mut rejected = 0u32;
+    let mut late = 0u32;
+    let mut applied = 0u32;
+    let mut abstained = 0u32;
+    for phase in phases {
+        let duty = phase.duty();
+        let weights = catalog_spec(CatalogId::CpuV1).profile(active).weights();
+        let catch_up = if phase.name == "memory" {
+            workloads::catch_up_us(weights[1])
+        } else {
+            0
+        };
+        LATENCY_DUTY.store(duty.latency, Ordering::Release);
+        BATCH_DUTY.store(duty.batch, Ordering::Release);
+        MAINTENANCE_DUTY.store(duty.maintenance, Ordering::Release);
+        unsafe { sys_usleep(100_000 + catch_up) };
+        let before = (
+            read_service(LATENCY)?,
+            read_service(BATCH)?,
+            read_service(MAINTENANCE)?,
+        );
+        unsafe { sys_usleep(workloads::SAMPLE_US) };
+        let after = (
+            read_service(LATENCY)?,
+            read_service(BATCH)?,
+            read_service(MAINTENANCE)?,
+        );
+        let sample = [
+            after.0.saturating_sub(before.0),
+            after.1.saturating_sub(before.1),
+            after.2.saturating_sub(before.2),
+        ];
+        println!(
+            "FERRUM_SNAPSHOT name={} window_us={} catch_up_us={} latency={} batch={} maintenance={}",
+            phase.name, workloads::SAMPLE_US, catch_up, sample[0], sample[1], sample[2]
+        );
+        if let Err(fault) = workloads::service_follows(sample, duty, weights) {
+            return Err(format!("{} active profile: {fault}", phase.name));
+        }
+        let generation_before = generation()?;
+        if unsafe { sys_policy_staged() } != 0 {
+            return Err(format!("{} left a profile staged", phase.name));
+        }
 
-    let captured = monotonic_us()?;
-    let observation = workloads::measured(phase, workloads::SAMPLE_US, sample);
-    let outcome = session
-        .request_judged(&mut stream, captured, observation, || {
-            monotonic_us().map_err(|_| policy_guest::SessionError::Protocol("clock"))
-        })
-        .map_err(|err| err.to_string())?;
-    let accept_until = captured.saturating_add(ACCEPTANCE_DEADLINE_US);
-    match outcome {
-        LiveOutcome::Rejected { reason, profile, decision_us } => {
-            if unsafe { sys_policy_staged() } != 0 || generation()? != 1 {
-                return Err(format!(
-                    "rejected proposal was staged (reason={} profile={})",
+        let captured = monotonic_us()?;
+        let observation = workloads::measured(phase, workloads::SAMPLE_US, sample);
+        let outcome = session
+            .request_judged(&mut stream, captured, observation, || {
+                monotonic_us().map_err(|_| policy_guest::SessionError::Protocol("clock"))
+            })
+            .map_err(|err| format!("{}: {err}", phase.name))?;
+        let accept_until = captured.saturating_add(ACCEPTANCE_DEADLINE_US);
+        let mut held = false;
+        match outcome {
+            LiveOutcome::Rejected { reason, profile, decision_us } => {
+                if unsafe { sys_policy_staged() } != 0 || generation()? != generation_before {
+                    return Err(format!(
+                        "{} rejected proposal was staged (reason={} profile={})",
+                        phase.name,
+                        reason.as_str(),
+                        profile.as_str()
+                    ));
+                }
+                rejected += 1;
+                if reason == RejectReason::Late {
+                    late += 1;
+                }
+                println!(
+                    "FERRUM_LIVE_REJECTED name={} reason={} profile={} captured_us={} decision_us={} accept_until={} generation={}",
+                    phase.name,
                     reason.as_str(),
-                    profile.as_str()
-                ));
+                    profile.as_str(),
+                    captured,
+                    decision_us,
+                    accept_until,
+                    generation_before
+                );
+                if !matches!(
+                    reason,
+                    RejectReason::Late | RejectReason::Dwell | RejectReason::StaleGeneration | RejectReason::Emergency
+                ) {
+                    return Err(format!("{} proposal rejected: {}", phase.name, reason.as_str()));
+                }
+                held = true;
             }
-            println!(
-                "FERRUM_LIVE_REJECTED reason={} profile={} captured_us={} decision_us={} accept_until={} generation=1",
-                reason.as_str(),
-                profile.as_str(),
-                captured,
-                decision_us,
-                accept_until
-            );
-            if !matches!(
-                reason,
-                RejectReason::Late | RejectReason::Dwell | RejectReason::StaleGeneration | RejectReason::Emergency
-            ) {
-                return Err(format!("proposal rejected: {}", reason.as_str()));
+            LiveOutcome::Abstained { decision_us } => {
+                if unsafe { sys_policy_staged() } != 0 || generation()? != generation_before {
+                    return Err(format!("{} abstain staged a profile", phase.name));
+                }
+                abstained += 1;
+                println!(
+                    "FERRUM_LIVE_ABSTAIN name={} captured_us={} decision_us={} generation={}",
+                    phase.name, captured, decision_us, generation_before
+                );
+                held = true;
             }
+            LiveOutcome::Staged { ticket, decision_us } => {
+                let now = monotonic_us()?;
+                if now > accept_until {
+                    policy_guest::report_reject(&mut stream, &ticket, RejectReason::Late)
+                        .map_err(|err| err.to_string())?;
+                    rejected += 1;
+                    late += 1;
+                    println!(
+                        "FERRUM_LIVE_REJECTED name={} reason=late profile={} captured_us={} decision_us={} accept_until={} generation={}",
+                        phase.name,
+                        ticket.profile.as_str(),
+                        captured,
+                        now,
+                        accept_until,
+                        generation()?
+                    );
+                    if unsafe { sys_policy_staged() } != 0 {
+                        return Err(format!("{} late proposal was left staged", phase.name));
+                    }
+                    held = true;
+                } else {
+                    let remaining = accept_until - now;
+                    let chosen = catalog_spec(CatalogId::CpuV1).profile(ticket.profile).weights();
+                    let rc = unsafe {
+                        sys_policy_stage(
+                            chosen[0],
+                            chosen[1],
+                            chosen[2],
+                            remaining,
+                            PROFILE_LEASE_US,
+                            ticket.base_generation,
+                        )
+                    };
+                    if rc != 0 {
+                        return Err(format!("{} stage returned {rc}", phase.name));
+                    }
+                    let mut ack = None;
+                    for _ in 0..40 {
+                        let mut slot = PolicyAck {
+                            kind: 0,
+                            reason: 0,
+                            profile: 0,
+                            _pad0: 0,
+                            _pad1: 0,
+                            previous_generation: 0,
+                            generation: 0,
+                            guest_us: 0,
+                            lease_until_guest_us: 0,
+                        };
+                        let read = unsafe { sys_policy_read_ack(&mut slot) };
+                        if read == 0 {
+                            ack = Some(slot);
+                            break;
+                        }
+                        if read != 1 {
+                            return Err(format!("{} read ack returned {read}", phase.name));
+                        }
+                        unsafe { sys_usleep(5_000) };
+                    }
+                    let Some(ack) = ack else {
+                        return Err(format!("{} scheduler wrote no acknowledgment", phase.name));
+                    };
+                    publish_scheduler(&mut stream, &ticket, &ack)?;
+                    if ack.kind == 1 {
+                        session.commit_applied(ack.guest_us).map_err(|err| err.to_string())?;
+                        active = ticket.profile;
+                        applied += 1;
+                        println!(
+                            "FERRUM_LIVE_APPLIED name={} profile={} captured_us={} decision_us={} accept_until={} generation={}",
+                            phase.name,
+                            ticket.profile.as_str(),
+                            captured,
+                            decision_us,
+                            accept_until,
+                            ack.generation
+                        );
+                    } else {
+                        rejected += 1;
+                        if ack.reason == 2 {
+                            late += 1;
+                        }
+                        println!(
+                            "FERRUM_LIVE_REJECTED name={} reason={} profile={} captured_us={} decision_us={} accept_until={} generation={}",
+                            phase.name,
+                            ack_reason_name(ack.reason),
+                            ticket.profile.as_str(),
+                            captured,
+                            decision_us,
+                            accept_until,
+                            generation()?
+                        );
+                        held = true;
+                    }
+                }
+            }
+        }
+        if held {
             let held_before = (
                 read_service(LATENCY)?,
                 read_service(BATCH)?,
@@ -599,116 +831,42 @@ fn live_run() -> Result<(), String> {
                 read_service(BATCH)?,
                 read_service(MAINTENANCE)?,
             );
-            let held = [
+            let held_sample = [
                 held_after.0.saturating_sub(held_before.0),
                 held_after.1.saturating_sub(held_before.1),
                 held_after.2.saturating_sub(held_before.2),
             ];
+            let active_name = active.as_str();
             println!(
-                "FERRUM_SCHED window=balanced latency={} batch={} maintenance={}",
-                held[0], held[1], held[2]
+                "FERRUM_SCHED window={active_name} latency={} batch={} maintenance={}",
+                held_sample[0], held_sample[1], held_sample[2]
             );
-            if let Err(fault) = workloads::service_follows(held, duty, weights) {
-                return Err(format!("boot profile after reject: {fault}"));
+            let weights = catalog_spec(CatalogId::CpuV1).profile(active).weights();
+            if let Err(fault) = workloads::service_follows(held_sample, duty, weights) {
+                return Err(format!("{} after the decision: {fault}", phase.name));
             }
-            if generation()? != 1 || unsafe { sys_policy_staged() } != 0 {
-                return Err("scheduler moved after the reject".to_string());
-            }
-            println!("FERRUM_LIVE_HELD profile=balanced generation=1");
-        }
-        LiveOutcome::Abstained { decision_us } => {
-            if unsafe { sys_policy_staged() } != 0 || generation()? != 1 {
-                return Err("abstain staged a profile".to_string());
+            if generation()? != generation_before || unsafe { sys_policy_staged() } != 0 {
+                return Err(format!("{} scheduler moved after the reject", phase.name));
             }
             println!(
-                "FERRUM_LIVE_ABSTAIN captured_us={} decision_us={} generation=1",
-                captured, decision_us
+                "FERRUM_LIVE_HELD name={} profile={} generation={}",
+                phase.name,
+                active_name,
+                generation_before
             );
-            println!("FERRUM_LIVE_HELD profile=balanced generation=1");
         }
-        LiveOutcome::Staged { ticket, decision_us } => {
-            let now = monotonic_us()?;
-            if now > accept_until {
-                policy_guest::report_reject(&mut stream, &ticket, RejectReason::Late)
-                    .map_err(|err| err.to_string())?;
-                println!(
-                    "FERRUM_LIVE_REJECTED reason=late profile={} captured_us={} decision_us={} accept_until={} generation=1",
-                    ticket.profile.as_str(),
-                    captured,
-                    now,
-                    accept_until
-                );
-                if unsafe { sys_policy_staged() } != 0 {
-                    return Err("late proposal was left staged".to_string());
-                }
-                println!("FERRUM_LIVE_HELD profile=balanced generation=1");
-            } else {
-                let remaining = accept_until - now;
-                let chosen = catalog_spec(CatalogId::CpuV1).profile(ticket.profile).weights();
-                let rc = unsafe {
-                    sys_policy_stage(
-                        chosen[0],
-                        chosen[1],
-                        chosen[2],
-                        remaining,
-                        PROFILE_LEASE_US,
-                        ticket.base_generation,
-                    )
-                };
-                if rc != 0 {
-                    return Err(format!("stage returned {rc}"));
-                }
-                let mut ack = None;
-                for _ in 0..40 {
-                    let mut slot = PolicyAck {
-                        kind: 0,
-                        reason: 0,
-                        profile: 0,
-                        _pad0: 0,
-                        _pad1: 0,
-                        previous_generation: 0,
-                        generation: 0,
-                        guest_us: 0,
-                        lease_until_guest_us: 0,
-                    };
-                    let read = unsafe { sys_policy_read_ack(&mut slot) };
-                    if read == 0 {
-                        ack = Some(slot);
-                        break;
-                    }
-                    if read != 1 {
-                        return Err(format!("read ack returned {read}"));
-                    }
-                    unsafe { sys_usleep(5_000) };
-                }
-                let Some(ack) = ack else {
-                    return Err("scheduler wrote no acknowledgment".to_string());
-                };
-                publish_scheduler(&mut stream, &ticket, &ack)?;
-                if ack.kind == 1 {
-                    session.commit_applied(ack.guest_us).map_err(|err| err.to_string())?;
-                    println!(
-                        "FERRUM_LIVE_APPLIED profile={} captured_us={} decision_us={} accept_until={} generation={}",
-                        ticket.profile.as_str(),
-                        captured,
-                        decision_us,
-                        accept_until,
-                        ack.generation
-                    );
-                } else {
-                    println!(
-                        "FERRUM_LIVE_REJECTED reason={} profile={} captured_us={} decision_us={} accept_until={} generation={}",
-                        ack_reason_name(ack.reason),
-                        ticket.profile.as_str(),
-                        captured,
-                        decision_us,
-                        accept_until,
-                        generation()?
-                    );
-                    println!("FERRUM_LIVE_HELD profile=balanced generation={}", generation()?);
-                }
-            }
-        }
+    }
+    if trace {
+        println!(
+            "FERRUM_LIVE_TRACE rounds={} rejected={} late={} applied={} abstain={} active={} generation={}",
+            workloads::mixed_v1().len(),
+            rejected,
+            late,
+            applied,
+            abstained,
+            active.as_str(),
+            generation()?
+        );
     }
     LATENCY_DUTY.store(0, Ordering::Release);
     BATCH_DUTY.store(0, Ordering::Release);
