@@ -188,15 +188,21 @@ pub fn measured(phase: PhaseSpec, window_us: u64, service_us: [u64; 3]) -> Obser
     obs
 }
 
-/// Wall time that lets the memory phase absorb the virtual-runtime lead from
-/// `steady` before its sample starts.
+/// Wall time that lets a later shared phase absorb one solo sample.
 ///
-/// `steady` runs batch alone for [`SAMPLE_US`] at weight 6, adding
-/// `SAMPLE_US / 6` of virtual runtime. Under reclaim weights, latency and
-/// maintenance climb together at one eighth of a virtual microsecond per wall
-/// microsecond, so that lead lasts `SAMPLE_US * 8 / 6`. The wait is twice that.
+/// A group that runs alone for [`SAMPLE_US`] at `solo_weight` gains
+/// `SAMPLE_US / solo_weight` of virtual runtime. The wait assumes the slower
+/// weight-2 climb, one eighth of a virtual microsecond per wall microsecond,
+/// and then doubles it. A heavier solo weight leaves a smaller lead.
+pub fn catch_up_us(solo_weight: u32) -> u64 {
+    let weight = u64::from(solo_weight.max(1));
+    SAMPLE_US.saturating_mul(16) / weight
+}
+
+/// [`catch_up_us`] for the adaptive memory phase, whose preceding solo sample
+/// ran batch at weight 6.
 pub fn memory_catch_up_us() -> u64 {
-    SAMPLE_US.saturating_mul(8) / 6 * 2
+    catch_up_us(6)
 }
 
 /// Ideal group service for one [`SAMPLE_US`] window once virtual runtimes have
@@ -338,6 +344,10 @@ mod tests {
     fn memory_catch_up_covers_one_solo_sample() {
         let wait = memory_catch_up_us();
         assert_eq!(wait, SAMPLE_US * 8 / 6 * 2);
+        assert_eq!(wait, catch_up_us(6));
+        assert_eq!(catch_up_us(1), SAMPLE_US * 16);
+        assert!(catch_up_us(1) > catch_up_us(2));
+        assert!(catch_up_us(2) > wait);
         assert!(wait > SAMPLE_US);
     }
 

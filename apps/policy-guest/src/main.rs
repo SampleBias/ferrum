@@ -38,6 +38,9 @@ fn main() -> ExitCode {
     if env::args().skip(1).any(|arg| arg == "--fair-dwell") {
         return fair_dwell_exit();
     }
+    if env::args().skip(1).any(|arg| arg == "--mixed-v1-fixed") {
+        return mixed_v1_fixed_exit();
+    }
     if env::args().skip(1).any(|arg| arg == "--mixed-v1") {
         return mixed_v1_exit();
     }
@@ -1687,6 +1690,166 @@ fn mixed_v1_run() -> Result<(), String> {
     })();
     std::mem::forget(stream);
     outcome
+}
+
+fn mixed_v1_fixed_exit() -> ExitCode {
+    match mixed_v1_fixed_run() {
+        Ok(()) => {
+            println!("FERRUM_COMPLETE");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            println!("FERRUM_FIXED_FAIL {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(not(target_os = "hermit"))]
+fn mixed_v1_fixed_run() -> Result<(), String> {
+    Err("mixed-v1-fixed runs inside the hermit guest".to_string())
+}
+
+/// Run every `mixed-v1` duty under each pinned `cpu-v1` profile. No controller
+/// chooses the profile. The sample is one [`workloads::SAMPLE_US`] window.
+/// The memory phase waits [`workloads::catch_up_us`] for that profile's batch
+/// weight, because `steady` left batch ahead.
+#[cfg(target_os = "hermit")]
+fn mixed_v1_fixed_run() -> Result<(), String> {
+    use std::hint::spin_loop;
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+    use std::thread;
+
+    use policy_core::catalog_spec;
+    use policy_types::{CatalogId, ProfileId};
+
+    const LATENCY: u8 = 1;
+    const BATCH: u8 = 2;
+    const MAINTENANCE: u8 = 3;
+    const PROFILES: [ProfileId; 4] = [
+        ProfileId::Balanced,
+        ProfileId::Latency,
+        ProfileId::Throughput,
+        ProfileId::Reclaim,
+    ];
+
+    unsafe extern "C" {
+        fn sys_policy_register(class: u8) -> i32;
+        fn sys_policy_set_weights(latency: u32, batch: u32, maintenance: u32) -> i32;
+        fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
+        fn sys_usleep(usecs: u64);
+    }
+
+    static LATENCY_DUTY: AtomicU8 = AtomicU8::new(0);
+    static BATCH_DUTY: AtomicU8 = AtomicU8::new(0);
+    static MAINTENANCE_DUTY: AtomicU8 = AtomicU8::new(0);
+    static READY: AtomicU8 = AtomicU8::new(0);
+    static FAILED: AtomicBool = AtomicBool::new(false);
+
+    let pool = [
+        (LATENCY, workloads::LATENCY_WORKERS),
+        (BATCH, workloads::BATCH_WORKERS),
+        (MAINTENANCE, workloads::MAINTENANCE_WORKERS),
+    ];
+    let mut expected = 0u8;
+    for (class, count) in pool {
+        expected = expected.saturating_add(count);
+        for index in 0..count {
+            thread::spawn(move || {
+                if unsafe { sys_policy_register(class) } != 0 {
+                    FAILED.store(true, Ordering::Release);
+                    return;
+                }
+                READY.fetch_add(1, Ordering::Release);
+                loop {
+                    let allowed = match class {
+                        LATENCY => LATENCY_DUTY.load(Ordering::Acquire),
+                        BATCH => BATCH_DUTY.load(Ordering::Acquire),
+                        _ => MAINTENANCE_DUTY.load(Ordering::Acquire),
+                    };
+                    if index < allowed {
+                        for _ in 0..8_000 {
+                            spin_loop();
+                        }
+                    } else {
+                        unsafe { sys_usleep(40_000) };
+                    }
+                }
+            });
+        }
+    }
+    for _ in 0..80 {
+        if READY.load(Ordering::Acquire) == expected || FAILED.load(Ordering::Acquire) {
+            break;
+        }
+        unsafe { sys_usleep(50_000) };
+    }
+    if FAILED.load(Ordering::Acquire) || READY.load(Ordering::Acquire) != expected {
+        return Err(format!(
+            "workers did not register ({}/{})",
+            READY.load(Ordering::Acquire),
+            expected
+        ));
+    }
+
+    let read = |class: u8| -> Result<u64, String> {
+        let mut service_us = 0u64;
+        let rc = unsafe { sys_policy_read(class, &mut service_us) };
+        if rc == 0 {
+            Ok(service_us)
+        } else {
+            Err(format!("read class {class} returned {rc}"))
+        }
+    };
+    println!(
+        "FERRUM_FIXED_BEGIN profiles={} phases={}",
+        PROFILES.len(),
+        workloads::mixed_v1().len()
+    );
+    for profile in PROFILES {
+        let weights = catalog_spec(CatalogId::CpuV1).profile(profile).weights();
+        let rc = unsafe { sys_policy_set_weights(weights[0], weights[1], weights[2]) };
+        if rc != 0 {
+            return Err(format!("{} weights returned {rc}", profile.as_str()));
+        }
+        for phase in workloads::mixed_v1() {
+            let duty = phase.duty();
+            LATENCY_DUTY.store(duty.latency, Ordering::Release);
+            BATCH_DUTY.store(duty.batch, Ordering::Release);
+            MAINTENANCE_DUTY.store(duty.maintenance, Ordering::Release);
+            let catch_up = if phase.name == "memory" {
+                workloads::catch_up_us(weights[1])
+            } else {
+                0
+            };
+            unsafe { sys_usleep(100_000 + catch_up) };
+            let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+            unsafe { sys_usleep(workloads::SAMPLE_US) };
+            let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+            let sample = [
+                after.0.saturating_sub(before.0),
+                after.1.saturating_sub(before.1),
+                after.2.saturating_sub(before.2),
+            ];
+            println!(
+                "FERRUM_FIXED profile={} phase={} catch_up_us={} latency={} batch={} maintenance={}",
+                profile.as_str(),
+                phase.name,
+                catch_up,
+                sample[0],
+                sample[1],
+                sample[2]
+            );
+            if let Err(fault) = workloads::service_follows(sample, duty, weights) {
+                return Err(format!("{} {}: {fault}", profile.as_str(), phase.name));
+            }
+            LATENCY_DUTY.store(0, Ordering::Release);
+            BATCH_DUTY.store(0, Ordering::Release);
+            MAINTENANCE_DUTY.store(0, Ordering::Release);
+        }
+    }
+    println!("FERRUM_FIXED_OK");
+    Ok(())
 }
 
 fn fair_demo_exit() -> ExitCode {

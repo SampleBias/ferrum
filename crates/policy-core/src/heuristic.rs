@@ -125,4 +125,27 @@ mod tests {
                 .unwrap_or_else(|err| panic!("{name} ideal window: {err}"));
         }
     }
+
+    #[test]
+    fn every_fixed_profile_has_an_ideal_window_on_every_phase() {
+        use crate::catalog_spec;
+        use policy_types::{CatalogId, ProfileId};
+        use workloads::{ideal_service, service_follows};
+
+        let profiles = [
+            ProfileId::Balanced,
+            ProfileId::Latency,
+            ProfileId::Throughput,
+            ProfileId::Reclaim,
+        ];
+        for profile in profiles {
+            let weights = catalog_spec(CatalogId::CpuV1).profile(profile).weights();
+            for phase in workloads::mixed_v1() {
+                let duty = phase.duty();
+                service_follows(ideal_service(duty, weights), duty, weights).unwrap_or_else(|err| {
+                    panic!("{} {} ideal window: {err}", profile.as_str(), phase.name)
+                });
+            }
+        }
+    }
 }
