@@ -133,6 +133,17 @@ pub fn service(class: u8) -> Option<u64> {
 	}
 }
 
+/// Class and accumulated service for one registration slot.
+/// `None` means the slot is empty or out of range.
+pub fn member(slot: usize) -> Option<(u8, u64)> {
+	let state = STATE.lock();
+	let member = state.members.get(slot)?;
+	if member.id.is_none() {
+		return None;
+	}
+	Some((member.class, member.service_us))
+}
+
 pub fn decide(
 	now: u64,
 	blocked_deadline: Option<u64>,

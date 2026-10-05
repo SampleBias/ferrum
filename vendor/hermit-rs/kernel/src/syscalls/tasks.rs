@@ -181,6 +181,25 @@ pub unsafe extern "C" fn sys_policy_read(class: u8, service_us: *mut u64) -> i32
 	}
 }
 
+#[cfg(feature = "ai-policy")]
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sys_policy_member(slot: u8, class: *mut u8, service_us: *mut u64) -> i32 {
+	if class.is_null() || !class.is_aligned() || service_us.is_null() || !service_us.is_aligned() {
+		return -1;
+	}
+	match crate::policy::member(usize::from(slot)) {
+		Some((member_class, member_service)) => {
+			unsafe {
+				class.write(member_class);
+				service_us.write(member_service);
+			}
+			0
+		}
+		None => -1,
+	}
+}
+
 #[cfg(feature = "newlib")]
 #[hermit_macro::system(errno)]
 #[unsafe(no_mangle)]
