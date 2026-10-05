@@ -21,6 +21,7 @@ from aik_controller.laya_offline import (
     model_state,
     resource_question,
 )
+from aik_controller.interval import judge
 from aik_controller.laya_pin import assess, checkpoint_dir, load_pin
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -175,6 +176,7 @@ def run_timed(root: Path, directory: Path) -> dict:
     report["torch"] = torch.__version__
     report["torch_threads"] = torch.get_num_threads()
     report["laya"] = getattr(laya, "__version__", "unknown")
+    report["declared"] = judge(report["warm"]["p99_us"], report["cold_us"])
     return report
 
 
@@ -201,6 +203,15 @@ def main(argv: list[str] | None = None) -> int:
         + f"p99_us={warm['p99_us']} max_us={warm['max_us']} "
         + f"budget_us={warm['budget_us']} fits_budget={warm['fits_budget']} "
         + f"rss_peak_kb={report['rss_peak_kb']}",
+        flush=True,
+    )
+    declared = report["declared"]
+    print(
+        "DECLARED "
+        + f"experiment={declared['experiment']} budget_us={declared['budget_us']} "
+        + f"headroom_us={declared['headroom_us']} fits_published={declared['fits_published']} "
+        + f"cold_fits={declared['cold_fits_budget']} "
+        + f"replaces_guest_deadline={declared['replaces_guest_deadline']}",
         flush=True,
     )
     if args.report:

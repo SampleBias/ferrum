@@ -1,0 +1,8 @@
+{
+  "id": "acceptance-2s-v0",
+  "host": "intel-i7-10750h",
+  "published_budget_us": 750000,
+  "budget_us": 2000000,
+  "replaces_guest_deadline": false,
+  "note": "Intel warmed p99 missed 750 ms and fits 2 s with one second left for transport and apply. The guest still seals snapshots with the published deadline. The office Ryzen host needs its own warmed pass before it uses this id."
+}
