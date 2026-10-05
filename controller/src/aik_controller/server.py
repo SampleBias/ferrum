@@ -125,12 +125,55 @@ def serve_once(conn: socket.socket, key: bytes, catalog: dict, thresholds: dict,
     )
 
     report = read_payload(conn, key)
+    return accept_scheduler_report(report, hello["boot_id"], session_id, snapshot["request_seq"], profile)
+
+
+def accept_scheduler_report(
+    report: dict, boot_id: str, session_id: str, request_seq: int, profile: str
+) -> int:
+    """Accept the guest frame that answers this proposal.
+
+    An `applied` frame is the scheduler activation record: generation, guest
+    timestamp, and lease. A `reject` frame is the scheduler dropping that same
+    proposal. Either one completes the session. A transport or identity failure
+    does not.
+    """
+    if report.get("boot_id") != boot_id or report.get("session_id") != session_id:
+        print("report identity mismatch", file=sys.stderr)
+        return 1
+    if report.get("request_seq") != request_seq:
+        print("report sequence mismatch", file=sys.stderr)
+        return 1
     kind = report.get("kind")
-    if kind == "applied" and report.get("profile") == profile:
+    if kind == "applied":
+        if report.get("profile") != profile:
+            print("applied profile does not match the proposal", file=sys.stderr)
+            return 1
+        previous = report.get("previous_generation")
+        generation = report.get("new_generation")
+        guest_us = report.get("activated_guest_us")
+        lease_until = report.get("lease_until_guest_us")
+        if not all(isinstance(value, int) for value in (previous, generation, guest_us, lease_until)):
+            print("applied acknowledgment is missing scheduler fields", file=sys.stderr)
+            return 1
+        if generation != previous + 1 or guest_us <= 0 or lease_until <= guest_us:
+            print("applied acknowledgment is not a scheduler activation", file=sys.stderr)
+            return 1
+        if report.get("desired_matches_actual") is not True:
+            print("applied acknowledgment has not converged", file=sys.stderr)
+            return 1
         print(
-            f"APPLIED profile={profile} generation={report['new_generation']}",
+            f"APPLIED profile={profile} generation={generation} previous={previous} "
+            f"guest_us={guest_us} lease_until={lease_until}",
             flush=True,
         )
+        return 0
+    if kind == "reject":
+        reason = report.get("reason")
+        if reason not in {"late", "stale_generation", "emergency"}:
+            print(f"unexpected reject {reason}", file=sys.stderr)
+            return 1
+        print(f"REJECTED reason={reason} seq={request_seq}", flush=True)
         return 0
     print(f"guest reported {kind} {report.get('reason', '')}", file=sys.stderr)
     return 1
@@ -161,7 +204,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         while True:
             conn, _addr = listener.accept()
-            conn.settimeout(5)
+            # The guest answers after the scheduler acknowledgment. A TCG
+            # one-second measurement can take longer than that on the host clock.
+            conn.settimeout(60)
             with conn:
                 try:
                     status = serve_once(conn, key, catalog, thresholds, identity)

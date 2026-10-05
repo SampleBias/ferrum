@@ -7,6 +7,7 @@ use std::env;
 use std::net::TcpStream;
 use std::process::ExitCode;
 
+#[cfg(not(target_os = "hermit"))]
 use policy_guest::exchange;
 use policy_types::BootId;
 
@@ -22,16 +23,8 @@ fn main() -> ExitCode {
     if env::args().skip(1).any(|arg| arg == "--fair-demo") {
         return fair_demo_exit();
     }
-    match run() {
-        Ok(applied) => {
-            println!(
-                "FERRUM_APPLIED profile={} generation={}",
-                applied.profile, applied.generation
-            );
-            if let Err(err) = actuate(&applied.profile, emergency, stage_race, stale, late) {
-                println!("FERRUM_FAIL {err}");
-                return ExitCode::from(1);
-            }
+    match run(emergency, stage_race, stale, late) {
+        Ok(()) => {
             println!("FERRUM_COMPLETE");
             ExitCode::SUCCESS
         }
@@ -42,25 +35,225 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<policy_guest::Applied, String> {
+fn guest_endpoint() -> Result<(String, BootId), String> {
     let mut controller = default_controller();
     let mut boot = BootId::from_hex("00112233445566778899aabbccddeeff").expect("boot id");
     for arg in env::args().skip(1) {
         if let Some(value) = arg.strip_prefix("--controller=") {
             controller = value.to_string();
         } else if let Some(value) = arg.strip_prefix("--boot-id=") {
-            boot = BootId::from_hex(value).map_err(|_| format!("bad boot id"))?;
+            boot = BootId::from_hex(value).map_err(|_| "bad boot id".to_string())?;
         } else if arg == "--emergency" || arg == "--stage-race" || arg == "--stale" || arg == "--late" {
         } else {
             return Err(format!("unknown argument {arg}"));
         }
     }
+    Ok((controller, boot))
+}
+
+/// Host build. There is no kernel scheduler, so the userspace engine's
+/// activation is the report. The Hermit build waits for the scheduler.
+#[cfg(not(target_os = "hermit"))]
+fn run(emergency: bool, stage_race: bool, stale: bool, late: bool) -> Result<(), String> {
+    let (controller, boot) = guest_endpoint()?;
     let mut stream = TcpStream::connect(&controller).map_err(|err| format!("connect {controller}: {err}"))?;
     let applied = exchange(&mut stream, boot, 3_000_000).map_err(|err| err.to_string())?;
-    // Hermit's TCP close waits until the socket is inactive. The mock
-    // controller has already exited, so that wait does not finish.
     std::mem::forget(stream);
-    Ok(applied)
+    println!(
+        "FERRUM_APPLIED profile={} generation={}",
+        applied.profile, applied.generation
+    );
+    actuate(&applied.profile, emergency, stage_race, stale, late)
+}
+
+/// Hermit build. The controller stays connected until the scheduler writes
+/// the acknowledgment for this proposal. Closing the socket hangs in Hermit
+/// after the peer has exited, so the stream is leaked for the rest of the run.
+///
+/// A missing controller is not a guest failure. The bridge gives the attempt
+/// two seconds, then the boot profile, which is balanced, runs the workload.
+#[cfg(target_os = "hermit")]
+fn run(emergency: bool, stage_race: bool, stale: bool, late: bool) -> Result<(), String> {
+    let (controller, boot) = guest_endpoint()?;
+    let mut stream = match connect_controller(&controller) {
+        Ok(stream) => stream,
+        Err(err) => {
+            println!("FERRUM_NO_CONTROLLER {err}");
+            return fallback_balanced();
+        }
+    };
+    let ticket = policy_guest::open_proposal(&mut stream, boot, 3_000_000).map_err(|err| err.to_string())?;
+    let result = actuate(&mut stream, &ticket, emergency, stage_race, stale, late);
+    std::mem::forget(stream);
+    result
+}
+
+/// Try the controller without letting a silent peer hold the boot path.
+/// The attempt runs on another thread because Hermit's connect waits inside
+/// the network executor until the handshake finishes or the peer refuses it.
+#[cfg(target_os = "hermit")]
+fn connect_controller(addr: &str) -> Result<TcpStream, String> {
+    use std::sync::mpsc;
+    use std::thread;
+
+    let addr = addr.to_string();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = tx.send(TcpStream::connect(addr));
+    });
+
+    unsafe extern "C" {
+        fn sys_usleep(usecs: u64);
+    }
+
+    let mut waited_us = 0u64;
+    loop {
+        match rx.try_recv() {
+            Ok(Ok(stream)) => return Ok(stream),
+            Ok(Err(err)) => return Err(err.to_string()),
+            Err(mpsc::TryRecvError::Empty) => {
+                if waited_us >= 2_000_000 {
+                    return Err("timed out".to_string());
+                }
+                unsafe { sys_usleep(50_000) };
+                waited_us = waited_us.saturating_add(50_000);
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                return Err("connect thread exited".to_string());
+            }
+        }
+    }
+}
+
+/// Boot weights are balanced. Nothing is staged, so generation stays at 1.
+#[cfg(target_os = "hermit")]
+fn fallback_balanced() -> Result<(), String> {
+    use std::hint::spin_loop;
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+    use std::thread;
+
+    const LATENCY: u8 = 1;
+    const BATCH: u8 = 2;
+    const MAINTENANCE: u8 = 3;
+
+    unsafe extern "C" {
+        fn sys_policy_register(class: u8) -> i32;
+        fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
+        fn sys_policy_generation(generation: *mut u64) -> i32;
+        fn sys_policy_read_ack(ack: *mut PolicyAck) -> i32;
+        fn sys_policy_staged() -> i32;
+        fn sys_usleep(usecs: u64);
+    }
+
+    fn generation() -> Result<u64, String> {
+        let mut generation = 0u64;
+        let rc = unsafe { sys_policy_generation(&mut generation) };
+        if rc == 0 {
+            Ok(generation)
+        } else {
+            Err(format!("generation returned {rc}"))
+        }
+    }
+
+    fn read_service(class: u8) -> Result<u64, String> {
+        let mut service_us = 0u64;
+        let rc = unsafe { sys_policy_read(class, &mut service_us) };
+        if rc == 0 {
+            Ok(service_us)
+        } else {
+            Err(format!("read class {class} returned {rc}"))
+        }
+    }
+
+    static READY: AtomicU32 = AtomicU32::new(0);
+    static FAILED: AtomicBool = AtomicBool::new(false);
+
+    for class in [LATENCY, BATCH, MAINTENANCE] {
+        thread::spawn(move || {
+            if unsafe { sys_policy_register(class) } == 0 {
+                READY.fetch_add(1, Ordering::Release);
+            } else {
+                FAILED.store(true, Ordering::Release);
+            }
+            loop {
+                spin_loop();
+            }
+        });
+    }
+
+    for _ in 0..40 {
+        if READY.load(Ordering::Acquire) == 3 || FAILED.load(Ordering::Acquire) {
+            break;
+        }
+        unsafe { sys_usleep(50_000) };
+    }
+    if FAILED.load(Ordering::Acquire) {
+        return Err("a worker could not register".to_string());
+    }
+    if READY.load(Ordering::Acquire) != 3 {
+        return Err("workers did not register".to_string());
+    }
+
+    let generation_at_boot = generation()?;
+    if generation_at_boot != 1 {
+        return Err(format!("fallback generation was {generation_at_boot}"));
+    }
+    if unsafe { sys_policy_staged() } != 0 {
+        return Err("fallback left a profile staged".to_string());
+    }
+    let mut ack = PolicyAck {
+        kind: 0,
+        reason: 0,
+        profile: 0,
+        _pad0: 0,
+        _pad1: 0,
+        previous_generation: 0,
+        generation: 0,
+        guest_us: 0,
+        lease_until_guest_us: 0,
+    };
+    let ack_rc = unsafe { sys_policy_read_ack(&mut ack) };
+    if ack_rc != 1 {
+        return Err(format!("fallback found a scheduler acknowledgment ({ack_rc})"));
+    }
+    println!("FERRUM_FALLBACK profile=balanced generation={generation_at_boot}");
+
+    let before = (
+        read_service(LATENCY)?,
+        read_service(BATCH)?,
+        read_service(MAINTENANCE)?,
+    );
+    unsafe { sys_usleep(1_000_000) };
+    let after = (
+        read_service(LATENCY)?,
+        read_service(BATCH)?,
+        read_service(MAINTENANCE)?,
+    );
+    let sample = (
+        after.0.saturating_sub(before.0),
+        after.1.saturating_sub(before.1),
+        after.2.saturating_sub(before.2),
+    );
+    println!(
+        "FERRUM_SCHED window=balanced latency={} batch={} maintenance={}",
+        sample.0, sample.1, sample.2
+    );
+    if generation()? != generation_at_boot {
+        return Err("fallback workload advanced the scheduler generation".to_string());
+    }
+    let sum = sample.0 + sample.1 + sample.2;
+    let near_even = sum > 800_000
+        && sample.0 > 0
+        && sample.1 > 0
+        && sample.2 > 0
+        && sample.0 * 20 < sum * 9
+        && sample.1 * 20 < sum * 9
+        && sample.2 * 20 < sum * 9;
+    if !near_even {
+        return Err("absent controller did not keep balanced service".to_string());
+    }
+    println!("FERRUM_FALLBACK_OK");
+    Ok(())
 }
 
 fn fair_demo_exit() -> ExitCode {
@@ -363,7 +556,63 @@ fn ack_profile_name(profile: u8) -> &'static str {
 }
 
 #[cfg(target_os = "hermit")]
-fn actuate(profile: &str, emergency: bool, stage_race: bool, stale: bool, late: bool) -> Result<(), String> {
+fn publish_scheduler(
+    stream: &mut TcpStream,
+    ticket: &policy_guest::ProposalTicket,
+    ack: &PolicyAck,
+) -> Result<(), String> {
+    use policy_types::RejectReason;
+
+    match ack.kind {
+        1 => {
+            if ack_profile_name(ack.profile) != ticket.profile.as_str() {
+                return Err("scheduler applied a different profile than the proposal".to_string());
+            }
+            println!(
+                "FERRUM_APPLIED profile={} previous={} generation={} guest_us={} lease_until={}",
+                ticket.profile.as_str(),
+                ack.previous_generation,
+                ack.generation,
+                ack.guest_us,
+                ack.lease_until_guest_us
+            );
+            policy_guest::report_applied(
+                stream,
+                ticket,
+                ack.previous_generation,
+                ack.generation,
+                ack.guest_us,
+                ack.lease_until_guest_us,
+            )
+            .map_err(|err| err.to_string())
+        }
+        3 | 4 => {
+            let reason = if ack.kind == 3 {
+                RejectReason::Emergency
+            } else {
+                match ack.reason {
+                    1 => RejectReason::Emergency,
+                    2 => RejectReason::Late,
+                    3 => RejectReason::StaleGeneration,
+                    other => return Err(format!("scheduler reject reason {other} has no protocol name")),
+                }
+            };
+            println!("FERRUM_REPORT kind=reject reason={}", reason.as_str());
+            policy_guest::report_reject(stream, ticket, reason).map_err(|err| err.to_string())
+        }
+        other => Err(format!("scheduler acknowledgment kind {other} does not answer the proposal")),
+    }
+}
+
+#[cfg(target_os = "hermit")]
+fn actuate(
+    stream: &mut TcpStream,
+    ticket: &policy_guest::ProposalTicket,
+    emergency: bool,
+    stage_race: bool,
+    stale: bool,
+    late: bool,
+) -> Result<(), String> {
     use std::hint::spin_loop;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::thread;
@@ -395,7 +644,8 @@ fn actuate(profile: &str, emergency: bool, stage_race: bool, stale: bool, late: 
         fn sys_usleep(usecs: u64);
     }
 
-    let id = ProfileId::parse(profile).ok_or_else(|| format!("unknown profile {profile}"))?;
+    let profile = ticket.profile.as_str();
+    let id = ticket.profile;
     let weights = catalog_spec(CatalogId::CpuV1).profile(id).weights();
 
     static READY: AtomicU32 = AtomicU32::new(0);
@@ -553,6 +803,7 @@ fn actuate(profile: &str, emergency: bool, stage_race: bool, stale: bool, late: 
         if ack.lease_until_guest_us != 0 {
             return Err("stale stage armed a lease".to_string());
         }
+        publish_scheduler(stream, ticket, &ack)?;
         println!("FERRUM_STALE_DROPPED");
         println!("FERRUM_SCHED_OK");
         return Ok(());
@@ -607,6 +858,7 @@ fn actuate(profile: &str, emergency: bool, stage_race: bool, stale: bool, late: 
         if ack.lease_until_guest_us != 0 {
             return Err("late stage armed a lease".to_string());
         }
+        publish_scheduler(stream, ticket, &ack)?;
         println!("FERRUM_LATE_DROPPED");
         println!("FERRUM_SCHED_OK");
         return Ok(());
@@ -629,6 +881,7 @@ fn actuate(profile: &str, emergency: bool, stage_race: bool, stale: bool, late: 
         if ack.lease_until_guest_us != 0 {
             return Err("emergency acknowledgment kept a profile lease".to_string());
         }
+        publish_scheduler(stream, ticket, &ack)?;
         // Acceptance stays open for the whole measurement. The scheduler has
         // to drop this stage because the override is in force.
         stage(5_000_000, generation()?)?;
@@ -677,7 +930,14 @@ fn actuate(profile: &str, emergency: bool, stage_race: bool, stale: bool, late: 
         return Ok(());
     }
 
-    stage(ACCEPTANCE_DEADLINE_US, generation()?)?;
+    let current = generation()?;
+    if ticket.base_generation != current {
+        return Err(format!(
+            "proposal base {} is not the scheduler generation {current}",
+            ticket.base_generation
+        ));
+    }
+    stage(ACCEPTANCE_DEADLINE_US, ticket.base_generation)?;
     unsafe { sys_usleep(20_000) };
     let generation = generation()?;
     if generation < 2 {
@@ -688,6 +948,7 @@ fn actuate(profile: &str, emergency: bool, stage_race: bool, stale: bool, late: 
     if ack.lease_until_guest_us <= ack.guest_us {
         return Err("applied acknowledgment has no lease".to_string());
     }
+    publish_scheduler(stream, ticket, &ack)?;
 
     let reclaim_share = |sample: (u64, u64, u64)| {
         let sum = sample.0 + sample.1 + sample.2;

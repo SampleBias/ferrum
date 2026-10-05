@@ -9,12 +9,12 @@ use std::time::Duration;
 
 use policy_core::{ActivateOutcome, Capture, EngineConfig, PolicyEngine, ProposalOutcome};
 use policy_types::{
-    BootId, CatalogId, Hash32, Hello, ObjectiveId, Observation, RunMode, CAP_CPU,
-    GUEST_MEMORY_BYTES, MAX_WORKLOAD_THREADS, TELEMETRY_VERSION,
+    BootId, CatalogId, Hash32, Hello, ObjectiveId, Observation, ProfileId, RejectReason, RunMode,
+    SessionId, CAP_CPU, GUEST_MEMORY_BYTES, MAX_WORKLOAD_THREADS, TELEMETRY_VERSION,
 };
 use policy_wire::{
-    decode_message, encode_applied, encode_hello, encode_snapshot, seal, Direction, FrameDecoder,
-    WireError, AppliedReport, Decoded,
+    decode_message, encode_applied, encode_hello, encode_reject, encode_snapshot, seal, Direction,
+    FrameDecoder, WireError, AppliedReport, Decoded, RejectReport,
 };
 
 /// 32 bytes of 0x11. Same bytes as configs/lab-psk.hex.
@@ -54,7 +54,96 @@ pub struct Applied {
     pub generation: u64,
 }
 
+/// The one proposal the controller has issued for this connection.
+///
+/// On Hermit the scheduler acknowledgment is the `applied` or `reject` frame.
+/// The host `exchange` helper still reports the userspace engine, which is the
+/// reference model and has no kernel scheduler behind it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProposalTicket {
+    pub boot_id: BootId,
+    pub session_id: SessionId,
+    pub request_seq: u64,
+    pub profile: ProfileId,
+    pub base_generation: u64,
+}
+
+struct Negotiated {
+    ticket: ProposalTicket,
+    engine: PolicyEngine,
+}
+
+pub fn open_proposal(
+    stream: &mut TcpStream,
+    boot_id: BootId,
+    now_us: u64,
+) -> Result<ProposalTicket, SessionError> {
+    Ok(negotiate(stream, boot_id, now_us)?.ticket)
+}
+
+/// Report a scheduler activation. `guest_us` and `lease_until_guest_us` are
+/// the kernel timer values from the acknowledgment, not the host engine clock.
+pub fn report_applied(
+    stream: &mut TcpStream,
+    ticket: &ProposalTicket,
+    previous_generation: u64,
+    generation: u64,
+    guest_us: u64,
+    lease_until_guest_us: u64,
+) -> Result<(), SessionError> {
+    let report = AppliedReport {
+        boot_id: ticket.boot_id,
+        session_id: ticket.session_id,
+        request_seq: ticket.request_seq,
+        previous_generation,
+        new_generation: generation,
+        profile: ticket.profile,
+        activated_guest_us: guest_us,
+        lease_until_guest_us,
+        desired_matches_actual: true,
+    };
+    send(stream, Direction::GuestToController, &encode_applied(&report)?)?;
+    stream.flush()?;
+    Ok(())
+}
+
+/// Report that the scheduler dropped the staged proposal.
+pub fn report_reject(
+    stream: &mut TcpStream,
+    ticket: &ProposalTicket,
+    reason: RejectReason,
+) -> Result<(), SessionError> {
+    let report = RejectReport {
+        boot_id: ticket.boot_id,
+        session_id: ticket.session_id,
+        request_seq: ticket.request_seq,
+        reason,
+    };
+    send(stream, Direction::GuestToController, &encode_reject(&report)?)?;
+    stream.flush()?;
+    Ok(())
+}
+
 pub fn exchange(stream: &mut TcpStream, boot_id: BootId, now_us: u64) -> Result<Applied, SessionError> {
+    let mut negotiated = negotiate(stream, boot_id, now_us)?;
+    let ActivateOutcome::Applied(ack) = negotiated.engine.activate(now_us) else {
+        return Err(SessionError::Protocol("proposal was not applied"));
+    };
+    report_applied(
+        stream,
+        &negotiated.ticket,
+        ack.previous_generation,
+        ack.generation,
+        ack.guest_us,
+        ack.lease_until_guest_us,
+    )?;
+    Ok(Applied {
+        profile: ack.profile.as_str().to_string(),
+        generation: ack.generation,
+    })
+}
+
+fn negotiate(stream: &mut TcpStream, boot_id: BootId, now_us: u64) -> Result<Negotiated, SessionError> {
     // Hermit rejects some POSIX socket options. The session still completes
     // without them; the host test keeps the timeouts when the calls succeed.
     let _ = stream.set_nodelay(true);
@@ -109,24 +198,15 @@ pub fn exchange(stream: &mut TcpStream, boot_id: BootId, now_us: u64) -> Result<
     if !matches!(engine.on_proposal(now_us, &proposal), ProposalOutcome::Staged) {
         return Err(SessionError::Protocol("proposal was not staged"));
     }
-    let ActivateOutcome::Applied(ack) = engine.activate(now_us) else {
-        return Err(SessionError::Protocol("proposal was not applied"));
-    };
-    let report = AppliedReport {
-        boot_id,
-        session_id: proposal.session_id,
-        request_seq: ack.request_seq,
-        previous_generation: ack.previous_generation,
-        new_generation: ack.generation,
-        profile: ack.profile,
-        activated_guest_us: ack.guest_us,
-        lease_until_guest_us: ack.lease_until_guest_us,
-        desired_matches_actual: ack.desired_matches_actual,
-    };
-    send(stream, Direction::GuestToController, &encode_applied(&report)?)?;
-    Ok(Applied {
-        profile: ack.profile.as_str().to_string(),
-        generation: ack.generation,
+    Ok(Negotiated {
+        ticket: ProposalTicket {
+            boot_id,
+            session_id: proposal.session_id,
+            request_seq: proposal.request_seq,
+            profile: proposal.profile,
+            base_generation: proposal.base_generation,
+        },
+        engine,
     })
 }
 
@@ -194,5 +274,12 @@ mod tests {
         let mut err = String::new();
         child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
         assert!(status.success(), "controller failed: {err}");
+        let log: String = lines.map(|line| line.unwrap()).collect::<Vec<_>>().join("\n");
+        assert!(
+            log.contains(
+                "APPLIED profile=latency generation=2 previous=1 guest_us=3000000 lease_until=6000000"
+            ),
+            "controller log did not record the activation clock: {log}"
+        );
     }
 }
