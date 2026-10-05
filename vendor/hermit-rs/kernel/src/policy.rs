@@ -23,6 +23,19 @@ const SYSTEM_BUDGET_US: u64 = 5_000;
 const MAX_MEMBERS: usize = 12;
 const MAX_WORKLOAD: usize = 8;
 const MAX_SYSTEM: usize = 4;
+const ACK_CAP: usize = 8;
+
+pub const ACK_APPLIED: u8 = 1;
+pub const ACK_LEASE_EXPIRED: u8 = 2;
+pub const ACK_EMERGENCY: u8 = 3;
+pub const ACK_REJECTED: u8 = 4;
+pub const ACK_REASON_NONE: u8 = 0;
+pub const ACK_REASON_EMERGENCY: u8 = 1;
+pub const ACK_REASON_LATE: u8 = 2;
+pub const PROFILE_BALANCED: u8 = 0;
+pub const PROFILE_LATENCY: u8 = 1;
+pub const PROFILE_THROUGHPUT: u8 = 2;
+pub const PROFILE_RECLAIM: u8 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Choice {
@@ -37,6 +50,34 @@ struct Member {
 	class: u8,
 	ticket: u64,
 	service_us: u64,
+}
+
+#[derive(Clone, Copy)]
+pub struct SchedAck {
+	pub kind: u8,
+	pub reason: u8,
+	pub profile: u8,
+	pub previous_generation: u64,
+	pub generation: u64,
+	pub guest_us: u64,
+	pub lease_until_guest_us: u64,
+}
+
+const EMPTY_ACK: SchedAck = SchedAck {
+	kind: 0,
+	reason: 0,
+	profile: 0,
+	previous_generation: 0,
+	generation: 0,
+	guest_us: 0,
+	lease_until_guest_us: 0,
+};
+
+struct Pending {
+	occupied: bool,
+	weights: [u32; 3],
+	accept_until: u64,
+	lease_until: u64,
 }
 
 struct State {
@@ -59,6 +100,14 @@ struct State {
 	/// Local override. While set, expiry records the lease as expired and
 	/// leaves the reclaim weights in place.
 	emergency: bool,
+	/// Scheduler-owned generation. Boot is 1. Activation, emergency, and
+	/// balanced fallback each increment it. A dropped stage does not.
+	generation: u64,
+	staged: Pending,
+	ack_head: usize,
+	ack_len: usize,
+	acks_dropped: u64,
+	acks: [SchedAck; ACK_CAP],
 }
 
 static STATE: hermit_sync::InterruptTicketMutex<State> = hermit_sync::InterruptTicketMutex::new(
@@ -83,6 +132,17 @@ static STATE: hermit_sync::InterruptTicketMutex<State> = hermit_sync::InterruptT
 		lease_until: 0,
 		lease_expired: false,
 		emergency: false,
+		generation: 1,
+		staged: Pending {
+			occupied: false,
+			weights: [0, 0, 0],
+			accept_until: 0,
+			lease_until: 0,
+		},
+		ack_head: 0,
+		ack_len: 0,
+		acks_dropped: 0,
+		acks: [EMPTY_ACK; ACK_CAP],
 	},
 );
 
@@ -152,11 +212,75 @@ pub fn arm_lease(now: u64, duration_us: u64) -> i32 {
 
 /// Install the catalog `reclaim` weights and hold them across lease expiry.
 /// A second call leaves the override in place. There is no syscall that clears it.
-pub fn install_emergency() -> i32 {
+/// Any staged profile is discarded here so a scheduling entry cannot apply it later.
+pub fn install_emergency(now: u64) -> i32 {
 	let mut state = STATE.lock();
+	state.staged.occupied = false;
+	if state.emergency {
+		return 0;
+	}
+	let previous = state.generation;
 	state.emergency = true;
 	state.weights = [2, 2, 6];
+	state.generation = state.generation.saturating_add(1);
+	let generation = state.generation;
+	let lease_until = state.lease_until;
+	push_ack(
+		&mut state,
+		SchedAck {
+			kind: ACK_EMERGENCY,
+			reason: ACK_REASON_NONE,
+			profile: PROFILE_RECLAIM,
+			previous_generation: previous,
+			generation,
+			guest_us: now,
+			lease_until_guest_us: lease_until,
+		},
+	);
 	0
+}
+
+/// Record a profile for the scheduler to install at its next entry.
+/// This does not change the weights in force. A stage is stored even during
+/// an emergency; the scheduling entry drops it without applying it.
+pub fn stage(
+	now: u64,
+	latency: u32,
+	batch: u32,
+	maintenance: u32,
+	accept_us: u64,
+	lease_us: u64,
+) -> i32 {
+	if latency == 0 || batch == 0 || maintenance == 0 || accept_us == 0 || lease_us == 0 {
+		return -1;
+	}
+	let mut state = STATE.lock();
+	state.staged = Pending {
+		occupied: true,
+		weights: [latency, batch, maintenance],
+		accept_until: now.saturating_add(accept_us),
+		lease_until: now.saturating_add(lease_us),
+	};
+	0
+}
+
+pub fn staged() -> bool {
+	STATE.lock().staged.occupied
+}
+
+pub fn generation() -> u64 {
+	STATE.lock().generation
+}
+
+pub fn pop_ack() -> Option<SchedAck> {
+	let mut state = STATE.lock();
+	if state.ack_len == 0 {
+		return None;
+	}
+	let ack = state.acks[state.ack_head];
+	state.ack_head = (state.ack_head + 1) % ACK_CAP;
+	state.ack_len -= 1;
+	Some(ack)
 }
 
 pub fn lease_expired() -> bool {
@@ -197,6 +321,7 @@ pub fn decide(
 	let mut state = STATE.lock();
 	if !state.active {
 		enforce_lease(&mut state, now);
+		activate_staged(&mut state, now);
 		return (Choice::Fallback, lease_wakeup(now, &state));
 	}
 	account(
@@ -207,6 +332,7 @@ pub fn decide(
 		bill_current,
 	);
 	enforce_lease(&mut state, now);
+	activate_staged(&mut state, now);
 
 	let mut runnable = [(TaskId::from(-1), 0u8, false); MAX_MEMBERS];
 	let mut n = 0;
@@ -282,12 +408,102 @@ fn enforce_lease(state: &mut State, now: u64) {
 	if state.lease_until == 0 || now < state.lease_until {
 		return;
 	}
+	state.staged.occupied = false;
 	state.lease_until = 0;
 	state.lease_expired = true;
 	if state.emergency {
 		return;
 	}
+	let previous = state.generation;
 	state.weights = [1, 1, 1];
+	state.generation = state.generation.saturating_add(1);
+	let generation = state.generation;
+	push_ack(
+		state,
+		SchedAck {
+			kind: ACK_LEASE_EXPIRED,
+			reason: ACK_REASON_NONE,
+			profile: PROFILE_BALANCED,
+			previous_generation: previous,
+			generation,
+			guest_us: now,
+			lease_until_guest_us: 0,
+		},
+	);
+}
+
+/// Install a staged profile after the outgoing slice has been charged.
+/// An emergency or a missed acceptance deadline drops the stage.
+fn activate_staged(state: &mut State, now: u64) {
+	if !state.staged.occupied {
+		return;
+	}
+	if state.emergency || now > state.staged.accept_until {
+		let reason = if state.emergency {
+			ACK_REASON_EMERGENCY
+		} else {
+			ACK_REASON_LATE
+		};
+		let generation = state.generation;
+		let profile = profile_code(state.weights);
+		let lease_until = state.lease_until;
+		state.staged.occupied = false;
+		push_ack(
+			state,
+			SchedAck {
+				kind: ACK_REJECTED,
+				reason,
+				profile,
+				previous_generation: generation,
+				generation,
+				guest_us: now,
+				lease_until_guest_us: lease_until,
+			},
+		);
+		return;
+	}
+	let previous = state.generation;
+	let weights = state.staged.weights;
+	let lease_until = state.staged.lease_until;
+	state.weights = weights;
+	state.lease_until = lease_until;
+	state.lease_expired = false;
+	state.generation = state.generation.saturating_add(1);
+	state.staged.occupied = false;
+	let generation = state.generation;
+	push_ack(
+		state,
+		SchedAck {
+			kind: ACK_APPLIED,
+			reason: ACK_REASON_NONE,
+			profile: profile_code(weights),
+			previous_generation: previous,
+			generation,
+			guest_us: now,
+			lease_until_guest_us: lease_until,
+		},
+	);
+}
+
+fn profile_code(weights: [u32; 3]) -> u8 {
+	match weights {
+		[1, 1, 1] => PROFILE_BALANCED,
+		[6, 2, 2] => PROFILE_LATENCY,
+		[2, 6, 2] => PROFILE_THROUGHPUT,
+		[2, 2, 6] => PROFILE_RECLAIM,
+		_ => 255,
+	}
+}
+
+fn push_ack(state: &mut State, ack: SchedAck) {
+	if state.ack_len == ACK_CAP {
+		state.ack_head = (state.ack_head + 1) % ACK_CAP;
+		state.ack_len -= 1;
+		state.acks_dropped = state.acks_dropped.saturating_add(1);
+	}
+	let index = (state.ack_head + state.ack_len) % ACK_CAP;
+	state.acks[index] = ack;
+	state.ack_len += 1;
 }
 
 fn lease_wakeup(now: u64, state: &State) -> Option<u64> {

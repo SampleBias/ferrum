@@ -13,6 +13,7 @@ use policy_types::BootId;
 fn main() -> ExitCode {
     println!("FERRUM_START policy-guest");
     let emergency = env::args().skip(1).any(|arg| arg == "--emergency");
+    let stage_race = env::args().skip(1).any(|arg| arg == "--stage-race");
     if env::args().skip(1).any(|arg| arg == "--fair-progress") {
         return fair_progress_exit();
     }
@@ -25,7 +26,7 @@ fn main() -> ExitCode {
                 "FERRUM_APPLIED profile={} generation={}",
                 applied.profile, applied.generation
             );
-            if let Err(err) = actuate(&applied.profile, emergency) {
+            if let Err(err) = actuate(&applied.profile, emergency, stage_race) {
                 println!("FERRUM_FAIL {err}");
                 return ExitCode::from(1);
             }
@@ -47,7 +48,7 @@ fn run() -> Result<policy_guest::Applied, String> {
             controller = value.to_string();
         } else if let Some(value) = arg.strip_prefix("--boot-id=") {
             boot = BootId::from_hex(value).map_err(|_| format!("bad boot id"))?;
-        } else if arg == "--emergency" {
+        } else if arg == "--emergency" || arg == "--stage-race" {
         } else {
             return Err(format!("unknown argument {arg}"));
         }
@@ -313,13 +314,59 @@ fn fair_progress() -> Result<(), String> {
 }
 
 #[cfg(target_os = "hermit")]
-fn actuate(profile: &str, emergency: bool) -> Result<(), String> {
+#[repr(C)]
+struct PolicyAck {
+    kind: u8,
+    reason: u8,
+    profile: u8,
+    _pad0: u8,
+    _pad1: u32,
+    previous_generation: u64,
+    generation: u64,
+    guest_us: u64,
+    lease_until_guest_us: u64,
+}
+
+#[cfg(target_os = "hermit")]
+fn ack_kind_name(kind: u8) -> &'static str {
+    match kind {
+        1 => "applied",
+        2 => "lease_expired",
+        3 => "emergency",
+        4 => "rejected",
+        _ => "unknown",
+    }
+}
+
+#[cfg(target_os = "hermit")]
+fn ack_reason_name(reason: u8) -> &'static str {
+    match reason {
+        0 => "none",
+        1 => "emergency",
+        2 => "late",
+        _ => "unknown",
+    }
+}
+
+#[cfg(target_os = "hermit")]
+fn ack_profile_name(profile: u8) -> &'static str {
+    match profile {
+        0 => "balanced",
+        1 => "latency",
+        2 => "throughput",
+        3 => "reclaim",
+        _ => "unknown",
+    }
+}
+
+#[cfg(target_os = "hermit")]
+fn actuate(profile: &str, emergency: bool, stage_race: bool) -> Result<(), String> {
     use std::hint::spin_loop;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::thread;
 
     use policy_core::catalog_spec;
-    use policy_types::{CatalogId, ProfileId, PROFILE_LEASE_US};
+    use policy_types::{CatalogId, ProfileId, ACCEPTANCE_DEADLINE_US, PROFILE_LEASE_US};
 
     const LATENCY: u8 = 1;
     const BATCH: u8 = 2;
@@ -328,9 +375,18 @@ fn actuate(profile: &str, emergency: bool) -> Result<(), String> {
     unsafe extern "C" {
         fn sys_policy_register(class: u8) -> i32;
         fn sys_policy_set_weights(latency: u32, batch: u32, maintenance: u32) -> i32;
-        fn sys_policy_arm_lease(duration_us: u64) -> i32;
         fn sys_policy_lease_expired() -> i32;
         fn sys_policy_install_emergency() -> i32;
+        fn sys_policy_stage(
+            latency: u32,
+            batch: u32,
+            maintenance: u32,
+            accept_us: u64,
+            lease_us: u64,
+        ) -> i32;
+        fn sys_policy_staged() -> i32;
+        fn sys_policy_generation(generation: *mut u64) -> i32;
+        fn sys_policy_read_ack(ack: *mut PolicyAck) -> i32;
         fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
         fn sys_usleep(usecs: u64);
     }
@@ -367,13 +423,156 @@ fn actuate(profile: &str, emergency: bool) -> Result<(), String> {
         return Err("workers did not register".to_string());
     }
 
-    let rc = unsafe { sys_policy_set_weights(weights[0], weights[1], weights[2]) };
-    if rc != 0 {
-        return Err(format!("weights returned {rc}"));
+    let stage = |accept_us: u64| -> Result<(), String> {
+        let rc = unsafe {
+            sys_policy_stage(
+                weights[0],
+                weights[1],
+                weights[2],
+                accept_us,
+                PROFILE_LEASE_US,
+            )
+        };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(format!("stage returned {rc}"))
+        }
+    };
+    let generation = || -> Result<u64, String> {
+        let mut generation = 0u64;
+        let rc = unsafe { sys_policy_generation(&mut generation) };
+        if rc == 0 {
+            Ok(generation)
+        } else {
+            Err(format!("generation returned {rc}"))
+        }
+    };
+    let pull_ack = || -> Result<Option<PolicyAck>, String> {
+        let mut ack = PolicyAck {
+            kind: 0,
+            reason: 0,
+            profile: 0,
+            _pad0: 0,
+            _pad1: 0,
+            previous_generation: 0,
+            generation: 0,
+            guest_us: 0,
+            lease_until_guest_us: 0,
+        };
+        let rc = unsafe { sys_policy_read_ack(&mut ack) };
+        if rc == 0 {
+            Ok(Some(ack))
+        } else if rc == 1 {
+            Ok(None)
+        } else {
+            Err(format!("read ack returned {rc}"))
+        }
+    };
+    let require_ack = |kind: u8, reason: u8, profile: u8, previous: u64, generation: u64| -> Result<PolicyAck, String> {
+        let Some(ack) = pull_ack()? else {
+            return Err("scheduler wrote no acknowledgment".to_string());
+        };
+        println!(
+            "FERRUM_ACK kind={} reason={} profile={} previous={} generation={} guest_us={} lease_until={}",
+            ack_kind_name(ack.kind),
+            ack_reason_name(ack.reason),
+            ack_profile_name(ack.profile),
+            ack.previous_generation,
+            ack.generation,
+            ack.guest_us,
+            ack.lease_until_guest_us
+        );
+        if ack.kind != kind
+            || ack.reason != reason
+            || ack.profile != profile
+            || ack.previous_generation != previous
+            || ack.generation != generation
+            || ack.guest_us == 0
+        {
+            return Err("scheduler acknowledgment did not match".to_string());
+        }
+        if pull_ack()?.is_some() {
+            return Err("scheduler wrote an extra acknowledgment".to_string());
+        }
+        Ok(ack)
+    };
+
+    if stage_race {
+        stage(ACCEPTANCE_DEADLINE_US)?;
+        let rc = unsafe { sys_policy_install_emergency() };
+        if rc != 0 {
+            return Err(format!("install emergency returned {rc}"));
+        }
+        if unsafe { sys_policy_staged() } != 0 {
+            return Err("emergency left the staged profile in place".to_string());
+        }
+        println!(
+            "FERRUM_EMERGENCY generation={}",
+            generation()?
+        );
+        let ack = require_ack(3, 0, 3, 1, 2)?;
+        if ack.lease_until_guest_us != 0 {
+            return Err("emergency acknowledgment kept a profile lease".to_string());
+        }
+        // Acceptance stays open for the whole measurement. The scheduler has
+        // to drop this stage because the override is in force.
+        stage(5_000_000)?;
+        let before = |class: u8| -> Result<u64, String> {
+            let mut service_us = 0u64;
+            let rc = unsafe { sys_policy_read(class, &mut service_us) };
+            if rc == 0 {
+                Ok(service_us)
+            } else {
+                Err(format!("read class {class} returned {rc}"))
+            }
+        };
+        let read = before;
+        let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+        unsafe { sys_usleep(1_000_000) };
+        let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+        let held = (
+            after.0.saturating_sub(before.0),
+            after.1.saturating_sub(before.1),
+            after.2.saturating_sub(before.2),
+        );
+        println!(
+            "FERRUM_SCHED window=reclaim latency={} batch={} maintenance={}",
+            held.0, held.1, held.2
+        );
+        if unsafe { sys_policy_staged() } != 0 {
+            return Err("scheduler left the staged profile in place".to_string());
+        }
+        let ack = require_ack(4, 1, 3, 2, 2)?;
+        if ack.lease_until_guest_us != 0 {
+            return Err("dropped stage armed a lease".to_string());
+        }
+        println!("FERRUM_STAGE_DROPPED");
+        let sum = held.0 + held.1 + held.2;
+        let reclaim = sum > 0
+            && held.0 > 0
+            && held.1 > 0
+            && held.2 > 0
+            && held.2 > held.0
+            && held.2 > held.1
+            && held.2 * 20 > sum * 9;
+        if !reclaim {
+            return Err("staged profile replaced the emergency override".to_string());
+        }
+        println!("FERRUM_SCHED_OK");
+        return Ok(());
     }
-    let rc = unsafe { sys_policy_arm_lease(PROFILE_LEASE_US) };
-    if rc != 0 {
-        return Err(format!("arm lease returned {rc}"));
+
+    stage(ACCEPTANCE_DEADLINE_US)?;
+    unsafe { sys_usleep(20_000) };
+    let generation = generation()?;
+    if generation < 2 {
+        return Err(format!("scheduler did not activate the staged profile (generation {generation})"));
+    }
+    println!("FERRUM_ACTIVATED generation={generation}");
+    let ack = require_ack(1, 0, 1, 1, 2)?;
+    if ack.lease_until_guest_us <= ack.guest_us {
+        return Err("applied acknowledgment has no lease".to_string());
     }
 
     let reclaim_share = |sample: (u64, u64, u64)| {
@@ -479,6 +678,10 @@ fn actuate(profile: &str, emergency: bool) -> Result<(), String> {
     if unsafe { sys_policy_lease_expired() } != 1 {
         return Err("lease did not expire in the kernel".to_string());
     }
+    let ack = require_ack(2, 0, 0, 2, 3)?;
+    if ack.lease_until_guest_us != 0 {
+        return Err("lease expiry acknowledgment still has a lease".to_string());
+    }
     let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
     unsafe { sys_usleep(1_000_000) };
     let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
@@ -508,7 +711,7 @@ fn actuate(profile: &str, emergency: bool) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "hermit"))]
-fn actuate(_profile: &str, _emergency: bool) -> Result<(), String> {
+fn actuate(_profile: &str, _emergency: bool, _stage_race: bool) -> Result<(), String> {
     Ok(())
 }
 

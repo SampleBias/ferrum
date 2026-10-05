@@ -188,7 +188,81 @@ pub extern "C" fn sys_policy_lease_expired() -> i32 {
 #[hermit_macro::system]
 #[unsafe(no_mangle)]
 pub extern "C" fn sys_policy_install_emergency() -> i32 {
-	crate::policy::install_emergency()
+	let now = arch::processor::get_timer_ticks();
+	crate::policy::install_emergency(now)
+}
+
+#[repr(C)]
+struct PolicyAckOut {
+	kind: u8,
+	reason: u8,
+	profile: u8,
+	_pad0: u8,
+	_pad1: u32,
+	previous_generation: u64,
+	generation: u64,
+	guest_us: u64,
+	lease_until_guest_us: u64,
+}
+
+#[cfg(feature = "ai-policy")]
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sys_policy_read_ack(out: *mut PolicyAckOut) -> i32 {
+	if out.is_null() || !out.is_aligned() {
+		return -1;
+	}
+	match crate::policy::pop_ack() {
+		Some(ack) => {
+			unsafe {
+				out.write(PolicyAckOut {
+					kind: ack.kind,
+					reason: ack.reason,
+					profile: ack.profile,
+					_pad0: 0,
+					_pad1: 0,
+					previous_generation: ack.previous_generation,
+					generation: ack.generation,
+					guest_us: ack.guest_us,
+					lease_until_guest_us: ack.lease_until_guest_us,
+				});
+			}
+			0
+		}
+		None => 1,
+	}
+}
+
+#[cfg(feature = "ai-policy")]
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
+pub extern "C" fn sys_policy_stage(
+	latency: u32,
+	batch: u32,
+	maintenance: u32,
+	accept_us: u64,
+	lease_us: u64,
+) -> i32 {
+	let now = arch::processor::get_timer_ticks();
+	crate::policy::stage(now, latency, batch, maintenance, accept_us, lease_us)
+}
+
+#[cfg(feature = "ai-policy")]
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
+pub extern "C" fn sys_policy_staged() -> i32 {
+	i32::from(crate::policy::staged())
+}
+
+#[cfg(feature = "ai-policy")]
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sys_policy_generation(generation: *mut u64) -> i32 {
+	if generation.is_null() || !generation.is_aligned() {
+		return -1;
+	}
+	unsafe { generation.write(crate::policy::generation()) };
+	0
 }
 
 #[cfg(feature = "ai-policy")]
