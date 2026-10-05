@@ -317,7 +317,7 @@ fn actuate(profile: &str) -> Result<(), String> {
     use std::thread;
 
     use policy_core::catalog_spec;
-    use policy_types::{CatalogId, ProfileId};
+    use policy_types::{CatalogId, ProfileId, PROFILE_LEASE_US};
 
     const LATENCY: u8 = 1;
     const BATCH: u8 = 2;
@@ -326,6 +326,8 @@ fn actuate(profile: &str) -> Result<(), String> {
     unsafe extern "C" {
         fn sys_policy_register(class: u8) -> i32;
         fn sys_policy_set_weights(latency: u32, batch: u32, maintenance: u32) -> i32;
+        fn sys_policy_arm_lease(duration_us: u64) -> i32;
+        fn sys_policy_lease_expired() -> i32;
         fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
         fn sys_usleep(usecs: u64);
     }
@@ -366,6 +368,10 @@ fn actuate(profile: &str) -> Result<(), String> {
     if rc != 0 {
         return Err(format!("weights returned {rc}"));
     }
+    let rc = unsafe { sys_policy_arm_lease(PROFILE_LEASE_US) };
+    if rc != 0 {
+        return Err(format!("arm lease returned {rc}"));
+    }
 
     let read = |class: u8| -> Result<u64, String> {
         let mut service_us = 0u64;
@@ -398,6 +404,40 @@ fn actuate(profile: &str) -> Result<(), String> {
     };
     if !served || !directed {
         return Err("applied profile did not change class service".to_string());
+    }
+    if id == ProfileId::Balanced {
+        println!("FERRUM_SCHED_OK");
+        return Ok(());
+    }
+
+    // The kernel, not this thread, installs balanced weights when the lease ends.
+    unsafe { sys_usleep(PROFILE_LEASE_US) };
+    if unsafe { sys_policy_lease_expired() } != 1 {
+        return Err("lease did not expire in the kernel".to_string());
+    }
+    let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    unsafe { sys_usleep(1_000_000) };
+    let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    let fallback = (
+        after.0.saturating_sub(before.0),
+        after.1.saturating_sub(before.1),
+        after.2.saturating_sub(before.2),
+    );
+    println!(
+        "FERRUM_SCHED window=balanced latency={} batch={} maintenance={}",
+        fallback.0, fallback.1, fallback.2
+    );
+    println!("FERRUM_LEASE_EXPIRED");
+    let sum = fallback.0 + fallback.1 + fallback.2;
+    let near_even = sum > 0
+        && fallback.0 > 0
+        && fallback.1 > 0
+        && fallback.2 > 0
+        && fallback.0 * 20 < sum * 9
+        && fallback.1 * 20 < sum * 9
+        && fallback.2 * 20 < sum * 9;
+    if !near_even {
+        return Err("expired lease did not return service to balanced".to_string());
     }
     println!("FERRUM_SCHED_OK");
     Ok(())

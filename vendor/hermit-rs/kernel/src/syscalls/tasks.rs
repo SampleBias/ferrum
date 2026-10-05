@@ -168,6 +168,25 @@ pub extern "C" fn sys_policy_set_weights(latency: u32, batch: u32, maintenance: 
 #[cfg(feature = "ai-policy")]
 #[hermit_macro::system]
 #[unsafe(no_mangle)]
+pub extern "C" fn sys_policy_arm_lease(duration_us: u64) -> i32 {
+	let now = arch::processor::get_timer_ticks();
+	let result = crate::policy::arm_lease(now, duration_us);
+	if result == 0 {
+		arch::set_oneshot_timer(Some(now.saturating_add(duration_us)));
+	}
+	result
+}
+
+#[cfg(feature = "ai-policy")]
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
+pub extern "C" fn sys_policy_lease_expired() -> i32 {
+	i32::from(crate::policy::lease_expired())
+}
+
+#[cfg(feature = "ai-policy")]
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn sys_policy_read(class: u8, service_us: *mut u64) -> i32 {
 	if service_us.is_null() || !service_us.is_aligned() {
 		return -1;

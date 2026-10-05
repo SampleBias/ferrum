@@ -52,6 +52,10 @@ struct State {
 	system_charged: u64,
 	was_runnable: [bool; 3],
 	active: bool,
+	/// Absolute guest time at which the active weights fall back to balanced.
+	/// Zero means no lease is armed.
+	lease_until: u64,
+	lease_expired: bool,
 }
 
 static STATE: hermit_sync::InterruptTicketMutex<State> = hermit_sync::InterruptTicketMutex::new(
@@ -73,6 +77,8 @@ static STATE: hermit_sync::InterruptTicketMutex<State> = hermit_sync::InterruptT
 		system_charged: 0,
 		was_runnable: [false; 3],
 		active: false,
+		lease_until: 0,
+		lease_expired: false,
 	},
 );
 
@@ -122,6 +128,22 @@ pub fn set_weights(latency: u32, batch: u32, maintenance: u32) -> i32 {
 	0
 }
 
+/// Arm a one-shot fallback to balanced weights. `duration_us` is measured
+/// from `now` on the guest timer. The scheduler applies the fallback itself.
+pub fn arm_lease(now: u64, duration_us: u64) -> i32 {
+	if duration_us == 0 {
+		return -1;
+	}
+	let mut state = STATE.lock();
+	state.lease_until = now.saturating_add(duration_us);
+	state.lease_expired = false;
+	0
+}
+
+pub fn lease_expired() -> bool {
+	STATE.lock().lease_expired
+}
+
 pub fn service(class: u8) -> Option<u64> {
 	let state = STATE.lock();
 	match class {
@@ -155,7 +177,8 @@ pub fn decide(
 ) -> (Choice, Option<u64>) {
 	let mut state = STATE.lock();
 	if !state.active {
-		return (Choice::Fallback, None);
+		enforce_lease(&mut state, now);
+		return (Choice::Fallback, lease_wakeup(now, &state));
 	}
 	account(
 		&mut state,
@@ -164,6 +187,7 @@ pub fn decide(
 		current_class,
 		bill_current,
 	);
+	enforce_lease(&mut state, now);
 
 	let mut runnable = [(TaskId::from(-1), 0u8, false); MAX_MEMBERS];
 	let mut n = 0;
@@ -180,7 +204,7 @@ pub fn decide(
 		}
 	}
 	if n == 0 {
-		return (Choice::Fallback, None);
+		return (Choice::Fallback, soonest(blocked_deadline, lease_wakeup(now, &state)));
 	}
 
 	let mut workload_runnable = [false; 3];
@@ -198,7 +222,7 @@ pub fn decide(
 		pick_workload(&state, runnable)
 	};
 	let Some((id, class)) = chosen else {
-		return (Choice::Fallback, None);
+		return (Choice::Fallback, soonest(blocked_deadline, lease_wakeup(now, &state)));
 	};
 	if let Some(index) = rr_index(class) {
 		if let Some(ticket) = ticket_of(&state, id) {
@@ -222,10 +246,41 @@ fn preempt_at(now: u64, blocked_deadline: Option<u64>, state: &State, class: u8)
 			slice = slice.min(remain);
 		}
 	}
-	let quantum = now.saturating_add(slice);
-	match blocked_deadline {
-		Some(blocked) => quantum.min(blocked),
-		None => quantum,
+	let mut when = now.saturating_add(slice);
+	if let Some(blocked) = blocked_deadline {
+		when = when.min(blocked);
+	}
+	if state.lease_until > now {
+		when = when.min(state.lease_until);
+	}
+	when
+}
+
+/// After the current slice has been charged, an elapsed lease installs
+/// balanced weights. Virtual runtime is left in place.
+fn enforce_lease(state: &mut State, now: u64) {
+	if state.lease_until == 0 || now < state.lease_until {
+		return;
+	}
+	state.weights = [1, 1, 1];
+	state.lease_until = 0;
+	state.lease_expired = true;
+}
+
+fn lease_wakeup(now: u64, state: &State) -> Option<u64> {
+	if state.lease_until > now {
+		Some(state.lease_until)
+	} else {
+		None
+	}
+}
+
+fn soonest(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+	match (left, right) {
+		(Some(left), Some(right)) => Some(left.min(right)),
+		(Some(left), None) => Some(left),
+		(None, Some(right)) => Some(right),
+		(None, None) => None,
 	}
 }
 
