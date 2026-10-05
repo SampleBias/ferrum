@@ -1,0 +1,21 @@
+[package]
+name = "policy-guest"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+policy-core = { path = "../../crates/policy-core" }
+policy-types = { path = "../../crates/policy-types" }
+policy-wire = { path = "../../crates/policy-wire" }
+
+[target.'cfg(target_os = "hermit")'.dependencies]
+hermit = { git = "https://github.com/hermit-os/hermit-rs.git", tag = "hermit-0.13.0", default-features = false, features = [
+    "acpi",
+    "fsgsbase",
+    "kernel-stack",
+    "pci",
+    "pci-ids",
+    "tcp",
+    "virtio-net",
+] }

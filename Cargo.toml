@@ -6,6 +6,7 @@ members = [
     "crates/policy-wire",
     "crates/hermit-policy-abi",
     "crates/workloads",
+    "apps/policy-guest",
 ]
 exclude = ["bootstrap"]
 

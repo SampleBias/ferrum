@@ -45,6 +45,20 @@ if [[ -n "$serial_path" ]]; then
   serial_arg=(-serial "file:${serial_path}")
 fi
 
+net_arg=()
+if [[ "${AIK_NET:-0}" == "1" ]]; then
+  net_arg=(
+    -nic none
+    -netdev user,id=net0,net=10.0.2.0/24,host=10.0.2.2,ipv6=off
+    -device virtio-net-pci,netdev=net0,disable-legacy=on
+  )
+fi
+
+append_arg=()
+if [[ -n "${AIK_APPEND:-}" ]]; then
+  append_arg=(-append "$AIK_APPEND")
+fi
+
 # timeout sends SIGTERM to its direct child. Do not wrap QEMU in another shell.
 timeout --foreground "$timeout_s" qemu-system-x86_64 \
   -machine pc "${accel_arg[@]}" \
@@ -53,6 +67,8 @@ timeout --foreground "$timeout_s" qemu-system-x86_64 \
   -display none "${serial_arg[@]}" -monitor none \
   -no-reboot \
   -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+  "${net_arg[@]}" \
+  "${append_arg[@]}" \
   -kernel "$AIK_LOADER" \
   -initrd "$AIK_GUEST"
 raw_status=$?

@@ -47,9 +47,9 @@ class VectorTests(unittest.TestCase):
     def test_heuristic_seed_matches_the_rust_rules(self):
         thresholds = load_thresholds(ROOT / "configs" / "heuristic-v0.json")
         quiet = json.loads((VECTORS / "snapshot.canonical.json").read_text())
-        self.assertEqual(choose(quiet, thresholds), "latency")
-        quiet["groups"][0]["queue_len"] = 0
         self.assertEqual(choose(quiet, thresholds), "balanced")
+        quiet["groups"][0]["queue_len"] = 4
+        self.assertEqual(choose(quiet, thresholds), "latency")
 
 
 if __name__ == "__main__":

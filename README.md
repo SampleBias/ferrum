@@ -37,4 +37,6 @@ The expanded proof of concept delegates three defined policy domains: CPU alloca
 
 Host policy crates now implement the catalog, lease state machine, scheduler reference model, and authenticated frames. `cargo test --workspace` exercises those on Linux. QEMU 11.1.1 is installed and `tools/run-qemu.sh` selects TCG or KVM explicitly. This machine is an AMD Ryzen 5 1600 with AMD-V; `kvm_amd` is loaded and `/dev/kvm` is accessible.
 
-The untouched template `da0826ec` boots under both accelerators with Rust 1.94.0, `rust-std-hermit` 1.94.0, and loader release v0.5.6. Serial contains `Hello, world!` and QEMU’s raw `isa-debug-exit` status is 3. Loader v0.5.7 panics in that kernel while mapping the SMP trampoline at `0x8000`. No model weights have been downloaded, and no performance result is claimed. The boot record is `bootstrap/lane-a/g0-manifest.txt`.
+The untouched template `da0826ec` boots under both accelerators with Rust 1.94.0, `rust-std-hermit` 1.94.0, and loader release v0.5.6. Serial contains `Hello, world!` and QEMU’s raw `isa-debug-exit` status is 3. Loader v0.5.7 panics in that kernel while mapping the SMP trampoline at `0x8000`. The boot record is `bootstrap/lane-a/g0-manifest.txt`.
+
+`apps/policy-guest` speaks the authenticated protocol to `python3 -m aik_controller.server`. Under both TCG and KVM the guest at `10.0.2.15` received the heuristic `latency` profile, printed `FERRUM_APPLIED`, and exited with raw status 3. No model weights have been downloaded, and no performance result is claimed.
