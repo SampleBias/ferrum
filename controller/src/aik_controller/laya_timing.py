@@ -51,6 +51,30 @@ RECORDED_WARM_US = (
     883_263,
     784_654,
 )
+# A later warmed pass on the same Intel host, same checkpoint and thread count.
+# Nearest-rank p99 is the maximum. It does not fit the 2 s experiment once the
+# one-second reserve is added, so the declared budget is five seconds.
+RECORDED_WARM_LATER_US = (
+    801_758,
+    800_520,
+    782_885,
+    1_059_871,
+    794_956,
+    801_382,
+    803_165,
+    836_489,
+    812_299,
+    808_205,
+    810_676,
+    812_293,
+    808_844,
+    817_250,
+    853_377,
+    838_625,
+    825_715,
+    844_682,
+    870_976,
+)
 
 
 def percentile_us(samples_us: list[int], fraction: float) -> int:

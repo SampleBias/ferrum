@@ -8,7 +8,7 @@ from aik_controller.interval import (
     load_declared,
     select_budget,
 )
-from aik_controller.laya_timing import RECORDED_WARM_US, envelope
+from aik_controller.laya_timing import RECORDED_WARM_LATER_US, RECORDED_WARM_US, envelope
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -43,6 +43,21 @@ class IntervalTests(unittest.TestCase):
         self.assertEqual(decision["headroom_us"], 1_116_737)
         self.assertFalse(decision["fits_published"])
         self.assertFalse(decision["cold_fits_budget"])
+        self.assertFalse(decision["replaces_guest_deadline"])
+        self.assertFalse(recorded["replaces_guest_deadline"])
+
+    def test_later_intel_envelope_selects_five_seconds(self):
+        summary = envelope(list(RECORDED_WARM_LATER_US))
+        self.assertEqual(summary["n"], 19)
+        self.assertEqual(summary["p99_us"], 1_059_871)
+        self.assertEqual(summary["p50_us"], 812_293)
+        decision = judge(summary["p99_us"], 796_929)
+        recorded = load_declared(ROOT / "configs" / "acceptance-5s-v0.json")
+        self.assertEqual(decision["experiment"], recorded["id"])
+        self.assertEqual(decision["budget_us"], recorded["budget_us"])
+        self.assertEqual(decision["headroom_us"], 3_940_129)
+        self.assertTrue(decision["cold_fits_budget"])
+        self.assertFalse(decision["fits_published"])
         self.assertFalse(decision["replaces_guest_deadline"])
         self.assertFalse(recorded["replaces_guest_deadline"])
 

@@ -66,13 +66,20 @@ def judge(warm_p99_us: int, cold_us: int) -> dict:
     }
 
 
+DECLARED_BUDGET_US = {
+    "acceptance-2s-v0": 2_000_000,
+    "acceptance-5s-v0": 5_000_000,
+}
+
+
 def load_declared(path: Path) -> dict:
-    """The Intel 2 s record. A file that would replace the guest deadline is refused."""
+    """An Intel experiment record. A file that would replace the guest deadline is refused."""
     doc = json.loads(path.read_text())
-    if doc.get("id") != "acceptance-2s-v0" or doc.get("host") != "intel-i7-10750h":
-        raise IntervalError("file is not the Intel 2s experiment")
-    if doc.get("published_budget_us") != PUBLISHED_BUDGET_US or doc.get("budget_us") != 2_000_000:
-        raise IntervalError("declared budgets do not match acceptance-2s-v0")
+    budget = DECLARED_BUDGET_US.get(doc.get("id"))
+    if budget is None or doc.get("host") != "intel-i7-10750h":
+        raise IntervalError("file is not an Intel declared experiment")
+    if doc.get("published_budget_us") != PUBLISHED_BUDGET_US or doc.get("budget_us") != budget:
+        raise IntervalError("declared budgets do not match the experiment id")
     if doc.get("replaces_guest_deadline") is not False:
         raise IntervalError("this experiment must not replace the guest deadline")
     return doc

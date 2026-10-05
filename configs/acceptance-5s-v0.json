@@ -1,0 +1,8 @@
+{
+  "id": "acceptance-5s-v0",
+  "host": "intel-i7-10750h",
+  "published_budget_us": 750000,
+  "budget_us": 5000000,
+  "replaces_guest_deadline": false,
+  "note": "A later Intel warmed pass had p99 1059871 us. That does not fit 2 s once one second is reserved for transport and apply, so the declared budget is 5 s. The guest still seals snapshots with the published deadline. The office Ryzen host needs its own warmed pass before it uses this id."
+}
