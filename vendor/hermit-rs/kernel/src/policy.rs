@@ -20,6 +20,8 @@ const SCALE: u128 = 1_048_576;
 const QUANTUM_US: u64 = 2_000;
 const INTERVAL_US: u64 = 100_000;
 const SYSTEM_BUDGET_US: u64 = 5_000;
+/// Minimum time between two different profiles. A renewal does not restart it.
+const MIN_DWELL_US: u64 = 2_000_000;
 const MAX_MEMBERS: usize = 12;
 const MAX_WORKLOAD: usize = 8;
 const MAX_SYSTEM: usize = 4;
@@ -33,6 +35,7 @@ pub const ACK_REASON_NONE: u8 = 0;
 pub const ACK_REASON_EMERGENCY: u8 = 1;
 pub const ACK_REASON_LATE: u8 = 2;
 pub const ACK_REASON_STALE: u8 = 3;
+pub const ACK_REASON_DWELL: u8 = 4;
 pub const PROFILE_BALANCED: u8 = 0;
 pub const PROFILE_LATENCY: u8 = 1;
 pub const PROFILE_THROUGHPUT: u8 = 2;
@@ -105,6 +108,10 @@ struct State {
 	/// Scheduler-owned generation. Boot is 1. Activation, emergency, and
 	/// balanced fallback each increment it. A dropped stage does not.
 	generation: u64,
+	/// Guest time of the last change to a different profile. Renewals skip this.
+	last_profile_change_us: u64,
+	/// The boot weights are not a dwell event. The first staged change arms it.
+	dwell_armed: bool,
 	staged: Pending,
 	ack_head: usize,
 	ack_len: usize,
@@ -135,6 +142,8 @@ static STATE: hermit_sync::InterruptTicketMutex<State> = hermit_sync::InterruptT
 		lease_expired: false,
 		emergency: false,
 		generation: 1,
+		last_profile_change_us: 0,
+		dwell_armed: false,
 		staged: Pending {
 			occupied: false,
 			weights: [0, 0, 0],
@@ -463,9 +472,21 @@ fn activate_staged(state: &mut State, now: u64) {
 		reject_staged(state, now, ACK_REASON_LATE);
 		return;
 	}
-	let previous = state.generation;
 	let weights = state.staged.weights;
+	let renewal = weights == state.weights;
+	if !renewal
+		&& state.dwell_armed
+		&& now.saturating_sub(state.last_profile_change_us) < MIN_DWELL_US
+	{
+		reject_staged(state, now, ACK_REASON_DWELL);
+		return;
+	}
+	let previous = state.generation;
 	let lease_until = state.staged.lease_until;
+	if !renewal {
+		state.last_profile_change_us = now;
+		state.dwell_armed = true;
+	}
 	state.weights = weights;
 	state.lease_until = lease_until;
 	state.lease_expired = false;

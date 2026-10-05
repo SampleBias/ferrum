@@ -35,6 +35,9 @@ fn main() -> ExitCode {
     if env::args().skip(1).any(|arg| arg == "--reject-frames") {
         return reject_frames_exit();
     }
+    if env::args().skip(1).any(|arg| arg == "--fair-dwell") {
+        return fair_dwell_exit();
+    }
     match run(emergency, stage_race, stale, late) {
         Ok(()) => {
             println!("FERRUM_COMPLETE");
@@ -853,6 +856,8 @@ fn fair_queue() -> Result<(), String> {
     if exit_window.0 > 2_000 || exit_window.1 <= exit_window.2 || exit_window.1 < 50_000 {
         return Err("exited thread stayed runnable or throughput was not applied".to_string());
     }
+    // Reclaim is a different profile, so it has to wait out the throughput dwell.
+    unsafe { sys_usleep(2_000_000) };
 
     let base = generation()?;
     BASE.store(base, Ordering::Release);
@@ -1057,6 +1062,212 @@ fn reject_frames() -> Result<(), String> {
         return Err("rejected frames changed class service".to_string());
     }
     println!("FERRUM_FRAMES_OK");
+    Ok(())
+}
+
+fn fair_dwell_exit() -> ExitCode {
+    match fair_dwell() {
+        Ok(()) => {
+            println!("FERRUM_COMPLETE");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            println!("FERRUM_DWELL_FAIL {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(not(target_os = "hermit"))]
+fn fair_dwell() -> Result<(), String> {
+    Err("dwell check runs inside the hermit guest".to_string())
+}
+
+/// Renew latency inside the dwell window, then accept a different profile
+/// once the original change time has aged out. The renewal must not push
+/// that deadline forward.
+#[cfg(target_os = "hermit")]
+fn fair_dwell() -> Result<(), String> {
+    use std::hint::spin_loop;
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+    use std::thread;
+
+    const LATENCY: u8 = 1;
+    const BATCH: u8 = 2;
+    const MAINTENANCE: u8 = 3;
+    const MIN_DWELL_US: u64 = 2_000_000;
+
+    unsafe extern "C" {
+        fn sys_policy_register(class: u8) -> i32;
+        fn sys_policy_stage(
+            latency: u32,
+            batch: u32,
+            maintenance: u32,
+            accept_us: u64,
+            lease_us: u64,
+            base_generation: u64,
+        ) -> i32;
+        fn sys_policy_generation(generation: *mut u64) -> i32;
+        fn sys_policy_read_ack(ack: *mut PolicyAck) -> i32;
+        fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
+        fn sys_usleep(usecs: u64);
+    }
+
+    static READY: AtomicU8 = AtomicU8::new(0);
+    static FAILED: AtomicBool = AtomicBool::new(false);
+    for class in [LATENCY, BATCH, MAINTENANCE] {
+        thread::spawn(move || {
+            if unsafe { sys_policy_register(class) } == 0 {
+                READY.fetch_add(1, Ordering::Release);
+            } else {
+                FAILED.store(true, Ordering::Release);
+            }
+            loop {
+                spin_loop();
+            }
+        });
+    }
+    for _ in 0..40 {
+        if READY.load(Ordering::Acquire) == 3 || FAILED.load(Ordering::Acquire) {
+            break;
+        }
+        unsafe { sys_usleep(50_000) };
+    }
+    if FAILED.load(Ordering::Acquire) || READY.load(Ordering::Acquire) != 3 {
+        return Err("workers did not register".to_string());
+    }
+
+    let generation = || -> Result<u64, String> {
+        let mut generation = 0u64;
+        let rc = unsafe { sys_policy_generation(&mut generation) };
+        if rc == 0 {
+            Ok(generation)
+        } else {
+            Err(format!("generation returned {rc}"))
+        }
+    };
+    let stage = |weights: (u32, u32, u32), base: u64| -> Result<(), String> {
+        let rc = unsafe { sys_policy_stage(weights.0, weights.1, weights.2, 5_000_000, 3_000_000, base) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(format!("stage returned {rc}"))
+        }
+    };
+    let pull_ack = || -> Result<PolicyAck, String> {
+        for _ in 0..50 {
+            let mut ack = PolicyAck {
+                kind: 0,
+                reason: 0,
+                profile: 0,
+                _pad0: 0,
+                _pad1: 0,
+                previous_generation: 0,
+                generation: 0,
+                guest_us: 0,
+                lease_until_guest_us: 0,
+            };
+            let rc = unsafe { sys_policy_read_ack(&mut ack) };
+            if rc == 0 {
+                return Ok(ack);
+            }
+            if rc != 1 {
+                return Err(format!("read ack returned {rc}"));
+            }
+            unsafe { sys_usleep(10_000) };
+        }
+        Err("scheduler wrote no acknowledgment".to_string())
+    };
+
+    stage((6, 2, 2), generation()?)?;
+    let first = pull_ack()?;
+    if first.kind != 1 || first.profile != 1 || first.generation != 2 {
+        return Err("latency profile was not applied".to_string());
+    }
+    println!(
+        "FERRUM_DWELL_APPLIED profile=latency generation={} guest_us={} lease_until={}",
+        first.generation, first.guest_us, first.lease_until_guest_us
+    );
+
+    unsafe { sys_usleep(200_000) };
+    let during = generation()?;
+    stage((2, 6, 2), during)?;
+    let rejected = pull_ack()?;
+    if rejected.kind != 4 || rejected.reason != 4 || rejected.generation != during {
+        return Err(format!(
+            "early throughput was not held for dwell (kind={} reason={} generation={})",
+            rejected.kind, rejected.reason, rejected.generation
+        ));
+    }
+    println!(
+        "FERRUM_DWELL_REJECTED reason=dwell generation={} guest_us={}",
+        rejected.generation, rejected.guest_us
+    );
+
+    unsafe { sys_usleep(1_300_000) };
+    let renew_base = generation()?;
+    stage((6, 2, 2), renew_base)?;
+    let renewed = pull_ack()?;
+    if renewed.kind != 1 || renewed.profile != 1 || renewed.generation != renew_base + 1 {
+        return Err("identical profile was not renewed".to_string());
+    }
+    if renewed.lease_until_guest_us <= first.lease_until_guest_us {
+        return Err("renewal did not extend the lease".to_string());
+    }
+    println!(
+        "FERRUM_DWELL_RENEWED profile=latency previous={} generation={} guest_us={} lease_until={}",
+        renewed.previous_generation,
+        renewed.generation,
+        renewed.guest_us,
+        renewed.lease_until_guest_us
+    );
+
+    unsafe { sys_usleep(700_000) };
+    let change_base = generation()?;
+    stage((2, 6, 2), change_base)?;
+    let changed = pull_ack()?;
+    if changed.kind != 1 || changed.profile != 2 || changed.generation != change_base + 1 {
+        return Err(format!(
+            "throughput was not accepted after the original dwell (kind={} reason={} generation={})",
+            changed.kind, changed.reason, changed.generation
+        ));
+    }
+    if changed.guest_us < first.guest_us.saturating_add(MIN_DWELL_US) {
+        return Err("throughput was accepted before the original dwell elapsed".to_string());
+    }
+    if changed.guest_us >= renewed.guest_us.saturating_add(MIN_DWELL_US) {
+        return Err("throughput waited for a dwell timer that the renewal restarted".to_string());
+    }
+    println!(
+        "FERRUM_DWELL_CHANGED profile=throughput previous={} generation={} guest_us={}",
+        changed.previous_generation, changed.generation, changed.guest_us
+    );
+
+    let read = |class: u8| -> Result<u64, String> {
+        let mut service_us = 0u64;
+        let rc = unsafe { sys_policy_read(class, &mut service_us) };
+        if rc == 0 {
+            Ok(service_us)
+        } else {
+            Err(format!("read class {class} returned {rc}"))
+        }
+    };
+    let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    unsafe { sys_usleep(200_000) };
+    let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    let sample = (
+        after.0.saturating_sub(before.0),
+        after.1.saturating_sub(before.1),
+        after.2.saturating_sub(before.2),
+    );
+    println!(
+        "FERRUM_SCHED window=throughput latency={} batch={} maintenance={}",
+        sample.0, sample.1, sample.2
+    );
+    if sample.1 <= sample.0 || sample.1 <= sample.2 {
+        return Err("throughput weights were not in force".to_string());
+    }
+    println!("FERRUM_DWELL_OK");
     Ok(())
 }
 
@@ -1344,6 +1555,7 @@ fn ack_reason_name(reason: u8) -> &'static str {
         1 => "emergency",
         2 => "late",
         3 => "stale",
+        4 => "dwell",
         _ => "unknown",
     }
 }
