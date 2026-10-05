@@ -192,11 +192,151 @@ def accept_scheduler_report(
     return 1
 
 
+def propose_once(
+    conn: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict
+) -> dict:
+    """Hello, snapshot, and one proposal. The caller decides whether to read the report."""
+    hello = read_payload(conn, key)
+    if hello.get("kind") != "hello" or hello.get("protocol") != 1:
+        raise FrameError("rejected hello")
+    if hello.get("catalog_id") != catalog["id"] or hello.get("catalog_hash") != catalog["hash"]:
+        raise FrameError("rejected catalog")
+    session_id = secrets.token_hex(16)
+    print(f"HELLO boot={hello['boot_id']} session={session_id}", flush=True)
+    write_payload(
+        conn,
+        key,
+        {
+            "protocol": 1,
+            "kind": "hello_ack",
+            "boot_id": hello["boot_id"],
+            "session_id": session_id,
+            "catalog_id": catalog["id"],
+            "catalog_hash": catalog["hash"],
+            "model_manifest_hash": identity["model_manifest_hash"],
+            "calibration_hash": identity["calibration_hash"],
+            "ready": True,
+        },
+    )
+    snapshot = read_payload(conn, key)
+    if snapshot.get("kind") != "snapshot":
+        raise FrameError("expected snapshot")
+    if snapshot.get("boot_id") != hello["boot_id"] or snapshot.get("session_id") != session_id:
+        raise FrameError("snapshot identity mismatch")
+    body = dict(snapshot)
+    body.pop("snapshot_hash", None)
+    digest = snapshot_hash(body)
+    if snapshot.get("snapshot_hash") != digest:
+        raise FrameError("snapshot hash mismatch")
+    profile = choose(body, thresholds)
+    proposal = {
+        "protocol": 1,
+        "kind": "proposal",
+        "boot_id": hello["boot_id"],
+        "session_id": session_id,
+        "request_seq": snapshot["request_seq"],
+        "base_generation": snapshot["base_generation"],
+        "catalog_id": catalog["id"],
+        "catalog_hash": catalog["hash"],
+        "snapshot_hash": digest,
+        "profile": profile,
+        "answer_confidence_bp": 10000,
+        "model_manifest_hash": identity["model_manifest_hash"],
+        "calibration_hash": identity["calibration_hash"],
+        "reason_code": "heuristic",
+    }
+    print(f"PROPOSAL profile={profile} seq={snapshot['request_seq']}", flush=True)
+    write_payload(conn, key, proposal)
+    return proposal
+
+
+def serve_lost_ack(
+    listener: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict
+) -> int:
+    """Drop the applied frame, then require the reconnect snapshot to carry the kernel generation.
+
+    The original proposal is replayed on the new connection. The guest must reject it.
+    """
+    try:
+        return serve_lost_ack_session(listener, key, catalog, thresholds, identity)
+    except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
+        print(f"session failed: {err}", file=sys.stderr)
+        return 1
+
+
+def serve_lost_ack_session(
+    listener: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict
+) -> int:
+    first, _addr = listener.accept()
+    first.settimeout(60)
+    with first:
+        proposal = propose_once(first, key, catalog, thresholds, identity)
+    print(f"DROPPED_ACK seq={proposal['request_seq']}", flush=True)
+
+    second, _addr = listener.accept()
+    second.settimeout(60)
+    with second:
+        hello = read_payload(second, key)
+        if hello.get("kind") != "hello" or hello.get("boot_id") != proposal["boot_id"]:
+            print("reconnect hello rejected", file=sys.stderr)
+            return 1
+        session_id = secrets.token_hex(16)
+        print(f"HELLO boot={hello['boot_id']} session={session_id}", flush=True)
+        write_payload(
+            second,
+            key,
+            {
+                "protocol": 1,
+                "kind": "hello_ack",
+                "boot_id": hello["boot_id"],
+                "session_id": session_id,
+                "catalog_id": catalog["id"],
+                "catalog_hash": catalog["hash"],
+                "model_manifest_hash": identity["model_manifest_hash"],
+                "calibration_hash": identity["calibration_hash"],
+                "ready": True,
+            },
+        )
+        snapshot = read_payload(second, key)
+        if snapshot.get("kind") != "snapshot" or snapshot.get("session_id") != session_id:
+            print("reconnect snapshot rejected", file=sys.stderr)
+            return 1
+        body = dict(snapshot)
+        body.pop("snapshot_hash", None)
+        if snapshot.get("snapshot_hash") != snapshot_hash(body):
+            print("reconnect snapshot hash mismatch", file=sys.stderr)
+            return 1
+        generation = snapshot.get("base_generation")
+        profile = snapshot.get("current_profile")
+        if generation != proposal["base_generation"] + 1 or profile != proposal["profile"]:
+            print(
+                f"authoritative generation was not recovered: generation={generation} profile={profile}",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"RECOVERED generation={generation} profile={profile}", flush=True)
+        write_payload(second, key, proposal)
+        report = read_payload(second, key)
+        if report.get("kind") != "reject" or report.get("reason") != "identity_mismatch":
+            print(f"replay was not rejected: {report}", file=sys.stderr)
+            return 1
+        if report.get("request_seq") != proposal["request_seq"] or report.get("session_id") != proposal["session_id"]:
+            print("replay rejection did not name the original request", file=sys.stderr)
+            return 1
+        print(f"REPLAY_REJECTED reason={report['reason']} seq={report['request_seq']}", flush=True)
+        return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Ferrum mock policy controller")
     parser.add_argument("--bind", default="127.0.0.1:7777")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--hold", action="store_true", help="keep the session open after the scheduler report")
+    parser.add_argument(
+        "--lose-ack",
+        action="store_true",
+        help="drop the connection before the applied frame, then accept one reconnect",
+    )
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args(argv)
 
@@ -216,6 +356,8 @@ def main(argv: list[str] | None = None) -> int:
     bound_host, bound_port = listener.getsockname()
     print(f"LISTENING {bound_host} {bound_port}", flush=True)
     try:
+        if args.lose_ack:
+            return serve_lost_ack(listener, key, catalog, thresholds, identity)
         while True:
             conn, _addr = listener.accept()
             # The guest answers after the scheduler acknowledgment. A TCG

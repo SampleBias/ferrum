@@ -231,6 +231,16 @@ impl PolicyEngine {
         self.cache_used = bytes;
     }
 
+    /// Record the scheduler's profile and generation after a lost acknowledgment.
+    ///
+    /// The bridge calls this with values read from the kernel. It does not
+    /// activate a proposal, increment the generation, or extend a lease.
+    pub fn adopt_scheduler(&mut self, generation: u64, profile: ProfileId) {
+        self.generation = generation;
+        self.profile = profile;
+        self.weights = self.spec.profile(profile).weights();
+    }
+
     pub fn accept_hello_ack(&mut self, ack: &HelloAck) -> Result<(), RejectReason> {
         if !ack.ready {
             return Err(RejectReason::NotReady);
@@ -1054,6 +1064,16 @@ mod tests {
         low.catalog_hash = Hash32::repeat(0x11);
         assert_eq!(engine.on_proposal(MIN_DWELL_US, &low), reason);
         assert_eq!(engine.status().profile, ProfileId::Balanced);
+    }
+
+    #[test]
+    fn adopt_scheduler_keeps_the_kernel_generation_and_does_not_arm_a_lease() {
+        let mut engine = engine(RunMode::Mock, CatalogId::CpuV1);
+        engine.adopt_scheduler(2, ProfileId::Latency);
+        assert_eq!(engine.status().generation, 2);
+        assert_eq!(engine.status().profile, ProfileId::Latency);
+        assert_eq!(engine.status().weights, [6, 2, 2]);
+        assert_eq!(engine.status().lease_until_guest_us, None);
     }
 
     #[test]

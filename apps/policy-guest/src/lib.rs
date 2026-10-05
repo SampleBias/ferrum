@@ -54,6 +54,14 @@ pub struct Applied {
     pub generation: u64,
 }
 
+/// Result of reporting the scheduler generation on a new session and rejecting
+/// the proposal from the session that never received its acknowledgment.
+pub struct Recovered {
+    pub generation: u64,
+    pub profile: ProfileId,
+    pub reason: RejectReason,
+}
+
 /// The one proposal the controller has issued for this connection.
 ///
 /// On Hermit the scheduler acknowledgment is the `applied` or `reject` frame.
@@ -143,13 +151,19 @@ pub fn exchange(stream: &mut TcpStream, boot_id: BootId, now_us: u64) -> Result<
     })
 }
 
-fn negotiate(stream: &mut TcpStream, boot_id: BootId, now_us: u64) -> Result<Negotiated, SessionError> {
-    // Hermit rejects some POSIX socket options. The session still completes
-    // without them; the host test keeps the timeouts when the calls succeed.
-    let _ = stream.set_nodelay(true);
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-
+/// Second session after the applied frame was lost.
+///
+/// `generation` and `profile` are the scheduler's values. The snapshot reports
+/// them. The replayed proposal belongs to the previous session, so it is
+/// rejected and the generation does not move.
+pub fn recover_lost_ack(
+    stream: &mut TcpStream,
+    boot_id: BootId,
+    now_us: u64,
+    generation: u64,
+    profile: ProfileId,
+) -> Result<Recovered, SessionError> {
+    prepare(stream);
     let mut engine = PolicyEngine::boot(EngineConfig {
         catalog: CatalogId::CpuV1,
         boot_id,
@@ -159,25 +173,62 @@ fn negotiate(stream: &mut TcpStream, boot_id: BootId, now_us: u64) -> Result<Neg
         run_mode: RunMode::Mock,
         manual_rearm: false,
     });
-    let status = engine.status();
-    let hello = Hello {
+    engine.adopt_scheduler(generation, profile);
+    exchange_hello(stream, &mut engine, boot_id)?;
+    let observation = Observation::quiet(1_000_000);
+    let Capture::Send { snapshot, .. } = engine
+        .capture(now_us, observation)
+        .map_err(|_| SessionError::Protocol("capture failed"))?
+    else {
+        return Err(SessionError::Protocol("snapshot was retained"));
+    };
+    if snapshot.base_generation != generation || snapshot.current_profile != profile {
+        return Err(SessionError::Protocol("snapshot did not report the scheduler"));
+    }
+    send(stream, Direction::GuestToController, &encode_snapshot(&snapshot)?)?;
+    let proposal = match decode_message(&recv(stream, Direction::ControllerToGuest)?)? {
+        Decoded::Proposal(proposal) => proposal,
+        _ => return Err(SessionError::Protocol("expected replayed proposal")),
+    };
+    let reason = match engine.on_proposal(now_us, &proposal) {
+        ProposalOutcome::Rejected(reason) => reason,
+        ProposalOutcome::Staged | ProposalOutcome::ShadowNoted | ProposalOutcome::Cached(_) => {
+            return Err(SessionError::Protocol("replayed proposal was accepted"));
+        }
+    };
+    if engine.status().generation != generation {
+        return Err(SessionError::Protocol("replay moved the generation"));
+    }
+    report_reject(
+        stream,
+        &ProposalTicket {
+            boot_id,
+            session_id: proposal.session_id,
+            request_seq: proposal.request_seq,
+            profile: proposal.profile,
+            base_generation: proposal.base_generation,
+        },
+        reason,
+    )?;
+    Ok(Recovered {
+        generation,
+        profile,
+        reason,
+    })
+}
+
+fn negotiate(stream: &mut TcpStream, boot_id: BootId, now_us: u64) -> Result<Negotiated, SessionError> {
+    prepare(stream);
+    let mut engine = PolicyEngine::boot(EngineConfig {
+        catalog: CatalogId::CpuV1,
         boot_id,
-        catalog_id: status.catalog,
-        catalog_hash: status.catalog_hash,
-        mode: RunMode::Mock,
-        capabilities: CAP_CPU,
-        max_workload_threads: MAX_WORKLOAD_THREADS,
-        guest_memory_bytes: GUEST_MEMORY_BYTES,
-        telemetry_version: TELEMETRY_VERSION,
-    };
-    send(stream, Direction::GuestToController, &encode_hello(&hello)?)?;
-    let ack = match decode_message(&recv(stream, Direction::ControllerToGuest)?)? {
-        Decoded::HelloAck(ack) => ack,
-        _ => return Err(SessionError::Protocol("expected hello_ack")),
-    };
-    engine
-        .accept_hello_ack(&ack)
-        .map_err(|_| SessionError::Protocol("hello_ack rejected"))?;
+        objective: ObjectiveId::MixedLatencyV1,
+        approved_model: Hash32::repeat(0xcc),
+        approved_calibration: Hash32::repeat(0xdd),
+        run_mode: RunMode::Mock,
+        manual_rearm: false,
+    });
+    exchange_hello(stream, &mut engine, boot_id)?;
     engine
         .promote_to_active()
         .map_err(|_| SessionError::Protocol("promote rejected"))?;
@@ -208,6 +259,41 @@ fn negotiate(stream: &mut TcpStream, boot_id: BootId, now_us: u64) -> Result<Neg
         },
         engine,
     })
+}
+
+fn prepare(stream: &mut TcpStream) {
+    // Hermit rejects some POSIX socket options. The session still completes
+    // without them; the host test keeps the timeouts when the calls succeed.
+    let _ = stream.set_nodelay(true);
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+}
+
+fn exchange_hello(
+    stream: &mut TcpStream,
+    engine: &mut PolicyEngine,
+    boot_id: BootId,
+) -> Result<(), SessionError> {
+    let status = engine.status();
+    let hello = Hello {
+        boot_id,
+        catalog_id: status.catalog,
+        catalog_hash: status.catalog_hash,
+        mode: RunMode::Mock,
+        capabilities: CAP_CPU,
+        max_workload_threads: MAX_WORKLOAD_THREADS,
+        guest_memory_bytes: GUEST_MEMORY_BYTES,
+        telemetry_version: TELEMETRY_VERSION,
+    };
+    send(stream, Direction::GuestToController, &encode_hello(&hello)?)?;
+    let ack = match decode_message(&recv(stream, Direction::ControllerToGuest)?)? {
+        Decoded::HelloAck(ack) => ack,
+        _ => return Err(SessionError::Protocol("expected hello_ack")),
+    };
+    engine
+        .accept_hello_ack(&ack)
+        .map_err(|_| SessionError::Protocol("hello_ack rejected"))?;
+    Ok(())
 }
 
 fn send(stream: &mut TcpStream, direction: Direction, payload: &[u8]) -> Result<(), SessionError> {
@@ -280,6 +366,63 @@ mod tests {
                 "APPLIED profile=latency generation=2 previous=1 guest_us=3000000 lease_until=6000000"
             ),
             "controller log did not record the activation clock: {log}"
+        );
+    }
+
+    #[test]
+    fn lost_ack_reconnect_reports_the_scheduler_generation() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut child = Command::new("python3")
+            .arg("-m")
+            .arg("aik_controller.server")
+            .arg("--lose-ack")
+            .arg("--bind")
+            .arg("127.0.0.1:0")
+            .arg("--root")
+            .arg(&root)
+            .env("PYTHONPATH", root.join("controller/src"))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start mock controller");
+        let stdout = child.stdout.take().unwrap();
+        let mut lines = BufReader::new(stdout).lines();
+        let listening = lines.next().unwrap().unwrap();
+        let port: u16 = listening.split_whitespace().nth(2).unwrap().parse().unwrap();
+        let boot = BootId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+
+        let mut first = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let ticket = open_proposal(&mut first, boot, 3_000_000).unwrap();
+        assert_eq!(ticket.base_generation, 1);
+        assert_eq!(ticket.profile, ProfileId::Latency);
+        drop(first);
+
+        let mut second = None;
+        for _ in 0..20 {
+            if let Ok(stream) = TcpStream::connect(("127.0.0.1", port)) {
+                second = Some(stream);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let mut second = second.expect("reconnect");
+        second.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let recovered = recover_lost_ack(&mut second, boot, 4_000_000, 2, ProfileId::Latency).unwrap();
+        assert_eq!(recovered.generation, 2);
+        assert_eq!(recovered.profile, ProfileId::Latency);
+        assert_eq!(recovered.reason, RejectReason::IdentityMismatch);
+        drop(second);
+
+        let status = child.wait().unwrap();
+        let mut err = String::new();
+        child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+        assert!(status.success(), "controller failed: {err}");
+        let log: String = lines.map(|line| line.unwrap()).collect::<Vec<_>>().join("\n");
+        assert!(
+            log.contains("DROPPED_ACK seq=1")
+                && log.contains("RECOVERED generation=2 profile=latency")
+                && log.contains("REPLAY_REJECTED reason=identity_mismatch seq=1"),
+            "controller log did not recover the generation: {log}"
         );
     }
 }

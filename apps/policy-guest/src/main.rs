@@ -17,11 +17,17 @@ fn main() -> ExitCode {
     let stage_race = env::args().skip(1).any(|arg| arg == "--stage-race");
     let stale = env::args().skip(1).any(|arg| arg == "--stale");
     let late = env::args().skip(1).any(|arg| arg == "--late");
+    if env::args().skip(1).any(|arg| arg == "--lose-ack") {
+        return lose_ack_exit();
+    }
     if env::args().skip(1).any(|arg| arg == "--fair-progress") {
         return fair_progress_exit();
     }
     if env::args().skip(1).any(|arg| arg == "--fair-demo") {
         return fair_demo_exit();
+    }
+    if env::args().skip(1).any(|arg| arg == "--fair-credit") {
+        return fair_credit_exit();
     }
     match run(emergency, stage_race, stale, late) {
         Ok(()) => {
@@ -253,6 +259,380 @@ fn fallback_balanced() -> Result<(), String> {
         return Err("absent controller did not keep balanced service".to_string());
     }
     println!("FERRUM_FALLBACK_OK");
+    Ok(())
+}
+
+fn lose_ack_exit() -> ExitCode {
+    match lose_ack() {
+        Ok(()) => {
+            println!("FERRUM_COMPLETE");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            println!("FERRUM_FAIL {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(not(target_os = "hermit"))]
+fn lose_ack() -> Result<(), String> {
+    Err("lost-ack recovery runs inside the hermit guest".to_string())
+}
+
+/// Apply one profile, drop the connection before `applied` is sent, then
+/// reconnect. The new snapshot carries the kernel generation. Replaying the
+/// old proposal must not stage it again.
+#[cfg(target_os = "hermit")]
+fn lose_ack() -> Result<(), String> {
+    use std::hint::spin_loop;
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+    use std::thread;
+
+    use policy_core::catalog_spec;
+    use policy_types::{CatalogId, ProfileId, ACCEPTANCE_DEADLINE_US, PROFILE_LEASE_US};
+
+    const LATENCY: u8 = 1;
+    const BATCH: u8 = 2;
+    const MAINTENANCE: u8 = 3;
+
+    unsafe extern "C" {
+        fn sys_policy_register(class: u8) -> i32;
+        fn sys_policy_stage(
+            latency: u32,
+            batch: u32,
+            maintenance: u32,
+            accept_us: u64,
+            lease_us: u64,
+            base_generation: u64,
+        ) -> i32;
+        fn sys_policy_staged() -> i32;
+        fn sys_policy_generation(generation: *mut u64) -> i32;
+        fn sys_policy_read_ack(ack: *mut PolicyAck) -> i32;
+        fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
+        fn sys_usleep(usecs: u64);
+    }
+
+    let (controller, boot) = {
+        let mut controller = default_controller();
+        let mut boot = BootId::from_hex("00112233445566778899aabbccddeeff").expect("boot id");
+        for arg in env::args().skip(1) {
+            if let Some(value) = arg.strip_prefix("--controller=") {
+                controller = value.to_string();
+            } else if let Some(value) = arg.strip_prefix("--boot-id=") {
+                boot = BootId::from_hex(value).map_err(|_| "bad boot id".to_string())?;
+            } else if arg == "--lose-ack" {
+            } else {
+                return Err(format!("unknown argument {arg}"));
+            }
+        }
+        (controller, boot)
+    };
+
+    static READY: AtomicU32 = AtomicU32::new(0);
+    static FAILED: AtomicBool = AtomicBool::new(false);
+    for class in [LATENCY, BATCH, MAINTENANCE] {
+        thread::spawn(move || {
+            if unsafe { sys_policy_register(class) } == 0 {
+                READY.fetch_add(1, Ordering::Release);
+            } else {
+                FAILED.store(true, Ordering::Release);
+            }
+            loop {
+                spin_loop();
+            }
+        });
+    }
+    for _ in 0..40 {
+        if READY.load(Ordering::Acquire) == 3 || FAILED.load(Ordering::Acquire) {
+            break;
+        }
+        unsafe { sys_usleep(50_000) };
+    }
+    if FAILED.load(Ordering::Acquire) || READY.load(Ordering::Acquire) != 3 {
+        return Err("workers did not register".to_string());
+    }
+
+    let mut first = connect_controller(&controller)?;
+    let ticket = policy_guest::open_proposal(&mut first, boot, 3_000_000).map_err(|err| err.to_string())?;
+    let weights = catalog_spec(CatalogId::CpuV1).profile(ticket.profile).weights();
+    let stage_rc = unsafe {
+        sys_policy_stage(
+            weights[0],
+            weights[1],
+            weights[2],
+            ACCEPTANCE_DEADLINE_US,
+            PROFILE_LEASE_US,
+            ticket.base_generation,
+        )
+    };
+    if stage_rc != 0 {
+        return Err(format!("stage returned {stage_rc}"));
+    }
+    unsafe { sys_usleep(20_000) };
+    let mut ack = PolicyAck {
+        kind: 0,
+        reason: 0,
+        profile: 0,
+        _pad0: 0,
+        _pad1: 0,
+        previous_generation: 0,
+        generation: 0,
+        guest_us: 0,
+        lease_until_guest_us: 0,
+    };
+    let ack_rc = unsafe { sys_policy_read_ack(&mut ack) };
+    if ack_rc != 0 {
+        return Err(format!("scheduler wrote no applied acknowledgment ({ack_rc})"));
+    }
+    if ack.kind != 1 || ack_profile_name(ack.profile) != ticket.profile.as_str() || ack.generation != ticket.base_generation + 1 {
+        return Err("scheduler acknowledgment was not the applied profile".to_string());
+    }
+    println!(
+        "FERRUM_ACK kind=applied reason=none profile={} previous={} generation={} guest_us={} lease_until={}",
+        ticket.profile.as_str(),
+        ack.previous_generation,
+        ack.generation,
+        ack.guest_us,
+        ack.lease_until_guest_us
+    );
+    println!("FERRUM_ACK_LOST generation={}", ack.generation);
+    std::mem::forget(first);
+
+    let mut second = None;
+    let mut last = String::from("not attempted");
+    for _ in 0..20 {
+        match connect_controller(&controller) {
+            Ok(stream) => {
+                second = Some(stream);
+                break;
+            }
+            Err(err) => last = err,
+        }
+        unsafe { sys_usleep(50_000) };
+    }
+    let mut second = second.ok_or(last)?;
+    let recovered = policy_guest::recover_lost_ack(
+        &mut second,
+        boot,
+        4_000_000,
+        ack.generation,
+        ticket.profile,
+    )
+    .map_err(|err| err.to_string())?;
+    std::mem::forget(second);
+    if recovered.generation != ack.generation || recovered.profile != ticket.profile {
+        return Err("reconnect snapshot did not report the scheduler".to_string());
+    }
+    if recovered.reason != policy_types::RejectReason::IdentityMismatch {
+        return Err(format!("replay reason was {}", recovered.reason.as_str()));
+    }
+    println!(
+        "FERRUM_RECOVERED generation={} profile={}",
+        recovered.generation,
+        recovered.profile.as_str()
+    );
+    println!(
+        "FERRUM_REPLAY_REJECTED reason={}",
+        recovered.reason.as_str()
+    );
+
+    let mut generation = 0u64;
+    if unsafe { sys_policy_generation(&mut generation) } != 0 || generation != ack.generation {
+        return Err(format!("replay moved the scheduler generation to {generation}"));
+    }
+    if unsafe { sys_policy_staged() } != 0 {
+        return Err("replay left a profile staged".to_string());
+    }
+    if unsafe { sys_policy_read_ack(&mut ack) } != 1 {
+        return Err("replay wrote another scheduler acknowledgment".to_string());
+    }
+
+    let read = |class: u8| -> Result<u64, String> {
+        let mut service_us = 0u64;
+        let rc = unsafe { sys_policy_read(class, &mut service_us) };
+        if rc == 0 {
+            Ok(service_us)
+        } else {
+            Err(format!("read class {class} returned {rc}"))
+        }
+    };
+    let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    unsafe { sys_usleep(1_000_000) };
+    let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    let sample = (
+        after.0.saturating_sub(before.0),
+        after.1.saturating_sub(before.1),
+        after.2.saturating_sub(before.2),
+    );
+    println!(
+        "FERRUM_SCHED window={} latency={} batch={} maintenance={}",
+        ticket.profile.as_str(),
+        sample.0, sample.1, sample.2
+    );
+    let directed = match ticket.profile {
+        ProfileId::Balanced => true,
+        ProfileId::Latency => sample.0 > sample.1 && sample.0 > sample.2,
+        ProfileId::Throughput => sample.1 > sample.0 && sample.1 > sample.2,
+        ProfileId::Reclaim => sample.2 > sample.0 && sample.2 > sample.1,
+    };
+    if !directed || sample.0 == 0 || sample.1 == 0 || sample.2 == 0 {
+        return Err("the first application did not keep its service".to_string());
+    }
+    println!("FERRUM_DUPLICATE_DROPPED");
+    println!("FERRUM_SCHED_OK");
+    Ok(())
+}
+
+fn fair_credit_exit() -> ExitCode {
+    match fair_credit() {
+        Ok(()) => {
+            println!("FERRUM_COMPLETE");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            println!("FERRUM_CREDIT_FAIL {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(not(target_os = "hermit"))]
+fn fair_credit() -> Result<(), String> {
+    Err("credit check runs inside the hermit guest".to_string())
+}
+
+/// A sleeping class must not wake with a private reserve of CPU, and a thread
+/// that yields must not receive more service than a sibling that keeps running.
+#[cfg(target_os = "hermit")]
+fn fair_credit() -> Result<(), String> {
+    use std::hint::spin_loop;
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+    use std::thread;
+
+    const LATENCY: u8 = 1;
+    const BATCH: u8 = 2;
+    const PHASE_RUN: u8 = 0;
+    const PHASE_SLEEP: u8 = 1;
+    const PHASE_YIELD: u8 = 3;
+
+    unsafe extern "C" {
+        fn sys_policy_register(class: u8) -> i32;
+        fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
+        fn sys_usleep(usecs: u64);
+        fn sys_yield();
+    }
+
+    static PHASE: AtomicU8 = AtomicU8::new(PHASE_RUN);
+    static READY: AtomicU8 = AtomicU8::new(0);
+    static WOKE: AtomicBool = AtomicBool::new(false);
+    static FAILED: AtomicBool = AtomicBool::new(false);
+
+    thread::spawn(|| {
+        if unsafe { sys_policy_register(LATENCY) } != 0 {
+            FAILED.store(true, Ordering::Release);
+            return;
+        }
+        READY.fetch_add(1, Ordering::Release);
+        let mut slept = false;
+        loop {
+            match PHASE.load(Ordering::Acquire) {
+                PHASE_SLEEP if !slept => {
+                    slept = true;
+                    unsafe { sys_usleep(400_000) };
+                    WOKE.store(true, Ordering::Release);
+                }
+                PHASE_YIELD => unsafe { sys_yield() },
+                _ => spin_loop(),
+            }
+        }
+    });
+    thread::spawn(|| {
+        if unsafe { sys_policy_register(BATCH) } != 0 {
+            FAILED.store(true, Ordering::Release);
+            return;
+        }
+        READY.fetch_add(1, Ordering::Release);
+        loop {
+            spin_loop();
+        }
+    });
+
+    for _ in 0..40 {
+        if READY.load(Ordering::Acquire) == 2 || FAILED.load(Ordering::Acquire) {
+            break;
+        }
+        unsafe { sys_usleep(50_000) };
+    }
+    if FAILED.load(Ordering::Acquire) || READY.load(Ordering::Acquire) != 2 {
+        return Err("workers did not register".to_string());
+    }
+
+    let read = |class: u8| -> Result<u64, String> {
+        let mut service_us = 0u64;
+        let rc = unsafe { sys_policy_read(class, &mut service_us) };
+        if rc == 0 {
+            Ok(service_us)
+        } else {
+            Err(format!("read class {class} returned {rc}"))
+        }
+    };
+    let delta = |before: (u64, u64), after: (u64, u64)| {
+        (
+            after.0.saturating_sub(before.0),
+            after.1.saturating_sub(before.1),
+        )
+    };
+
+    let before = (read(LATENCY)?, read(BATCH)?);
+    PHASE.store(PHASE_SLEEP, Ordering::Release);
+    unsafe { sys_usleep(400_000) };
+    let slept = delta(before, (read(LATENCY)?, read(BATCH)?));
+    println!(
+        "FERRUM_CREDIT sleep latency={} batch={}",
+        slept.0, slept.1
+    );
+    if slept.1 < 250_000 || slept.0.saturating_mul(5) > slept.1 {
+        return Err("sleeping thread kept running or the sibling did not".to_string());
+    }
+    for _ in 0..40 {
+        if WOKE.load(Ordering::Acquire) {
+            break;
+        }
+        unsafe { sys_usleep(10_000) };
+    }
+    if !WOKE.load(Ordering::Acquire) {
+        return Err("sleeping thread did not wake".to_string());
+    }
+
+    let before = (read(LATENCY)?, read(BATCH)?);
+    unsafe { sys_usleep(200_000) };
+    let woke = delta(before, (read(LATENCY)?, read(BATCH)?));
+    println!("FERRUM_CREDIT wake latency={} batch={}", woke.0, woke.1);
+    let wake_sum = woke.0 + woke.1;
+    // A banked sleeper would take this whole window. Clamping keeps both classes in it.
+    if wake_sum < 100_000
+        || woke.0 == 0
+        || woke.1 == 0
+        || woke.0.saturating_mul(3) > wake_sum.saturating_mul(2)
+        || woke.1.saturating_mul(3) > wake_sum.saturating_mul(2)
+    {
+        return Err("woken thread banked the sleep".to_string());
+    }
+
+    let before = (read(LATENCY)?, read(BATCH)?);
+    PHASE.store(PHASE_YIELD, Ordering::Release);
+    unsafe { sys_usleep(400_000) };
+    let yielded = delta(before, (read(LATENCY)?, read(BATCH)?));
+    println!(
+        "FERRUM_CREDIT yield latency={} batch={}",
+        yielded.0, yielded.1
+    );
+    // Yielding does not pay the thread more than the sibling that kept running.
+    if yielded.0 == 0 || yielded.1 == 0 || yielded.0 > yielded.1.saturating_mul(5) / 4 {
+        return Err("yielding thread received more service than the runner".to_string());
+    }
+    println!("FERRUM_CREDIT_OK");
     Ok(())
 }
 
