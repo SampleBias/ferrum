@@ -1,0 +1,11 @@
+/target
+/artifacts
+/bootstrap/hermit-rs-template/
+/bootstrap/lane-a/*.tar.gz
+/bootstrap/lane-a/hermit-loader*
+/bootstrap/lane-a/rust-std-*/
+**/*.pyc
+**/__pycache__
+**/.venv
+*.egg-info
+.pytest_cache

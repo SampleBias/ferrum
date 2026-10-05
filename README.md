@@ -1,0 +1,40 @@
+# Ferrum
+
+> Build a Hermit-based Rust unikernel whose resource-management policies are selected by Laya, a System 1 decision model. Rust retains hardware control, correctness rules, bounded execution, and fallback policies. Demonstrate the system in QEMU with measurable kernel effects and continued operation when the model is unavailable.
+
+This repository currently contains a development plan, not a working kernel implementation. The plan was researched on **2026-10-05**. Commands, interfaces, budgets, and acceptance thresholds described as proposed must be implemented or validated before they are treated as working infrastructure.
+
+The recommended first architecture is **one Hermit guest plus a standalone Linux application running Laya**. The guest combines the kernel, a small policy bridge, and benchmark workloads in one unikernel image. The external application makes decisions asynchronously. An enforced, expiring policy inside the guest governs ordinary execution without waiting for inference.
+
+“Type one” is interpreted as **System 1 inference**, not a Type 1 hypervisor. “Laya” is assumed to mean [NandhaKishorM/laya](https://github.com/NandhaKishorM/laya), the upstream of the initially discovered Dancing-coin/l-aya fork. RustyHermit's current project lineage is [Hermit](https://github.com/hermit-os). These assumptions can be changed without discarding the policy/mechanism design.
+
+## Reading order
+
+| Document | Purpose |
+| --- | --- |
+| [00 — Project brief](docs/00-project-brief.md) | Communicate the concept, scope, and what constitutes proof |
+| [01 — Upstream and feasibility](docs/01-upstream-and-feasibility.md) | Verified sources, candidate revisions, compatibility risks |
+| [02 — System architecture](docs/02-system-architecture.md) | Placement, trust boundaries, boot, timing, failure recovery |
+| [03 — Kernel mechanisms and policies](docs/03-kernel-mechanisms-and-policies.md) | Real scheduler changes, resource accounting, policy catalog |
+| [04 — Policy protocol](docs/04-policy-protocol.md) | Messages, freshness, validation, application, acknowledgments |
+| [05 — Laya controller](docs/05-laya-controller.md) | Model adapter, typed questions, confidence, resource budgets |
+| [06 — Repository and scaffold](docs/06-repository-and-scaffold.md) | Hermit derivation, proposed crates, build contract, patch order |
+| [07 — QEMU lab](docs/07-qemu-lab.md) | Host setup, TCG/KVM, networking, debugging, reproducible runs |
+| [08 — Data and learning](docs/08-data-and-learning.md) | Telemetry, labels, calibration, experiments, model promotion |
+| [09 — Validation and benchmarks](docs/09-validation-and-benchmarks.md) | Functional proof, fault injection, baselines, performance gates |
+| [10 — Delivery roadmap](docs/10-delivery-roadmap.md) | Dependencies, estimates, owners, acceptance criteria |
+| [11 — Decisions, risks, questions](docs/11-decisions-risks-and-questions.md) | Architecture decisions and unresolved implementation risks |
+| [12 — Demo and review](docs/12-demo-and-review.md) | Demonstration script and team sign-off checklist |
+| [13 — In-guest evolution](docs/13-in-guest-evolution.md) | Path toward a self-contained image and its additional costs |
+
+For an architecture review, read 00, 02, 03, and 11. Kernel engineers should then read 04, 06, and 07; ML engineers should read 05, 08, and 09. The delivery lead can turn the work packages in 10 into tickets.
+
+## Recommended first commitment
+
+Fund the scaffold and deterministic scheduler experiment first, then the live Laya integration. The minimum meaningful demo is a model-selected policy that changes **Hermit's selection of runnable threads**, with a trace showing the choice, acceptance, activation, and resulting CPU service. Application-level job routing alone is an earlier integration milestone.
+
+The expanded proof of concept delegates three defined policy domains: CPU allocation, managed-memory/cache targets, and workload admission. “Most policy” means these named discretionary choices within the prototype. It does not claim that an AI has replaced most responsibilities of a general-purpose operating system.
+
+Host policy crates now implement the catalog, lease state machine, scheduler reference model, and authenticated frames. `cargo test --workspace` exercises those on Linux. QEMU 11.1.1 is installed and `tools/run-qemu.sh` selects TCG or KVM explicitly. This machine is an AMD Ryzen 5 1600 with AMD-V; `kvm_amd` is loaded and `/dev/kvm` is accessible.
+
+The untouched template `da0826ec` boots under both accelerators with Rust 1.94.0, `rust-std-hermit` 1.94.0, and loader release v0.5.6. Serial contains `Hello, world!` and QEMU’s raw `isa-debug-exit` status is 3. Loader v0.5.7 panics in that kernel while mapping the SMP trampoline at `0x8000`. No model weights have been downloaded, and no performance result is claimed. The boot record is `bootstrap/lane-a/g0-manifest.txt`.

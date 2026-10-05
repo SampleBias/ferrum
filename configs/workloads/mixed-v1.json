@@ -1,0 +1,55 @@
+{
+  "id": "mixed-v1",
+  "phases": [
+    {
+      "name": "burst",
+      "duration_us": 30000000,
+      "latency_queue": 8,
+      "batch_queue": 1,
+      "maintenance_runnable": false,
+      "managed_used_bytes": 8388608,
+      "evictable_backlog_bytes": 0,
+      "emergency": false
+    },
+    {
+      "name": "steady",
+      "duration_us": 30000000,
+      "latency_queue": 0,
+      "batch_queue": 8,
+      "maintenance_runnable": false,
+      "managed_used_bytes": 16777216,
+      "evictable_backlog_bytes": 0,
+      "emergency": false
+    },
+    {
+      "name": "idle",
+      "duration_us": 20000000,
+      "latency_queue": 0,
+      "batch_queue": 0,
+      "maintenance_runnable": false,
+      "managed_used_bytes": 1048576,
+      "evictable_backlog_bytes": 0,
+      "emergency": false
+    },
+    {
+      "name": "memory",
+      "duration_us": 30000000,
+      "latency_queue": 1,
+      "batch_queue": 1,
+      "maintenance_runnable": true,
+      "managed_used_bytes": 241591910,
+      "evictable_backlog_bytes": 67108864,
+      "emergency": true
+    },
+    {
+      "name": "recovery",
+      "duration_us": 20000000,
+      "latency_queue": 1,
+      "batch_queue": 1,
+      "maintenance_runnable": true,
+      "managed_used_bytes": 8388608,
+      "evictable_backlog_bytes": 0,
+      "emergency": false
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "heuristic-v0",
+  "latency_queue_high": 4,
+  "latency_wait_us_high": 5000,
+  "batch_queue_high": 4,
+  "memory_pressure_bp": 8000,
+  "evictable_backlog_bytes": 33554432,
+  "note": "Untuned development seed. Thresholds are not a qualified controller."
+}

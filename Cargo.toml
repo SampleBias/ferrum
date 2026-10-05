@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/policy-types",
+    "crates/policy-core",
+    "crates/policy-wire",
+    "crates/hermit-policy-abi",
+    "crates/workloads",
+]
+exclude = ["bootstrap"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false

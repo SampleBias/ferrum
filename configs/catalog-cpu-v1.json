@@ -1,0 +1,30 @@
+{
+  "catalog_id": "cpu-v1",
+  "actuates": ["cpu"],
+  "profiles": [
+    {
+      "id": "balanced",
+      "cpu_weights": {"latency": 1, "batch": 1, "maintenance": 1},
+      "cache_soft_target_bytes": 67108864,
+      "inflight_limits": {"latency": 16, "batch": 8}
+    },
+    {
+      "id": "latency",
+      "cpu_weights": {"latency": 6, "batch": 2, "maintenance": 2},
+      "cache_soft_target_bytes": 67108864,
+      "inflight_limits": {"latency": 16, "batch": 4}
+    },
+    {
+      "id": "throughput",
+      "cpu_weights": {"latency": 2, "batch": 6, "maintenance": 2},
+      "cache_soft_target_bytes": 100663296,
+      "inflight_limits": {"latency": 8, "batch": 16}
+    },
+    {
+      "id": "reclaim",
+      "cpu_weights": {"latency": 2, "batch": 2, "maintenance": 6},
+      "cache_soft_target_bytes": 33554432,
+      "inflight_limits": {"latency": 4, "batch": 2}
+    }
+  ]
+}

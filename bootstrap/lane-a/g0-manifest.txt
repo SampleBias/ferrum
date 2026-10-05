@@ -1,0 +1,39 @@
+Untouched Hermit template boot, 2026-10-05.
+
+Host
+  CPU: AMD Ryzen 5 1600 Six-Core Processor
+  Virtualization: AMD-V
+  Modules: kvm_amd, kvm, irqbypass, ccp
+  /dev/kvm: crw-rw-rw- (10,232)
+  QEMU: 11.1.1
+  Machine: pc (alias, not yet frozen to pc-i440fx-*)
+  Memory: 512M
+  SMP: 1
+
+Template
+  hermit-os/hermit-rs-template da0826ec435a6cebc7133ebb0d1f3d8bc92fffdb
+  rustc 1.94.0 (4a4ef493e 2026-03-02)
+  rust-std-1.94.0-x86_64-unknown-hermit.tar.gz
+    sha256 b5c3f32252b110a1fca279aa653049b0f7fb11cd0f8382d5b23d7792db717e72
+  Hermit 0.13.0, kernel git ef27b79, opt-level=0
+
+Loader that boots
+  release v0.5.6 asset hermit-loader-x86_64
+  sha256 185f7ec843a18484aa72182eca77ff3e070c041a8ea35f2b1b415308d673d549
+  This binary is not verified equal to source pin 3ec52a9.
+
+Loader that panics on this kernel
+  release v0.5.7 asset hermit-loader-x86_64-multiboot
+  sha256 c31a2b499a5c073b3de17ef1d26b60ac9a41986a6d17d8d73c4b4ce0c15dc345
+  Panic: src/arch/x86_64/mm/paging.rs:189 ParentEntryHugePage
+  mapping Page[4KiB](0x8000). The v0.5.7 loader covers that
+  address with a huge page; v0.5.6 maps 0x8000 as 4 KiB pages.
+
+Results, tools/run-qemu.sh, isa-debug-exit iobase 0xf4
+  TCG: raw_exit=3, serial contains "Hello, world!", CPU model
+       "QEMU Virtual CPU version 2.5+", guest exit status 0
+  KVM: raw_exit=3, serial contains "Hello, world!", CPU model
+       "AMD Ryzen 5 1600 Six-Core Processor", guest exit status 0
+  Serial logs: artifacts/g0-tcg.serial and artifacts/g0-kvm.serial
+
+Not claimed: timing, Laya, a policy guest, or a kernel fork.

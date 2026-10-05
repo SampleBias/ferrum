@@ -1,0 +1,5 @@
+{
+  "model_manifest_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "calibration_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "note": "Placeholder identities for the host mock. Replace them with real artifact hashes before any model trial."
+}

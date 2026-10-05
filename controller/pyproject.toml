@@ -1,0 +1,16 @@
+[project]
+name = "aik-controller"
+version = "0.1.0"
+description = "Host policy controller for the Hermit guest protocol."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+aik-controller = "aik_controller.server:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
