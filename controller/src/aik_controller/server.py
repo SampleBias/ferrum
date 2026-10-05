@@ -58,7 +58,9 @@ def catalog_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def serve_once(conn: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict) -> int:
+def serve_once(
+    conn: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict, hold: bool
+) -> int:
     hello = read_payload(conn, key)
     if hello.get("kind") != "hello" or hello.get("protocol") != 1:
         print("rejected hello", file=sys.stderr)
@@ -125,7 +127,18 @@ def serve_once(conn: socket.socket, key: bytes, catalog: dict, thresholds: dict,
     )
 
     report = read_payload(conn, key)
-    return accept_scheduler_report(report, hello["boot_id"], session_id, snapshot["request_seq"], profile)
+    status = accept_scheduler_report(report, hello["boot_id"], session_id, snapshot["request_seq"], profile)
+    if status == 0 and hold:
+        # Stay connected for the rest of the lease so a kill is a dead peer,
+        # not a controller that already finished and closed the socket.
+        print("HOLDING", flush=True)
+        conn.settimeout(None)
+        try:
+            while conn.recv(64):
+                pass
+        except OSError as err:
+            print(f"HOLD_ENDED {err}", file=sys.stderr)
+    return status
 
 
 def accept_scheduler_report(
@@ -183,6 +196,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Ferrum mock policy controller")
     parser.add_argument("--bind", default="127.0.0.1:7777")
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--hold", action="store_true", help="keep the session open after the scheduler report")
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args(argv)
 
@@ -209,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
             conn.settimeout(60)
             with conn:
                 try:
-                    status = serve_once(conn, key, catalog, thresholds, identity)
+                    status = serve_once(conn, key, catalog, thresholds, identity, args.hold)
                 except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
                     print(f"session failed: {err}", file=sys.stderr)
                     status = 1

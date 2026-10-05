@@ -604,6 +604,37 @@ fn publish_scheduler(
     }
 }
 
+/// Watch the controller socket without blocking the workload. A later
+/// `note_controller` records whether the peer disappeared during the lease.
+#[cfg(target_os = "hermit")]
+fn watch_controller(stream: &TcpStream) -> Option<std::sync::mpsc::Receiver<std::io::Result<usize>>> {
+    use std::io::Read;
+    use std::sync::mpsc;
+    use std::thread;
+
+    let mut probe = stream.try_clone().ok()?;
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut buf = [0u8; 1];
+        let _ = tx.send(probe.read(&mut buf));
+    });
+    Some(rx)
+}
+
+#[cfg(target_os = "hermit")]
+fn note_controller(peer: Option<std::sync::mpsc::Receiver<std::io::Result<usize>>>) {
+    let Some(peer) = peer else {
+        println!("FERRUM_CONTROLLER_UNWATCHED");
+        return;
+    };
+    match peer.try_recv() {
+        Ok(Ok(0)) => println!("FERRUM_CONTROLLER_LOST closed"),
+        Ok(Err(err)) => println!("FERRUM_CONTROLLER_LOST {err}"),
+        Ok(Ok(n)) => println!("FERRUM_CONTROLLER_LOST bytes={n}"),
+        Err(_) => println!("FERRUM_CONTROLLER_HELD"),
+    }
+}
+
 #[cfg(target_os = "hermit")]
 fn actuate(
     stream: &mut TcpStream,
@@ -949,6 +980,7 @@ fn actuate(
         return Err("applied acknowledgment has no lease".to_string());
     }
     publish_scheduler(stream, ticket, &ack)?;
+    let peer = watch_controller(stream);
 
     let reclaim_share = |sample: (u64, u64, u64)| {
         let sum = sample.0 + sample.1 + sample.2;
@@ -981,6 +1013,7 @@ fn actuate(
         "FERRUM_SCHED window={profile} latency={} batch={} maintenance={}",
         sample.0, sample.1, sample.2
     );
+    note_controller(peer);
 
     let served = sample.0 > 0 && sample.1 > 0 && sample.2 > 0;
     let directed = match id {
