@@ -259,11 +259,22 @@ impl ShadowSession {
             Decoded::Proposal(proposal) => proposal,
             _ => return Err(SessionError::Protocol("expected proposal")),
         };
-        if !matches!(
-            self.engine.on_proposal(now_us, &proposal),
-            ProposalOutcome::ShadowNoted
-        ) {
-            return Err(SessionError::Protocol("proposal was not kept in shadow"));
+        let ticket = ProposalTicket {
+            boot_id: snapshot.boot_id,
+            session_id: proposal.session_id,
+            request_seq: proposal.request_seq,
+            profile: proposal.profile,
+            base_generation: proposal.base_generation,
+        };
+        match self.engine.on_proposal(now_us, &proposal) {
+            ProposalOutcome::ShadowNoted => {}
+            ProposalOutcome::Rejected(reason) => {
+                report_reject(stream, &ticket, reason)?;
+                return Err(SessionError::Protocol(reason.as_str()));
+            }
+            ProposalOutcome::Staged | ProposalOutcome::Cached(_) => {
+                return Err(SessionError::Protocol("proposal was not kept in shadow"));
+            }
         }
         let status = self.engine.status();
         if status.phase != ControlPhase::Shadow

@@ -113,9 +113,197 @@ fn shadow_trace_run() -> Result<Vec<policy_guest::ShadowNote>, String> {
         .map_err(|err| err.to_string())
 }
 
+/// Measure each `mixed-v1` duty under the boot profile and record the proposal.
+///
+/// The boot weights stay in place. Nothing is staged, and the scheduler
+/// generation has to stay at 1. The memory duty waits out the virtual-runtime
+/// lead `steady` leaves behind, using the boot batch weight.
 #[cfg(target_os = "hermit")]
 fn shadow_trace_run() -> Result<Vec<policy_guest::ShadowNote>, String> {
-    Err("a Hermit shadow trace has to come from measured service".to_string())
+    use std::hint::spin_loop;
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+    use std::thread;
+
+    use policy_core::catalog_spec;
+    use policy_types::{CatalogId, ProfileId};
+
+    const LATENCY: u8 = 1;
+    const BATCH: u8 = 2;
+    const MAINTENANCE: u8 = 3;
+
+    unsafe extern "C" {
+        fn sys_policy_register(class: u8) -> i32;
+        fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
+        fn sys_policy_generation(generation: *mut u64) -> i32;
+        fn sys_clock_gettime(clock_id: i32, tp: *mut Timespec) -> i32;
+        fn sys_usleep(usecs: u64);
+    }
+
+    #[repr(C)]
+    struct Timespec {
+        tv_sec: i64,
+        tv_nsec: i32,
+    }
+
+    let monotonic_us = || -> Result<u64, String> {
+        let mut time = Timespec { tv_sec: 0, tv_nsec: 0 };
+        let rc = unsafe { sys_clock_gettime(4, &mut time) };
+        if rc != 0 {
+            return Err(format!("clock returned {rc}"));
+        }
+        let usec = (time.tv_nsec / 1000) as u64;
+        Ok((time.tv_sec as u64).saturating_mul(1_000_000).saturating_add(usec))
+    };
+    let generation = || -> Result<u64, String> {
+        let mut value = 0u64;
+        let rc = unsafe { sys_policy_generation(&mut value) };
+        if rc == 0 {
+            Ok(value)
+        } else {
+            Err(format!("generation read returned {rc}"))
+        }
+    };
+    let read_service = |class: u8| -> Result<u64, String> {
+        let mut service_us = 0u64;
+        let rc = unsafe { sys_policy_read(class, &mut service_us) };
+        if rc == 0 {
+            Ok(service_us)
+        } else {
+            Err(format!("read class {class} returned {rc}"))
+        }
+    };
+
+    static LATENCY_DUTY: AtomicU8 = AtomicU8::new(0);
+    static BATCH_DUTY: AtomicU8 = AtomicU8::new(0);
+    static MAINTENANCE_DUTY: AtomicU8 = AtomicU8::new(0);
+    static READY: AtomicU8 = AtomicU8::new(0);
+    static FAILED: AtomicBool = AtomicBool::new(false);
+
+    let pool = [
+        (LATENCY, workloads::LATENCY_WORKERS),
+        (BATCH, workloads::BATCH_WORKERS),
+        (MAINTENANCE, workloads::MAINTENANCE_WORKERS),
+    ];
+    let mut expected = 0u8;
+    for (class, count) in pool {
+        expected = expected.saturating_add(count);
+        for index in 0..count {
+            thread::spawn(move || {
+                if unsafe { sys_policy_register(class) } != 0 {
+                    FAILED.store(true, Ordering::Release);
+                    return;
+                }
+                READY.fetch_add(1, Ordering::Release);
+                loop {
+                    let allowed = match class {
+                        LATENCY => LATENCY_DUTY.load(Ordering::Acquire),
+                        BATCH => BATCH_DUTY.load(Ordering::Acquire),
+                        _ => MAINTENANCE_DUTY.load(Ordering::Acquire),
+                    };
+                    if index < allowed {
+                        for _ in 0..8_000 {
+                            spin_loop();
+                        }
+                    } else {
+                        unsafe { sys_usleep(40_000) };
+                    }
+                }
+            });
+        }
+    }
+    for _ in 0..80 {
+        if READY.load(Ordering::Acquire) == expected || FAILED.load(Ordering::Acquire) {
+            break;
+        }
+        unsafe { sys_usleep(50_000) };
+    }
+    if FAILED.load(Ordering::Acquire) || READY.load(Ordering::Acquire) != expected {
+        return Err(format!(
+            "workers did not register ({}/{})",
+            READY.load(Ordering::Acquire),
+            expected
+        ));
+    }
+    if generation()? != 1 {
+        return Err("scheduler generation moved before the trace".to_string());
+    }
+
+    let (controller, boot) = shadow_endpoint("--shadow-trace")?;
+    let mut stream = connect_controller(&controller)?;
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(30)));
+    let mut session = policy_guest::ShadowSession::open(&mut stream, boot).map_err(|err| err.to_string())?;
+    let weights = catalog_spec(CatalogId::CpuV1).profile(ProfileId::Balanced).weights();
+    // Boot counts as a profile change at time zero. A different profile before
+    // the dwell is a reject. The kernel has not armed a lease, so this wait
+    // only satisfies the engine.
+    loop {
+        let now = monotonic_us()?;
+        if now >= policy_types::MIN_DWELL_US {
+            break;
+        }
+        unsafe { sys_usleep((policy_types::MIN_DWELL_US - now).min(100_000)) };
+    }
+    let mut notes = Vec::new();
+    for phase in workloads::mixed_v1() {
+        let duty = phase.duty();
+        LATENCY_DUTY.store(duty.latency, Ordering::Release);
+        BATCH_DUTY.store(duty.batch, Ordering::Release);
+        MAINTENANCE_DUTY.store(duty.maintenance, Ordering::Release);
+        let catch_up = if phase.name == "memory" {
+            workloads::catch_up_us(weights[1])
+        } else {
+            0
+        };
+        unsafe { sys_usleep(100_000 + catch_up) };
+        let before = (
+            read_service(LATENCY)?,
+            read_service(BATCH)?,
+            read_service(MAINTENANCE)?,
+        );
+        unsafe { sys_usleep(workloads::SAMPLE_US) };
+        let after = (
+            read_service(LATENCY)?,
+            read_service(BATCH)?,
+            read_service(MAINTENANCE)?,
+        );
+        let sample = [
+            after.0.saturating_sub(before.0),
+            after.1.saturating_sub(before.1),
+            after.2.saturating_sub(before.2),
+        ];
+        println!(
+            "FERRUM_SNAPSHOT name={} window_us={} catch_up_us={} latency={} batch={} maintenance={}",
+            phase.name,
+            workloads::SAMPLE_US,
+            catch_up,
+            sample[0],
+            sample[1],
+            sample[2]
+        );
+        if let Err(fault) = workloads::service_follows(sample, duty, weights) {
+            return Err(format!("{} boot profile: {fault}", phase.name));
+        }
+        if generation()? != 1 {
+            return Err(format!("{} scheduler generation moved", phase.name));
+        }
+        let observation = workloads::measured(*phase, workloads::SAMPLE_US, sample);
+        let now = monotonic_us()?;
+        let note = session
+            .note(&mut stream, now, observation)
+            .map_err(|err| format!("{}: {err}", phase.name))?;
+        if note.generation != 1 || note.active != "balanced" || generation()? != 1 {
+            return Err(format!(
+                "{} shadow moved the scheduler (active={} generation={})",
+                phase.name, note.active, note.generation
+            ));
+        }
+        notes.push(note);
+        LATENCY_DUTY.store(0, Ordering::Release);
+        BATCH_DUTY.store(0, Ordering::Release);
+        MAINTENANCE_DUTY.store(0, Ordering::Release);
+    }
+    std::mem::forget(stream);
+    Ok(notes)
 }
 
 fn shadow_exit() -> ExitCode {
