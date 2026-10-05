@@ -5,11 +5,13 @@ set -u
 require_qemu=0
 require_kvm=0
 probe_tcg=0
+probe_kvm=0
 for arg in "$@"; do
   case "$arg" in
     --require-qemu) require_qemu=1 ;;
     --require-kvm) require_kvm=1 ;;
     --probe-tcg) probe_tcg=1 ;;
+    --probe-kvm) probe_kvm=1 ;;
     *)
       echo "unknown argument: $arg" >&2
       exit 2
@@ -70,11 +72,14 @@ else
   report kvm absent "no /dev/kvm; TCG remains the functional lane"
 fi
 
-if [[ -r /proc/modules ]] && grep -q '^kvm ' /proc/modules; then
-  mods="$(awk '/^kvm/ { printf "%s ", $1 }' /proc/modules)"
-  report kvm-module ok "${mods}"
+if [[ -r /proc/modules ]] && grep -q '^kvm_intel ' /proc/modules; then
+  report kvm-vendor ok "kvm_intel"
+elif [[ -r /proc/modules ]] && grep -q '^kvm_amd ' /proc/modules; then
+  report kvm-vendor ok "kvm_amd"
+elif [[ -r /proc/modules ]] && grep -q '^kvm ' /proc/modules; then
+  report kvm-vendor fail "kvm is loaded without kvm_intel or kvm_amd"
 else
-  report kvm-module absent "kvm module is not loaded"
+  report kvm-vendor absent "load kvm_intel or kvm_amd; TCG remains the functional lane"
 fi
 
 if [[ "$probe_tcg" -eq 1 ]]; then
@@ -93,6 +98,29 @@ if [[ "$probe_tcg" -eq 1 ]]; then
       report tcg-probe ok "CPU feature set accepted; process ran until the probe timeout"
     else
       report tcg-probe fail "qemu exited ${probe_status} before the probe timeout"
+      sed -n '1,20p' "$tmp" >&2
+    fi
+    rm -f "$tmp"
+  fi
+fi
+
+if [[ "$probe_kvm" -eq 1 ]]; then
+  if ! command -v qemu-system-x86_64 >/dev/null 2>&1; then
+    report kvm-probe fail "qemu is not installed"
+  elif [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+    report kvm-probe fail "/dev/kvm is not accessible"
+  else
+    tmp="$(mktemp)"
+    timeout --foreground 2 qemu-system-x86_64 \
+      -machine pc -accel kvm -cpu host \
+      -smp 1 -m 64M \
+      -display none -serial none -monitor none -no-reboot \
+      >"$tmp" 2>&1
+    probe_status=$?
+    if [[ "$probe_status" -eq 124 ]]; then
+      report kvm-probe ok "KVM accepted -cpu host; process ran until the probe timeout"
+    else
+      report kvm-probe fail "qemu exited ${probe_status} before the probe timeout"
       sed -n '1,20p' "$tmp" >&2
     fi
     rm -f "$tmp"

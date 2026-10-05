@@ -2,7 +2,7 @@
 
 ## Status and host requirements
 
-This host is an AMD Ryzen 5 1600 with AMD-V. QEMU 11.1.1 is installed, `kvm_amd` is loaded, and `/dev/kvm` is accessible (`crw-rw-rw-`). The untouched template has booted; the record is `bootstrap/lane-a/g0-manifest.txt`. The rest of this page remains the lab runbook.
+The same lab runs on whichever host is in front of you. The office host is an AMD Ryzen 5 1600 with `kvm_amd` and AMD-V. This host is an Intel Core i7-10750H with `kvm_intel` and nested virtualization enabled. Both have QEMU 11.1.1 and an accessible `/dev/kvm` (`crw-rw-rw-`). `tools/doctor.sh --probe-kvm` accepts either vendor module. KVM boots use `-accel kvm -cpu host`, so the guest sees that machine's CPU. TCG uses the fixed `qemu64` feature set on either host. The Ryzen untouched-template boot is `bootstrap/lane-a/g0-manifest.txt`. Keep each new measurement labeled with the host that produced it. The rest of this page remains the lab runbook.
 
 Use a Linux x86-64 development host with enough RAM for the guest, compiler, and separate model service. Begin with TCG emulation for functional tests. Use KVM on a machine with accessible virtualization support for performance evaluation. The host may run all components, but isolate inference and QEMU CPU resources when comparing latency.
 
@@ -96,11 +96,13 @@ These are proposed application flags, not existing Hermit kernel flags. The harn
 
 ## KVM performance lane
 
-Use the same guest, memory size, virtual devices, and workload definitions, replacing the TCG accelerator/CPU arguments with:
+Use the same guest, memory size, virtual devices, and workload definitions on either host, replacing the TCG accelerator/CPU arguments with:
 
 ```bash
 -accel kvm -cpu host
 ```
+
+`kvm_intel` and `kvm_amd` both take `-cpu host`. Do not keep a separate CPU flag list per vendor.
 
 Confirm KVM actually initialized. Record host CPU model, topology, kernel, QEMU version, CPU affinity, governor/turbo policy, inference device, and concurrent host load. If measuring with invariant TSC, validate host support and use the loader's documented benchmarking configuration, then keep it fixed across comparisons. Never use `-cpu host` as the TCG configuration.
 

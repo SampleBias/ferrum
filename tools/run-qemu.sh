@@ -73,7 +73,16 @@ timeout --foreground "$timeout_s" qemu-system-x86_64 \
   -initrd "$AIK_GUEST"
 raw_status=$?
 
-echo "raw_exit=${raw_status} accel=${accel}"
+host_cpu="$(awk -F: '/model name/ { gsub(/^ +/, "", $2); print $2; exit }' /proc/cpuinfo 2>/dev/null || true)"
+kvm_module=""
+if [[ "$accel" == "kvm" && -r /proc/modules ]]; then
+  if grep -q '^kvm_intel ' /proc/modules; then
+    kvm_module="kvm_intel"
+  elif grep -q '^kvm_amd ' /proc/modules; then
+    kvm_module="kvm_amd"
+  fi
+fi
+echo "raw_exit=${raw_status} accel=${accel} host_cpu=${host_cpu:-unknown} kvm_module=${kvm_module:-none}"
 if [[ "$raw_status" -eq 124 ]]; then
   echo "qemu timed out after ${timeout_s}s" >&2
 fi
