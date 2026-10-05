@@ -24,6 +24,10 @@ fn main() -> ExitCode {
                 "FERRUM_APPLIED profile={} generation={}",
                 applied.profile, applied.generation
             );
+            if let Err(err) = actuate(&applied.profile) {
+                println!("FERRUM_FAIL {err}");
+                return ExitCode::from(1);
+            }
             println!("FERRUM_COMPLETE");
             ExitCode::SUCCESS
         }
@@ -47,7 +51,11 @@ fn run() -> Result<policy_guest::Applied, String> {
         }
     }
     let mut stream = TcpStream::connect(&controller).map_err(|err| format!("connect {controller}: {err}"))?;
-    exchange(&mut stream, boot, 3_000_000).map_err(|err| err.to_string())
+    let applied = exchange(&mut stream, boot, 3_000_000).map_err(|err| err.to_string())?;
+    // Hermit's TCP close waits until the socket is inactive. The mock
+    // controller has already exited, so that wait does not finish.
+    std::mem::forget(stream);
+    Ok(applied)
 }
 
 fn fair_demo_exit() -> ExitCode {
@@ -300,6 +308,104 @@ fn fair_progress() -> Result<(), String> {
 #[cfg(not(target_os = "hermit"))]
 fn fair_progress() -> Result<(), String> {
     Err("progress check runs inside the hermit guest".to_string())
+}
+
+#[cfg(target_os = "hermit")]
+fn actuate(profile: &str) -> Result<(), String> {
+    use std::hint::spin_loop;
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+    use std::thread;
+
+    use policy_core::catalog_spec;
+    use policy_types::{CatalogId, ProfileId};
+
+    const LATENCY: u8 = 1;
+    const BATCH: u8 = 2;
+    const MAINTENANCE: u8 = 3;
+
+    unsafe extern "C" {
+        fn sys_policy_register(class: u8) -> i32;
+        fn sys_policy_set_weights(latency: u32, batch: u32, maintenance: u32) -> i32;
+        fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
+        fn sys_usleep(usecs: u64);
+    }
+
+    let id = ProfileId::parse(profile).ok_or_else(|| format!("unknown profile {profile}"))?;
+    let weights = catalog_spec(CatalogId::CpuV1).profile(id).weights();
+
+    static READY: AtomicU32 = AtomicU32::new(0);
+    static FAILED: AtomicBool = AtomicBool::new(false);
+
+    for class in [LATENCY, BATCH, MAINTENANCE] {
+        thread::spawn(move || {
+            if unsafe { sys_policy_register(class) } == 0 {
+                READY.fetch_add(1, Ordering::Release);
+            } else {
+                FAILED.store(true, Ordering::Release);
+            }
+            loop {
+                spin_loop();
+            }
+        });
+    }
+
+    for _ in 0..40 {
+        if READY.load(Ordering::Acquire) == 3 || FAILED.load(Ordering::Acquire) {
+            break;
+        }
+        unsafe { sys_usleep(50_000) };
+    }
+    if FAILED.load(Ordering::Acquire) {
+        return Err("a worker could not register".to_string());
+    }
+    if READY.load(Ordering::Acquire) != 3 {
+        return Err("workers did not register".to_string());
+    }
+
+    let rc = unsafe { sys_policy_set_weights(weights[0], weights[1], weights[2]) };
+    if rc != 0 {
+        return Err(format!("weights returned {rc}"));
+    }
+
+    let read = |class: u8| -> Result<u64, String> {
+        let mut service_us = 0u64;
+        let rc = unsafe { sys_policy_read(class, &mut service_us) };
+        if rc == 0 {
+            Ok(service_us)
+        } else {
+            Err(format!("read class {class} returned {rc}"))
+        }
+    };
+    let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    unsafe { sys_usleep(1_000_000) };
+    let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    let sample = (
+        after.0.saturating_sub(before.0),
+        after.1.saturating_sub(before.1),
+        after.2.saturating_sub(before.2),
+    );
+    println!(
+        "FERRUM_SCHED window={profile} latency={} batch={} maintenance={}",
+        sample.0, sample.1, sample.2
+    );
+
+    let served = sample.0 > 0 && sample.1 > 0 && sample.2 > 0;
+    let directed = match id {
+        ProfileId::Balanced => true,
+        ProfileId::Latency => sample.0 > sample.1 && sample.0 > sample.2,
+        ProfileId::Throughput => sample.1 > sample.0 && sample.1 > sample.2,
+        ProfileId::Reclaim => sample.2 > sample.0 && sample.2 > sample.1,
+    };
+    if !served || !directed {
+        return Err("applied profile did not change class service".to_string());
+    }
+    println!("FERRUM_SCHED_OK");
+    Ok(())
+}
+
+#[cfg(not(target_os = "hermit"))]
+fn actuate(_profile: &str) -> Result<(), String> {
+    Ok(())
 }
 
 fn default_controller() -> String {
