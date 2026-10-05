@@ -14,6 +14,8 @@ fn main() -> ExitCode {
     println!("FERRUM_START policy-guest");
     let emergency = env::args().skip(1).any(|arg| arg == "--emergency");
     let stage_race = env::args().skip(1).any(|arg| arg == "--stage-race");
+    let stale = env::args().skip(1).any(|arg| arg == "--stale");
+    let late = env::args().skip(1).any(|arg| arg == "--late");
     if env::args().skip(1).any(|arg| arg == "--fair-progress") {
         return fair_progress_exit();
     }
@@ -26,7 +28,7 @@ fn main() -> ExitCode {
                 "FERRUM_APPLIED profile={} generation={}",
                 applied.profile, applied.generation
             );
-            if let Err(err) = actuate(&applied.profile, emergency, stage_race) {
+            if let Err(err) = actuate(&applied.profile, emergency, stage_race, stale, late) {
                 println!("FERRUM_FAIL {err}");
                 return ExitCode::from(1);
             }
@@ -48,7 +50,7 @@ fn run() -> Result<policy_guest::Applied, String> {
             controller = value.to_string();
         } else if let Some(value) = arg.strip_prefix("--boot-id=") {
             boot = BootId::from_hex(value).map_err(|_| format!("bad boot id"))?;
-        } else if arg == "--emergency" || arg == "--stage-race" {
+        } else if arg == "--emergency" || arg == "--stage-race" || arg == "--stale" || arg == "--late" {
         } else {
             return Err(format!("unknown argument {arg}"));
         }
@@ -344,6 +346,7 @@ fn ack_reason_name(reason: u8) -> &'static str {
         0 => "none",
         1 => "emergency",
         2 => "late",
+        3 => "stale",
         _ => "unknown",
     }
 }
@@ -360,7 +363,7 @@ fn ack_profile_name(profile: u8) -> &'static str {
 }
 
 #[cfg(target_os = "hermit")]
-fn actuate(profile: &str, emergency: bool, stage_race: bool) -> Result<(), String> {
+fn actuate(profile: &str, emergency: bool, stage_race: bool, stale: bool, late: bool) -> Result<(), String> {
     use std::hint::spin_loop;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::thread;
@@ -383,6 +386,7 @@ fn actuate(profile: &str, emergency: bool, stage_race: bool) -> Result<(), Strin
             maintenance: u32,
             accept_us: u64,
             lease_us: u64,
+            base_generation: u64,
         ) -> i32;
         fn sys_policy_staged() -> i32;
         fn sys_policy_generation(generation: *mut u64) -> i32;
@@ -423,7 +427,7 @@ fn actuate(profile: &str, emergency: bool, stage_race: bool) -> Result<(), Strin
         return Err("workers did not register".to_string());
     }
 
-    let stage = |accept_us: u64| -> Result<(), String> {
+    let stage = |accept_us: u64, base_generation: u64| -> Result<(), String> {
         let rc = unsafe {
             sys_policy_stage(
                 weights[0],
@@ -431,6 +435,7 @@ fn actuate(profile: &str, emergency: bool, stage_race: bool) -> Result<(), Strin
                 weights[2],
                 accept_us,
                 PROFILE_LEASE_US,
+                base_generation,
             )
         };
         if rc == 0 {
@@ -498,8 +503,117 @@ fn actuate(profile: &str, emergency: bool, stage_race: bool) -> Result<(), Strin
         Ok(ack)
     };
 
+    if stale {
+        let current = generation()?;
+        if current != 1 {
+            return Err(format!("boot generation was {current}"));
+        }
+        // Acceptance stays open. The only reason to drop this stage is that
+        // its base generation is not the scheduler's current generation.
+        stage(5_000_000, 0)?;
+        let read = |class: u8| -> Result<u64, String> {
+            let mut service_us = 0u64;
+            let rc = unsafe { sys_policy_read(class, &mut service_us) };
+            if rc == 0 {
+                Ok(service_us)
+            } else {
+                Err(format!("read class {class} returned {rc}"))
+            }
+        };
+        let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+        unsafe { sys_usleep(1_000_000) };
+        let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+        let sample = (
+            after.0.saturating_sub(before.0),
+            after.1.saturating_sub(before.1),
+            after.2.saturating_sub(before.2),
+        );
+        println!(
+            "FERRUM_SCHED window=balanced latency={} batch={} maintenance={}",
+            sample.0, sample.1, sample.2
+        );
+        let sum = sample.0 + sample.1 + sample.2;
+        let near_even = sum > 0
+            && sample.0 > 0
+            && sample.1 > 0
+            && sample.2 > 0
+            && sample.0 * 20 < sum * 9
+            && sample.1 * 20 < sum * 9
+            && sample.2 * 20 < sum * 9;
+        if !near_even {
+            return Err("stale stage changed class service".to_string());
+        }
+        if unsafe { sys_policy_staged() } != 0 {
+            return Err("scheduler left the stale profile staged".to_string());
+        }
+        if generation()? != 1 {
+            return Err("stale stage advanced the generation".to_string());
+        }
+        let ack = require_ack(4, 3, 0, 1, 1)?;
+        if ack.lease_until_guest_us != 0 {
+            return Err("stale stage armed a lease".to_string());
+        }
+        println!("FERRUM_STALE_DROPPED");
+        println!("FERRUM_SCHED_OK");
+        return Ok(());
+    }
+
+    if late {
+        let current = generation()?;
+        if current != 1 {
+            return Err(format!("boot generation was {current}"));
+        }
+        // The base generation is current. The acceptance window is already closed.
+        stage(0, current)?;
+        let read = |class: u8| -> Result<u64, String> {
+            let mut service_us = 0u64;
+            let rc = unsafe { sys_policy_read(class, &mut service_us) };
+            if rc == 0 {
+                Ok(service_us)
+            } else {
+                Err(format!("read class {class} returned {rc}"))
+            }
+        };
+        let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+        unsafe { sys_usleep(1_000_000) };
+        let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+        let sample = (
+            after.0.saturating_sub(before.0),
+            after.1.saturating_sub(before.1),
+            after.2.saturating_sub(before.2),
+        );
+        println!(
+            "FERRUM_SCHED window=balanced latency={} batch={} maintenance={}",
+            sample.0, sample.1, sample.2
+        );
+        let sum = sample.0 + sample.1 + sample.2;
+        let near_even = sum > 0
+            && sample.0 > 0
+            && sample.1 > 0
+            && sample.2 > 0
+            && sample.0 * 20 < sum * 9
+            && sample.1 * 20 < sum * 9
+            && sample.2 * 20 < sum * 9;
+        if !near_even {
+            return Err("late stage changed class service".to_string());
+        }
+        if unsafe { sys_policy_staged() } != 0 {
+            return Err("scheduler left the late profile staged".to_string());
+        }
+        if generation()? != 1 {
+            return Err("late stage advanced the generation".to_string());
+        }
+        let ack = require_ack(4, 2, 0, 1, 1)?;
+        if ack.lease_until_guest_us != 0 {
+            return Err("late stage armed a lease".to_string());
+        }
+        println!("FERRUM_LATE_DROPPED");
+        println!("FERRUM_SCHED_OK");
+        return Ok(());
+    }
+
     if stage_race {
-        stage(ACCEPTANCE_DEADLINE_US)?;
+        stage(ACCEPTANCE_DEADLINE_US, generation()?)?;
         let rc = unsafe { sys_policy_install_emergency() };
         if rc != 0 {
             return Err(format!("install emergency returned {rc}"));
@@ -517,7 +631,7 @@ fn actuate(profile: &str, emergency: bool, stage_race: bool) -> Result<(), Strin
         }
         // Acceptance stays open for the whole measurement. The scheduler has
         // to drop this stage because the override is in force.
-        stage(5_000_000)?;
+        stage(5_000_000, generation()?)?;
         let before = |class: u8| -> Result<u64, String> {
             let mut service_us = 0u64;
             let rc = unsafe { sys_policy_read(class, &mut service_us) };
@@ -563,7 +677,7 @@ fn actuate(profile: &str, emergency: bool, stage_race: bool) -> Result<(), Strin
         return Ok(());
     }
 
-    stage(ACCEPTANCE_DEADLINE_US)?;
+    stage(ACCEPTANCE_DEADLINE_US, generation()?)?;
     unsafe { sys_usleep(20_000) };
     let generation = generation()?;
     if generation < 2 {
@@ -711,7 +825,13 @@ fn actuate(profile: &str, emergency: bool, stage_race: bool) -> Result<(), Strin
 }
 
 #[cfg(not(target_os = "hermit"))]
-fn actuate(_profile: &str, _emergency: bool, _stage_race: bool) -> Result<(), String> {
+fn actuate(
+    _profile: &str,
+    _emergency: bool,
+    _stage_race: bool,
+    _stale: bool,
+    _late: bool,
+) -> Result<(), String> {
     Ok(())
 }
 

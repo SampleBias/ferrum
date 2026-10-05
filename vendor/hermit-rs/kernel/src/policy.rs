@@ -32,6 +32,7 @@ pub const ACK_REJECTED: u8 = 4;
 pub const ACK_REASON_NONE: u8 = 0;
 pub const ACK_REASON_EMERGENCY: u8 = 1;
 pub const ACK_REASON_LATE: u8 = 2;
+pub const ACK_REASON_STALE: u8 = 3;
 pub const PROFILE_BALANCED: u8 = 0;
 pub const PROFILE_LATENCY: u8 = 1;
 pub const PROFILE_THROUGHPUT: u8 = 2;
@@ -78,6 +79,7 @@ struct Pending {
 	weights: [u32; 3],
 	accept_until: u64,
 	lease_until: u64,
+	base_generation: u64,
 }
 
 struct State {
@@ -138,6 +140,7 @@ static STATE: hermit_sync::InterruptTicketMutex<State> = hermit_sync::InterruptT
 			weights: [0, 0, 0],
 			accept_until: 0,
 			lease_until: 0,
+			base_generation: 0,
 		},
 		ack_head: 0,
 		ack_len: 0,
@@ -250,16 +253,25 @@ pub fn stage(
 	maintenance: u32,
 	accept_us: u64,
 	lease_us: u64,
+	base_generation: u64,
 ) -> i32 {
-	if latency == 0 || batch == 0 || maintenance == 0 || accept_us == 0 || lease_us == 0 {
+	if latency == 0 || batch == 0 || maintenance == 0 || lease_us == 0 {
 		return -1;
 	}
+	// A zero acceptance window is already closed at the staging instant, so the
+	// next scheduling entry observes it as late even in the same microsecond.
+	let accept_until = if accept_us == 0 {
+		now.saturating_sub(1)
+	} else {
+		now.saturating_add(accept_us)
+	};
 	let mut state = STATE.lock();
 	state.staged = Pending {
 		occupied: true,
 		weights: [latency, batch, maintenance],
-		accept_until: now.saturating_add(accept_us),
+		accept_until,
 		lease_until: now.saturating_add(lease_us),
+		base_generation,
 	};
 	0
 }
@@ -433,33 +445,22 @@ fn enforce_lease(state: &mut State, now: u64) {
 }
 
 /// Install a staged profile after the outgoing slice has been charged.
-/// An emergency or a missed acceptance deadline drops the stage.
+/// An emergency, a stale base generation, or a missed acceptance deadline
+/// drops the stage. Generation does not move on a drop.
 fn activate_staged(state: &mut State, now: u64) {
 	if !state.staged.occupied {
 		return;
 	}
-	if state.emergency || now > state.staged.accept_until {
-		let reason = if state.emergency {
-			ACK_REASON_EMERGENCY
-		} else {
-			ACK_REASON_LATE
-		};
-		let generation = state.generation;
-		let profile = profile_code(state.weights);
-		let lease_until = state.lease_until;
-		state.staged.occupied = false;
-		push_ack(
-			state,
-			SchedAck {
-				kind: ACK_REJECTED,
-				reason,
-				profile,
-				previous_generation: generation,
-				generation,
-				guest_us: now,
-				lease_until_guest_us: lease_until,
-			},
-		);
+	if state.emergency {
+		reject_staged(state, now, ACK_REASON_EMERGENCY);
+		return;
+	}
+	if state.staged.base_generation != state.generation {
+		reject_staged(state, now, ACK_REASON_STALE);
+		return;
+	}
+	if now > state.staged.accept_until {
+		reject_staged(state, now, ACK_REASON_LATE);
 		return;
 	}
 	let previous = state.generation;
@@ -478,6 +479,25 @@ fn activate_staged(state: &mut State, now: u64) {
 			reason: ACK_REASON_NONE,
 			profile: profile_code(weights),
 			previous_generation: previous,
+			generation,
+			guest_us: now,
+			lease_until_guest_us: lease_until,
+		},
+	);
+}
+
+fn reject_staged(state: &mut State, now: u64, reason: u8) {
+	let generation = state.generation;
+	let profile = profile_code(state.weights);
+	let lease_until = state.lease_until;
+	state.staged.occupied = false;
+	push_ack(
+		state,
+		SchedAck {
+			kind: ACK_REJECTED,
+			reason,
+			profile,
+			previous_generation: generation,
 			generation,
 			guest_us: now,
 			lease_until_guest_us: lease_until,

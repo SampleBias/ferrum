@@ -242,9 +242,18 @@ pub extern "C" fn sys_policy_stage(
 	maintenance: u32,
 	accept_us: u64,
 	lease_us: u64,
+	base_generation: u64,
 ) -> i32 {
 	let now = arch::processor::get_timer_ticks();
-	crate::policy::stage(now, latency, batch, maintenance, accept_us, lease_us)
+	crate::policy::stage(
+		now,
+		latency,
+		batch,
+		maintenance,
+		accept_us,
+		lease_us,
+		base_generation,
+	)
 }
 
 #[cfg(feature = "ai-policy")]
