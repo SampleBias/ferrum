@@ -1,0 +1,14 @@
+{
+  "id": "features-v0",
+  "schema": 1,
+  "queue_high_min": 4,
+  "wait_us_high": 5000,
+  "service_mid_bp": 2500,
+  "service_high_bp": 5000,
+  "service_dominant_bp": 7500,
+  "pressure_medium_bp": 2000,
+  "pressure_high_bp": 8000,
+  "evictable_backlog_bytes": 33554432,
+  "trend_alpha_bp": 5000,
+  "note": "Bin edges frozen before any Laya call. Labels describe measurements. They are not profile names."
+}

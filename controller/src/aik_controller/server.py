@@ -17,6 +17,7 @@ from aik_controller.framing import (
     seal,
     snapshot_hash,
 )
+from aik_controller.features import FeatureError, FeatureHistory, feature_line, laya_status, load_edges
 from aik_controller.heuristic import choose, load_thresholds
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -111,6 +112,8 @@ def exchange_round(
     identity: dict,
     hello: dict,
     session_id: str,
+    edges: dict,
+    history: FeatureHistory,
 ) -> int:
     snapshot = read_payload(conn, key)
     if snapshot.get("kind") != "snapshot":
@@ -126,6 +129,12 @@ def exchange_round(
     if claimed != digest:
         print("snapshot hash mismatch", file=sys.stderr)
         return 1
+    try:
+        state = history.observe(body, edges)
+    except FeatureError as err:
+        print(f"rejected features: {err}", file=sys.stderr)
+        return 1
+    print(feature_line(state), flush=True)
     profile = choose(body, thresholds)
     print(proposal_line(snapshot, profile), flush=True)
     write_payload(
@@ -207,13 +216,21 @@ def accept_scheduler_report(
 
 
 def serve_once(
-    conn: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict, hold: bool
+    conn: socket.socket,
+    key: bytes,
+    catalog: dict,
+    thresholds: dict,
+    identity: dict,
+    hold: bool,
+    edges: dict,
 ) -> int:
     opened = accept_hello(conn, key, catalog, identity)
     if opened is None:
         return 1
     hello, session_id = opened
-    status = exchange_round(conn, key, catalog, thresholds, identity, hello, session_id)
+    status = exchange_round(
+        conn, key, catalog, thresholds, identity, hello, session_id, edges, FeatureHistory()
+    )
     if status == 0 and hold:
         # Stay connected for the rest of the lease so a kill is a dead peer,
         # not a controller that already finished and closed the socket.
@@ -233,16 +250,20 @@ def serve_follow(
     catalog: dict,
     thresholds: dict,
     identity: dict,
+    edges: dict,
 ) -> int:
     """One session. Keep exchanging rounds until the guest closes."""
     opened = accept_hello(conn, key, catalog, identity)
     if opened is None:
         return 1
     hello, session_id = opened
+    history = FeatureHistory()
     rounds = 0
     while True:
         try:
-            status = exchange_round(conn, key, catalog, thresholds, identity, hello, session_id)
+            status = exchange_round(
+                conn, key, catalog, thresholds, identity, hello, session_id, edges, history
+            )
         except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError, OSError) as err:
             if rounds == 0:
                 print(f"session failed: {err}", file=sys.stderr)
@@ -261,14 +282,18 @@ def serve_rounds(
     thresholds: dict,
     identity: dict,
     rounds: int,
+    edges: dict,
 ) -> int:
     """One session. Each round is a snapshot, a heuristic proposal, and the scheduler report."""
     opened = accept_hello(conn, key, catalog, identity)
     if opened is None:
         return 1
     hello, session_id = opened
+    history = FeatureHistory()
     for _ in range(rounds):
-        status = exchange_round(conn, key, catalog, thresholds, identity, hello, session_id)
+        status = exchange_round(
+            conn, key, catalog, thresholds, identity, hello, session_id, edges, history
+        )
         if status != 0:
             return status
     print(f"ROUNDS {rounds}", flush=True)
@@ -276,7 +301,7 @@ def serve_rounds(
 
 
 def propose_once(
-    conn: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict
+    conn: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict, edges: dict
 ) -> dict:
     """Hello, snapshot, and one proposal. The caller decides whether to read the report."""
     hello = read_payload(conn, key)
@@ -311,6 +336,11 @@ def propose_once(
     digest = snapshot_hash(body)
     if snapshot.get("snapshot_hash") != digest:
         raise FrameError("snapshot hash mismatch")
+    try:
+        state = FeatureHistory().observe(body, edges)
+    except FeatureError as err:
+        raise FrameError(f"rejected features: {err}") from err
+    print(feature_line(state), flush=True)
     profile = choose(body, thresholds)
     print(proposal_line(snapshot, profile), flush=True)
     proposal = {
@@ -334,26 +364,26 @@ def propose_once(
 
 
 def serve_lost_ack(
-    listener: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict
+    listener: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict, edges: dict
 ) -> int:
     """Drop the applied frame, then require the reconnect snapshot to carry the kernel generation.
 
     The original proposal is replayed on the new connection. The guest must reject it.
     """
     try:
-        return serve_lost_ack_session(listener, key, catalog, thresholds, identity)
+        return serve_lost_ack_session(listener, key, catalog, thresholds, identity, edges)
     except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
         print(f"session failed: {err}", file=sys.stderr)
         return 1
 
 
 def serve_lost_ack_session(
-    listener: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict
+    listener: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict, edges: dict
 ) -> int:
     first, _addr = listener.accept()
     first.settimeout(60)
     with first:
-        proposal = propose_once(first, key, catalog, thresholds, identity)
+        proposal = propose_once(first, key, catalog, thresholds, identity, edges)
     print(f"DROPPED_ACK seq={proposal['request_seq']}", flush=True)
 
     second, _addr = listener.accept()
@@ -488,6 +518,7 @@ def main(argv: list[str] | None = None) -> int:
     catalog_doc = json.loads(catalog_path.read_text())
     catalog = {"id": catalog_doc["catalog_id"], "hash": catalog_hash(catalog_path)}
     thresholds = load_thresholds(root / "configs" / "heuristic-v0.json")
+    edges = load_edges(root / "configs" / "features-v0.json")
     identity = json.loads((root / "configs" / "lab-identity.json").read_text())
 
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -496,9 +527,10 @@ def main(argv: list[str] | None = None) -> int:
     listener.listen(1)
     bound_host, bound_port = listener.getsockname()
     print(f"LISTENING {bound_host} {bound_port}", flush=True)
+    print(f"LAYA {laya_status(root)}", flush=True)
     try:
         if args.lose_ack:
-            return serve_lost_ack(listener, key, catalog, thresholds, identity)
+            return serve_lost_ack(listener, key, catalog, thresholds, identity, edges)
         if args.reject_frames:
             return serve_reject_frames(listener, key, catalog, identity)
         if args.follow and args.rounds:
@@ -509,7 +541,7 @@ def main(argv: list[str] | None = None) -> int:
             conn.settimeout(60)
             with conn:
                 try:
-                    return serve_follow(conn, key, catalog, thresholds, identity)
+                    return serve_follow(conn, key, catalog, thresholds, identity, edges)
                 except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
                     print(f"session failed: {err}", file=sys.stderr)
                     return 1
@@ -521,7 +553,7 @@ def main(argv: list[str] | None = None) -> int:
             conn.settimeout(60)
             with conn:
                 try:
-                    return serve_rounds(conn, key, catalog, thresholds, identity, args.rounds)
+                    return serve_rounds(conn, key, catalog, thresholds, identity, args.rounds, edges)
                 except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
                     print(f"session failed: {err}", file=sys.stderr)
                     return 1
@@ -532,7 +564,7 @@ def main(argv: list[str] | None = None) -> int:
             conn.settimeout(60)
             with conn:
                 try:
-                    status = serve_once(conn, key, catalog, thresholds, identity, args.hold)
+                    status = serve_once(conn, key, catalog, thresholds, identity, args.hold, edges)
                 except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
                     print(f"session failed: {err}", file=sys.stderr)
                     status = 1
