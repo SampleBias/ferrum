@@ -32,6 +32,22 @@ pub struct RejectReport {
     pub reason: RejectReason,
 }
 
+/// A proposal recorded while the guest is still in shadow.
+///
+/// `generation` stays equal to `previous_generation` and the lease stays at 0.
+/// The profile is the one that was proposed. The scheduler profile does not change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShadowReport {
+    pub boot_id: BootId,
+    pub session_id: SessionId,
+    pub request_seq: u64,
+    pub previous_generation: u64,
+    pub generation: u64,
+    pub profile: ProfileId,
+    pub guest_us: u64,
+    pub lease_until_guest_us: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Decoded {
     Hello(Hello),
@@ -144,6 +160,22 @@ pub fn encode_applied(report: &AppliedReport) -> Result<Vec<u8>, WireError> {
         "activated_guest_us": report.activated_guest_us,
         "lease_until_guest_us": report.lease_until_guest_us,
         "desired_matches_actual": report.desired_matches_actual,
+    }))
+    .map_err(|_| WireError::Schema)?)
+}
+
+pub fn encode_shadow(report: &ShadowReport) -> Result<Vec<u8>, WireError> {
+    Ok(serde_json::to_vec(&json!({
+        "protocol": PROTOCOL_VERSION,
+        "kind": "shadow",
+        "boot_id": report.boot_id.to_string(),
+        "session_id": report.session_id.to_string(),
+        "request_seq": report.request_seq,
+        "previous_generation": report.previous_generation,
+        "generation": report.generation,
+        "profile": report.profile.as_str(),
+        "guest_us": report.guest_us,
+        "lease_until_guest_us": report.lease_until_guest_us,
     }))
     .map_err(|_| WireError::Schema)?)
 }

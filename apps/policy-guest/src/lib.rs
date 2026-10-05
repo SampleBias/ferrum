@@ -7,14 +7,18 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
-use policy_core::{ActivateOutcome, Capture, EngineConfig, PolicyEngine, ProposalOutcome};
+use policy_core::{
+    AckKind, ActivateOutcome, Capture, EngineConfig, PolicyEngine, ProposalOutcome,
+};
 use policy_types::{
-    BootId, CatalogId, Hash32, Hello, ObjectiveId, Observation, ProfileId, RejectReason, RunMode,
-    SessionId, CAP_CPU, GUEST_MEMORY_BYTES, MAX_WORKLOAD_THREADS, TELEMETRY_VERSION,
+    BootId, CatalogId, ControlPhase, Hash32, Hello, ObjectiveId, Observation, ProfileId,
+    RejectReason, RunMode, SessionId, CAP_CPU, GUEST_MEMORY_BYTES, MAX_WORKLOAD_THREADS,
+    TELEMETRY_VERSION,
 };
 use policy_wire::{
-    decode_message, encode_applied, encode_hello, encode_reject, encode_snapshot, open, seal,
-    Direction, FrameDecoder, WireError, AppliedReport, Decoded, RejectReport,
+    decode_message, encode_applied, encode_hello, encode_reject, encode_shadow, encode_snapshot,
+    open, seal, AppliedReport, Decoded, Direction, FrameDecoder, RejectReport, ShadowReport,
+    WireError,
 };
 
 /// 32 bytes of 0x11. Same bytes as configs/lab-psk.hex.
@@ -51,6 +55,16 @@ impl std::fmt::Display for SessionError {
 
 pub struct Applied {
     pub profile: String,
+    pub generation: u64,
+}
+
+/// A proposal the shadow-phase engine recorded without staging.
+///
+/// `noted` is the profile in the proposal. `active` is the scheduler profile,
+/// which stays at the boot profile. `generation` does not advance.
+pub struct ShadowNote {
+    pub noted: String,
+    pub active: String,
     pub generation: u64,
 }
 
@@ -171,6 +185,133 @@ pub fn exchange(stream: &mut TcpStream, boot_id: BootId, now_us: u64) -> Result<
     })
 }
 
+/// One snapshot while the engine stays in shadow.
+///
+/// The controller still sends the heuristic proposal. The engine records it
+/// and does not stage it, so the boot profile and generation stay put.
+pub fn exchange_shadow(
+    stream: &mut TcpStream,
+    boot_id: BootId,
+    now_us: u64,
+) -> Result<ShadowNote, SessionError> {
+    let mut session = ShadowSession::open(stream, boot_id)?;
+    let mut observation = Observation::quiet(1_000_000);
+    observation.groups[0].queue_len = 4;
+    session.note(stream, now_us, observation)
+}
+
+/// Several snapshots on one shadow session.
+///
+/// Each observation is sent as its own round. The engine never promotes, so
+/// every note keeps the boot profile and the boot generation.
+pub fn exchange_shadow_trace(
+    stream: &mut TcpStream,
+    boot_id: BootId,
+    mut now_us: u64,
+    observations: &[Observation],
+) -> Result<Vec<ShadowNote>, SessionError> {
+    let mut session = ShadowSession::open(stream, boot_id)?;
+    let mut notes = Vec::with_capacity(observations.len());
+    for observation in observations {
+        notes.push(session.note(stream, now_us, *observation)?);
+        now_us = now_us.saturating_add(policy_types::MIN_DWELL_US);
+    }
+    Ok(notes)
+}
+
+/// A controller session that records proposals and does not stage them.
+pub struct ShadowSession {
+    engine: PolicyEngine,
+}
+
+impl ShadowSession {
+    pub fn open(stream: &mut TcpStream, boot_id: BootId) -> Result<Self, SessionError> {
+        prepare(stream);
+        let mut engine = PolicyEngine::boot(EngineConfig {
+            catalog: CatalogId::CpuV1,
+            boot_id,
+            objective: ObjectiveId::MixedLatencyV1,
+            approved_model: Hash32::repeat(0xcc),
+            approved_calibration: Hash32::repeat(0xdd),
+            run_mode: RunMode::Shadow,
+            manual_rearm: false,
+        });
+        exchange_hello(stream, &mut engine, boot_id, RunMode::Shadow)?;
+        Ok(Self { engine })
+    }
+
+    /// Send `observation` and report the proposal as a shadow note.
+    pub fn note(
+        &mut self,
+        stream: &mut TcpStream,
+        now_us: u64,
+        observation: Observation,
+    ) -> Result<ShadowNote, SessionError> {
+        let Capture::Send { snapshot, .. } = self
+            .engine
+            .capture(now_us, observation)
+            .map_err(|_| SessionError::Protocol("capture failed"))?
+        else {
+            return Err(SessionError::Protocol("snapshot was retained"));
+        };
+        send(stream, Direction::GuestToController, &encode_snapshot(&snapshot)?)?;
+        let proposal = match decode_message(&recv(stream, Direction::ControllerToGuest)?)? {
+            Decoded::Proposal(proposal) => proposal,
+            _ => return Err(SessionError::Protocol("expected proposal")),
+        };
+        if !matches!(
+            self.engine.on_proposal(now_us, &proposal),
+            ProposalOutcome::ShadowNoted
+        ) {
+            return Err(SessionError::Protocol("proposal was not kept in shadow"));
+        }
+        let status = self.engine.status();
+        if status.phase != ControlPhase::Shadow
+            || status.profile != ProfileId::Balanced
+            || status.generation != snapshot.base_generation
+            || status.lease_until_guest_us.is_some()
+        {
+            return Err(SessionError::Protocol("shadow moved the scheduler"));
+        }
+        let (acks, dropped) = self.engine.drain_acks();
+        if dropped != 0 {
+            return Err(SessionError::Protocol("shadow acknowledgment was dropped"));
+        }
+        let mut noted = None;
+        for ack in acks.into_iter().flatten() {
+            if noted.is_some() {
+                return Err(SessionError::Protocol("shadow produced more than one acknowledgment"));
+            }
+            noted = Some(ack);
+        }
+        let ack = noted.ok_or(SessionError::Protocol("shadow produced no acknowledgment"))?;
+        if !matches!(ack.kind, AckKind::Shadow)
+            || ack.profile != proposal.profile
+            || ack.generation != ack.previous_generation
+            || ack.lease_until_guest_us != 0
+        {
+            return Err(SessionError::Protocol("shadow acknowledgment was an activation"));
+        }
+        let report = ShadowReport {
+            boot_id: snapshot.boot_id,
+            session_id: proposal.session_id,
+            request_seq: proposal.request_seq,
+            previous_generation: ack.previous_generation,
+            generation: ack.generation,
+            profile: ack.profile,
+            guest_us: ack.guest_us,
+            lease_until_guest_us: ack.lease_until_guest_us,
+        };
+        send(stream, Direction::GuestToController, &encode_shadow(&report)?)?;
+        stream.flush()?;
+        Ok(ShadowNote {
+            noted: proposal.profile.as_str().to_string(),
+            active: status.profile.as_str().to_string(),
+            generation: status.generation,
+        })
+    }
+}
+
 /// Second session after the applied frame was lost.
 ///
 /// `generation` and `profile` are the scheduler's values. The snapshot reports
@@ -194,7 +335,7 @@ pub fn recover_lost_ack(
         manual_rearm: false,
     });
     engine.adopt_scheduler(generation, profile);
-    exchange_hello(stream, &mut engine, boot_id)?;
+    exchange_hello(stream, &mut engine, boot_id, RunMode::Mock)?;
     let observation = Observation::quiet(1_000_000);
     let Capture::Send { snapshot, .. } = engine
         .capture(now_us, observation)
@@ -256,7 +397,7 @@ pub fn reject_bad_frames(
         run_mode: RunMode::Mock,
         manual_rearm: false,
     });
-    exchange_hello(stream, &mut engine, boot_id)?;
+    exchange_hello(stream, &mut engine, boot_id, RunMode::Mock)?;
     let observation = Observation::quiet(1_000_000);
     let Capture::Send { snapshot, .. } = engine
         .capture(now_us, observation)
@@ -327,7 +468,7 @@ fn negotiate(stream: &mut TcpStream, boot_id: BootId, now_us: u64) -> Result<Neg
         run_mode: RunMode::Mock,
         manual_rearm: false,
     });
-    exchange_hello(stream, &mut engine, boot_id)?;
+    exchange_hello(stream, &mut engine, boot_id, RunMode::Mock)?;
     engine
         .promote_to_active()
         .map_err(|_| SessionError::Protocol("promote rejected"))?;
@@ -372,13 +513,14 @@ fn exchange_hello(
     stream: &mut TcpStream,
     engine: &mut PolicyEngine,
     boot_id: BootId,
+    mode: RunMode,
 ) -> Result<(), SessionError> {
     let status = engine.status();
     let hello = Hello {
         boot_id,
         catalog_id: status.catalog,
         catalog_hash: status.catalog_hash,
-        mode: RunMode::Mock,
+        mode,
         capabilities: CAP_CPU,
         max_workload_threads: MAX_WORKLOAD_THREADS,
         guest_memory_bytes: GUEST_MEMORY_BYTES,
@@ -422,7 +564,7 @@ impl LiveSession {
             run_mode: RunMode::Mock,
             manual_rearm: false,
         });
-        exchange_hello(stream, &mut engine, boot_id)?;
+        exchange_hello(stream, &mut engine, boot_id, RunMode::Mock)?;
         engine
             .promote_to_active()
             .map_err(|_| SessionError::Protocol("promote rejected"))?;
@@ -544,6 +686,112 @@ mod tests {
                 "APPLIED profile=latency generation=2 previous=1 guest_us=3000000 lease_until=6000000"
             ),
             "controller log did not record the activation clock: {log}"
+        );
+    }
+
+    #[test]
+    fn shadow_session_records_the_proposal_without_staging_it() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut child = Command::new("python3")
+            .arg("-m")
+            .arg("aik_controller.server")
+            .arg("--once")
+            .arg("--bind")
+            .arg("127.0.0.1:0")
+            .arg("--root")
+            .arg(&root)
+            .env("PYTHONPATH", root.join("controller/src"))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start mock controller");
+        let stdout = child.stdout.take().unwrap();
+        let mut lines = BufReader::new(stdout).lines();
+        let listening = lines.next().unwrap().unwrap();
+        let port: u16 = listening.split_whitespace().nth(2).unwrap().parse().unwrap();
+
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let boot = BootId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let note = exchange_shadow(&mut stream, boot, 3_000_000).unwrap();
+        assert_eq!(note.noted, "latency");
+        assert_eq!(note.active, "balanced");
+        assert_eq!(note.generation, 1);
+        drop(stream);
+
+        let status = child.wait().unwrap();
+        let mut err = String::new();
+        child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+        assert!(status.success(), "controller failed: {err}");
+        let log: String = lines.map(|line| line.unwrap()).collect::<Vec<_>>().join("\n");
+        assert!(
+            log.contains(
+                "SHADOW_NOTED profile=latency generation=1 previous=1 guest_us=3000000 lease_until=0"
+            ) && !log.contains("APPLIED"),
+            "controller log did not keep the proposal in shadow: {log}"
+        );
+    }
+
+    #[test]
+    fn shadow_trace_keeps_the_boot_profile_across_mixed_v1() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut child = Command::new("python3")
+            .arg("-m")
+            .arg("aik_controller.server")
+            .arg("--rounds")
+            .arg("5")
+            .arg("--bind")
+            .arg("127.0.0.1:0")
+            .arg("--root")
+            .arg(&root)
+            .env("PYTHONPATH", root.join("controller/src"))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start mock controller");
+        let stdout = child.stdout.take().unwrap();
+        let mut lines = BufReader::new(stdout).lines();
+        let listening = lines.next().unwrap().unwrap();
+        let port: u16 = listening.split_whitespace().nth(2).unwrap().parse().unwrap();
+
+        let observations: Vec<_> = workloads::mixed_v1()
+            .iter()
+            .enumerate()
+            .map(|(index, phase)| {
+                let step = index as u64 + 1;
+                workloads::measured(*phase, workloads::SAMPLE_US, [100_000 * step, 10_000 * step, 1_000 * step])
+            })
+            .collect();
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let boot = BootId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let notes = exchange_shadow_trace(&mut stream, boot, 3_000_000, &observations).unwrap();
+        let expected = ["latency", "throughput", "balanced", "reclaim", "balanced"];
+        assert_eq!(notes.len(), expected.len());
+        for (note, profile) in notes.iter().zip(expected) {
+            assert_eq!(note.noted, profile);
+            assert_eq!(note.active, "balanced");
+            assert_eq!(note.generation, 1);
+        }
+        drop(stream);
+
+        let status = child.wait().unwrap();
+        let mut err = String::new();
+        child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+        assert!(status.success(), "controller failed: {err}");
+        let log: String = lines.map(|line| line.unwrap()).collect::<Vec<_>>().join("\n");
+        let features: Vec<_> = log.lines().filter(|line| line.starts_with("FEATURES ")).collect();
+        assert!(
+            features.len() == 5 && features.iter().all(|line| line.contains("profile=balanced")),
+            "snapshots left the boot profile: {log}"
+        );
+        assert!(
+            log.contains("SHADOW_NOTED profile=latency generation=1 previous=1")
+                && log.contains("SHADOW_NOTED profile=throughput generation=1 previous=1")
+                && log.contains("SHADOW_NOTED profile=reclaim generation=1 previous=1")
+                && log.contains("ROUNDS 5")
+                && !log.contains("APPLIED"),
+            "controller log staged a shadow trace: {log}"
         );
     }
 

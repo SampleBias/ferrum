@@ -19,7 +19,7 @@ from aik_controller.framing import (
 )
 from aik_controller.features import FeatureError, FeatureHistory, feature_line, laya_status, load_edges
 from aik_controller.heuristic import choose, load_thresholds
-from aik_controller.shadow import send_heuristic_then_shadow, shadow_line
+from aik_controller.shadow import send_heuristic_then_shadow, shadow_line, shadow_trace_line
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -116,6 +116,7 @@ def exchange_round(
     edges: dict,
     history: FeatureHistory,
     shadow=None,
+    notes=None,
 ) -> int:
     snapshot = read_payload(conn, key)
     if snapshot.get("kind") != "snapshot":
@@ -165,6 +166,8 @@ def exchange_round(
     note = send_heuristic_then_shadow(write_proposal, shadow, state, profile)
     if note is not None:
         print(shadow_line(note), flush=True)
+        if notes is not None:
+            notes.append(note)
 
     report = read_payload(conn, key)
     return accept_scheduler_report(
@@ -179,8 +182,9 @@ def accept_scheduler_report(
 
     An `applied` frame is the scheduler activation record: generation, guest
     timestamp, and lease. A `reject` frame is the scheduler dropping that same
-    proposal. Either one completes the session. A transport or identity failure
-    does not.
+    proposal. A `shadow` frame records the proposal while generation and the
+    lease stay unchanged. Any of those completes the session. A transport or
+    identity failure does not.
     """
     if report.get("boot_id") != boot_id or report.get("session_id") != session_id:
         print("report identity mismatch", file=sys.stderr)
@@ -219,6 +223,26 @@ def accept_scheduler_report(
             return 1
         print(f"REJECTED reason={reason} seq={request_seq}", flush=True)
         return 0
+    if kind == "shadow":
+        if report.get("profile") != profile:
+            print("shadow profile does not match the proposal", file=sys.stderr)
+            return 1
+        previous = report.get("previous_generation")
+        generation = report.get("generation")
+        lease_until = report.get("lease_until_guest_us")
+        if not all(isinstance(value, int) for value in (previous, generation, lease_until)):
+            print("shadow report is missing generation fields", file=sys.stderr)
+            return 1
+        if generation != previous or lease_until != 0:
+            print("shadow report changed the scheduler", file=sys.stderr)
+            return 1
+        guest_us = report.get("guest_us")
+        print(
+            f"SHADOW_NOTED profile={profile} generation={generation} previous={previous} "
+            f"guest_us={guest_us} lease_until=0",
+            flush=True,
+        )
+        return 0
     print(f"guest reported {kind} {report.get('reason', '')}", file=sys.stderr)
     return 1
 
@@ -237,9 +261,22 @@ def serve_once(
     if opened is None:
         return 1
     hello, session_id = opened
+    notes = [] if shadow is not None else None
     status = exchange_round(
-        conn, key, catalog, thresholds, identity, hello, session_id, edges, FeatureHistory(), shadow
+        conn,
+        key,
+        catalog,
+        thresholds,
+        identity,
+        hello,
+        session_id,
+        edges,
+        FeatureHistory(),
+        shadow,
+        notes,
     )
+    if status == 0 and notes is not None:
+        print(shadow_trace_line(notes), flush=True)
     if status == 0 and hold:
         # Stay connected for the rest of the lease so a kill is a dead peer,
         # not a controller that already finished and closed the socket.
@@ -268,16 +305,29 @@ def serve_follow(
         return 1
     hello, session_id = opened
     history = FeatureHistory()
+    notes = [] if shadow is not None else None
     rounds = 0
     while True:
         try:
             status = exchange_round(
-                conn, key, catalog, thresholds, identity, hello, session_id, edges, history, shadow
+                conn,
+                key,
+                catalog,
+                thresholds,
+                identity,
+                hello,
+                session_id,
+                edges,
+                history,
+                shadow,
+                notes,
             )
         except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError, OSError) as err:
             if rounds == 0:
                 print(f"session failed: {err}", file=sys.stderr)
                 return 1
+            if notes is not None:
+                print(shadow_trace_line(notes), flush=True)
             print(f"ROUNDS {rounds}", flush=True)
             return 0
         if status != 0:
@@ -301,12 +351,25 @@ def serve_rounds(
         return 1
     hello, session_id = opened
     history = FeatureHistory()
+    notes = [] if shadow is not None else None
     for _ in range(rounds):
         status = exchange_round(
-            conn, key, catalog, thresholds, identity, hello, session_id, edges, history, shadow
+            conn,
+            key,
+            catalog,
+            thresholds,
+            identity,
+            hello,
+            session_id,
+            edges,
+            history,
+            shadow,
+            notes,
         )
         if status != 0:
             return status
+    if notes is not None:
+        print(shadow_trace_line(notes), flush=True)
     print(f"ROUNDS {rounds}", flush=True)
     return 0
 

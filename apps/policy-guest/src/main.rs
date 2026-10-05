@@ -13,6 +13,12 @@ use policy_types::BootId;
 
 fn main() -> ExitCode {
     println!("FERRUM_START policy-guest");
+    if env::args().skip(1).any(|arg| arg == "--shadow-trace") {
+        return shadow_trace_exit();
+    }
+    if env::args().skip(1).any(|arg| arg == "--shadow") {
+        return shadow_exit();
+    }
     let emergency = env::args().skip(1).any(|arg| arg == "--emergency");
     let stage_race = env::args().skip(1).any(|arg| arg == "--stage-race");
     let stale = env::args().skip(1).any(|arg| arg == "--stale");
@@ -54,6 +60,111 @@ fn main() -> ExitCode {
             ExitCode::from(1)
         }
     }
+}
+
+fn shadow_trace_exit() -> ExitCode {
+    match shadow_trace_run() {
+        Ok(notes) => {
+            for note in &notes {
+                println!(
+                    "FERRUM_SHADOW noted={} active={} generation={}",
+                    note.noted, note.active, note.generation
+                );
+            }
+            let generation = notes.last().map(|note| note.generation).unwrap_or(1);
+            let active = notes
+                .last()
+                .map(|note| note.active.as_str())
+                .unwrap_or("balanced");
+            println!(
+                "FERRUM_SHADOW_TRACE rounds={} active={} generation={}",
+                notes.len(),
+                active,
+                generation
+            );
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            println!("FERRUM_FAIL {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(not(target_os = "hermit"))]
+fn shadow_trace_run() -> Result<Vec<policy_guest::ShadowNote>, String> {
+    let (controller, boot) = shadow_endpoint("--shadow-trace")?;
+    let mut stream = TcpStream::connect(&controller).map_err(|err| format!("connect {controller}: {err}"))?;
+    let observations: Vec<_> = workloads::mixed_v1()
+        .iter()
+        .enumerate()
+        .map(|(index, phase)| {
+            let step = index as u64 + 1;
+            workloads::measured(
+                *phase,
+                workloads::SAMPLE_US,
+                [100_000 * step, 10_000 * step, 1_000 * step],
+            )
+        })
+        .collect();
+    // These counters are the phase spec's stand-in service window. They are
+    // not a Hermit scheduler sample.
+    policy_guest::exchange_shadow_trace(&mut stream, boot, 3_000_000, &observations)
+        .map_err(|err| err.to_string())
+}
+
+#[cfg(target_os = "hermit")]
+fn shadow_trace_run() -> Result<Vec<policy_guest::ShadowNote>, String> {
+    Err("a Hermit shadow trace has to come from measured service".to_string())
+}
+
+fn shadow_exit() -> ExitCode {
+    match shadow_run() {
+        Ok(note) => {
+            println!(
+                "FERRUM_SHADOW noted={} active={} generation={}",
+                note.noted, note.active, note.generation
+            );
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            println!("FERRUM_FAIL {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn shadow_endpoint(flag: &str) -> Result<(String, BootId), String> {
+    let mut controller = default_controller();
+    let mut boot = BootId::from_hex("00112233445566778899aabbccddeeff").expect("boot id");
+    for arg in env::args().skip(1) {
+        if arg == flag {
+        } else if let Some(value) = arg.strip_prefix("--controller=") {
+            controller = value.to_string();
+        } else if let Some(value) = arg.strip_prefix("--boot-id=") {
+            boot = BootId::from_hex(value).map_err(|_| "bad boot id".to_string())?;
+        } else {
+            return Err(format!("unknown argument {arg}"));
+        }
+    }
+    Ok((controller, boot))
+}
+
+#[cfg(not(target_os = "hermit"))]
+fn shadow_run() -> Result<policy_guest::ShadowNote, String> {
+    let (controller, boot) = shadow_endpoint("--shadow")?;
+    let mut stream = TcpStream::connect(&controller).map_err(|err| format!("connect {controller}: {err}"))?;
+    policy_guest::exchange_shadow(&mut stream, boot, 3_000_000).map_err(|err| err.to_string())
+}
+
+/// Hermit build. The proposal is recorded and not passed to `sys_policy_stage`.
+#[cfg(target_os = "hermit")]
+fn shadow_run() -> Result<policy_guest::ShadowNote, String> {
+    let (controller, boot) = shadow_endpoint("--shadow")?;
+    let mut stream = connect_controller(&controller)?;
+    let note = policy_guest::exchange_shadow(&mut stream, boot, 3_000_000).map_err(|err| err.to_string())?;
+    std::mem::forget(stream);
+    Ok(note)
 }
 
 fn guest_endpoint() -> Result<(String, BootId), String> {

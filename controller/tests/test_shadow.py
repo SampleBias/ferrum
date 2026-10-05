@@ -9,6 +9,7 @@ from aik_controller.shadow import (
     ShadowWorker,
     prepare,
     send_heuristic_then_shadow,
+    shadow_trace_line,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -61,6 +62,21 @@ class StepClock:
 
 
 class ShadowTests(unittest.TestCase):
+    def test_trace_line_counts_kinds_without_claiming_a_stage(self):
+        notes = [
+            {"kind": "agree", "staged": False},
+            {"kind": "disagree", "staged": False},
+            {"kind": "abstain", "staged": False},
+        ]
+        self.assertEqual(
+            shadow_trace_line(notes),
+            "SHADOW_TRACE rounds=3 agree=1 disagree=1 abstain=1 staged=false",
+        )
+
+    def test_a_staged_note_fails_the_trace(self):
+        notes = [{"kind": "agree", "staged": True}]
+        self.assertIn("staged=true", shadow_trace_line(notes))
+
     def test_proposal_is_sent_before_the_model_runs(self):
         agent = FakeAgent([answer("throughput"), answer("reclaim")])
         worker = ShadowWorker(agent, clock=StepClock([0.0, 0.0, 0.2, 0.0]))

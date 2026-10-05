@@ -25,6 +25,18 @@ def shadow_line(note: dict) -> str:
     )
 
 
+def shadow_trace_line(notes: list) -> str:
+    """Tally one live session. A staged note is a failed shadow run."""
+    agree = sum(note["kind"] == "agree" for note in notes)
+    disagree = sum(note["kind"] == "disagree" for note in notes)
+    abstain = sum(note["kind"] == "abstain" for note in notes)
+    staged = any(note["staged"] for note in notes)
+    return (
+        f"SHADOW_TRACE rounds={len(notes)} agree={agree} disagree={disagree} "
+        f"abstain={abstain} staged={str(staged).lower()}"
+    )
+
+
 def send_heuristic_then_shadow(write_proposal, worker, features, heuristic: str) -> dict | None:
     """Seal the heuristic profile first. A slow forward cannot make that frame late."""
     write_proposal(heuristic)

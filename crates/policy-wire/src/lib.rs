@@ -12,7 +12,8 @@ mod messages;
 pub use json::validate_json;
 pub use messages::{
     decode_message, encode_abstain, encode_applied, encode_hello, encode_hello_ack,
-    encode_proposal, encode_reject, encode_snapshot, AppliedReport, Decoded, RejectReport,
+    encode_proposal, encode_reject, encode_shadow, encode_snapshot, AppliedReport, Decoded,
+    RejectReport, ShadowReport,
 };
 
 use hmac::{Hmac, Mac};

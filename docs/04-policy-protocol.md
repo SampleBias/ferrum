@@ -4,7 +4,7 @@ This is the proposed project protocol, not Laya's native API. The host adapter t
 
 ## Transport and limits
 
-Use one guest-initiated TCP connection over virtio-net to the host controller. Initial host endpoint: `127.0.0.1:7777`; guest endpoint under the selected QEMU user network: `10.0.2.2:7777`. Validate this mapping in G1. A negotiated protocol connection carries `hello`, `snapshot`, `proposal`, `abstain`, `applied`, and `reject` messages.
+Use one guest-initiated TCP connection over virtio-net to the host controller. Initial host endpoint: `127.0.0.1:7777`; guest endpoint under the selected QEMU user network: `10.0.2.2:7777`. Validate this mapping in G1. A negotiated protocol connection carries `hello`, `snapshot`, `proposal`, `abstain`, `applied`, `shadow`, and `reject` messages.
 
 Proposed frame: 4-byte unsigned big-endian payload length, that many UTF-8 JSON bytes, then a 32-byte HMAC-SHA256 tag. Maximum payload: 16,384 bytes; maximum nesting depth: 6. Authenticate the direction marker, length bytes, and exact transmitted payload bytes. Use separate direction markers to prevent reflecting a guest message as a controller response. JSON is not reserialized before verification.
 
@@ -90,6 +90,8 @@ On the single-vCPU prototype, the scheduler owns active policy state. The bridge
 This ordering prevents a memory-pressure override between staging and activation from being overwritten by stale inference. No network call, heap allocation, or JSON parse occurs inside the critical section. For the first version, reject stale base generations rather than attempt optimistic merging.
 
 The bridge later sends `applied` with request ID, previous/new generation, selected profile, activation guest timestamp, lease expiry, and desired-versus-actual convergence flags. The host must distinguish `received`, `validated`, `applied`, and `converged`. A printed model choice is not any of those guest events.
+
+While the guest is still in the shadow phase it sends `shadow` instead. That frame names the proposed profile and the guest timestamp, and it keeps `generation` equal to `previous_generation` with `lease_until_guest_us` at 0. The scheduler profile stays at boot. The host logs the note and does not treat it as an activation.
 
 If an acknowledgment is lost, the next snapshot/status reports the authoritative generation. Retransmitting a consumed request produces a duplicate rejection or an idempotent cached status; it cannot extend the lease. Identical-profile renewals still increment generation and record a new accepted request.
 
