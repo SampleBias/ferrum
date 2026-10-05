@@ -1292,19 +1292,17 @@ fn mixed_v1_run() -> Result<(), String> {
     Err("mixed-v1 runs inside the hermit guest".to_string())
 }
 
-/// Walk `mixed-v1` against the controller. Each phase sets its duty first and
-/// reads one [`workloads::SAMPLE_US`] scheduler window under the profile still
-/// in force. That window, not the spec duration, is the snapshot. The
-/// controller's heuristic proposes from the offered queues and pressure, and
-/// the scheduler installs that proposal. A second window checks the new
-/// weights. The spec durations stay the later experiment horizon.
+/// Walk `mixed-v1` against the controller and hold each profile for the phase's
+/// spec duration. The lease is three seconds, so the guest keeps sending a
+/// measured snapshot and staging the same profile until that duration has
+/// elapsed. A renewal extends the lease and leaves the dwell anchor on the
+/// first activation of that profile. Threads park between renewals so the hold
+/// does not pile up virtual-runtime debt.
 ///
-/// A different profile has to wait out the two-second dwell. The threads park
-/// during that wait so it does not add virtual-runtime debt. The pre-decision
-/// sample has to finish before the current lease expires. `steady` still
-/// leaves batch ahead. The memory phase waits
-/// [`workloads::memory_catch_up_us`] after reclaim is installed, so the
-/// outcome window is the reclaim share after that debt has been paid.
+/// The pre-decision window and the outcome window are each
+/// [`workloads::SAMPLE_US`]. The outcome window starts after the first lease
+/// would have expired. The memory phase still waits
+/// [`workloads::memory_catch_up_us`] before that window.
 #[cfg(target_os = "hermit")]
 fn mixed_v1_run() -> Result<(), String> {
     use std::hint::spin_loop;
@@ -1477,6 +1475,9 @@ fn mixed_v1_run() -> Result<(), String> {
     // read cannot cross expiry and bump the generation underneath the stage.
     const MEASURE_US: u64 = 100_000 + workloads::SAMPLE_US;
     const LEASE_MARGIN_US: u64 = 200_000;
+    /// Start a renewal when this much of the lease is left. The parked sample
+    /// is 400 ms, and the rest is the round trip back to the scheduler.
+    const RENEW_SLACK_US: u64 = 1_000_000;
     let sample_window = |settle_us: u64| -> Result<[u64; 3], String> {
         unsafe { sys_usleep(settle_us) };
         let before = snapshot()?;
@@ -1492,21 +1493,13 @@ fn mixed_v1_run() -> Result<(), String> {
     let outcome = (|| {
         println!("FERRUM_MIXED phases={}", workloads::mixed_v1().len());
         let mut expect_generation = 1u64;
-        let mut dwell_ready_us = 0u64;
+        let mut changed_us = 0u64;
         let mut lease_until_us = 0u64;
+        let mut active_profile = 0u8;
+        let mut rounds = 0u32;
         for phase in workloads::mixed_v1() {
-            if dwell_ready_us != 0 {
-                wait_until(dwell_ready_us)?;
-            }
-            let mut kernel_generation = 0u64;
-            if unsafe { sys_policy_generation(&mut kernel_generation) } != 0 {
-                return Err("generation read failed".to_string());
-            }
-            if kernel_generation != expect_generation {
-                return Err(format!(
-                    "{} generation was {kernel_generation}, expected {expect_generation}",
-                    phase.name
-                ));
+            if changed_us != 0 {
+                wait_until(changed_us.saturating_add(MIN_DWELL_US))?;
             }
             if lease_until_us != 0 {
                 let now = monotonic_us()?;
@@ -1526,65 +1519,145 @@ fn mixed_v1_run() -> Result<(), String> {
                 phase.name, observation.window_us, seen[0], seen[1], seen[2]
             );
             let reference = choose_heuristic(&observation, &HEURISTIC_V0);
-            let now = monotonic_us()?;
             println!(
                 "FERRUM_PHASE_BEGIN name={} reference={}",
                 phase.name,
                 reference.as_str()
             );
-            let ticket = session
-                .request(&mut stream, now, observation)
-                .map_err(|err| format!("{}: {err}", phase.name))?;
-            if ticket.profile != reference {
-                return Err(format!(
-                    "{} controller proposed {} and the reference is {}",
-                    phase.name,
-                    ticket.profile.as_str(),
-                    reference.as_str()
-                ));
-            }
-            if ticket.base_generation != kernel_generation {
-                return Err(format!(
-                    "{} proposal base {} is not the scheduler generation {kernel_generation}",
-                    phase.name, ticket.base_generation
-                ));
-            }
-            let weights = catalog_spec(CatalogId::CpuV1).profile(ticket.profile).weights();
-            let rc = unsafe {
-                sys_policy_stage(
-                    weights[0],
-                    weights[1],
-                    weights[2],
-                    ACCEPTANCE_DEADLINE_US,
-                    PROFILE_LEASE_US,
-                    kernel_generation,
-                )
+            let mut install = |observation| -> Result<PolicyAck, String> {
+                let mut kernel_generation = 0u64;
+                if unsafe { sys_policy_generation(&mut kernel_generation) } != 0 {
+                    return Err("generation read failed".to_string());
+                }
+                if kernel_generation != expect_generation {
+                    return Err(format!(
+                        "{} generation was {kernel_generation}, expected {expect_generation}",
+                        phase.name
+                    ));
+                }
+                let now = monotonic_us()?;
+                let ticket = session
+                    .request(&mut stream, now, observation)
+                    .map_err(|err| format!("{}: {err}", phase.name))?;
+                if ticket.profile != reference {
+                    return Err(format!(
+                        "{} controller proposed {} and the reference is {}",
+                        phase.name,
+                        ticket.profile.as_str(),
+                        reference.as_str()
+                    ));
+                }
+                if ticket.base_generation != kernel_generation {
+                    return Err(format!(
+                        "{} proposal base {} is not the scheduler generation {kernel_generation}",
+                        phase.name, ticket.base_generation
+                    ));
+                }
+                let weights = catalog_spec(CatalogId::CpuV1).profile(ticket.profile).weights();
+                let rc = unsafe {
+                    sys_policy_stage(
+                        weights[0],
+                        weights[1],
+                        weights[2],
+                        ACCEPTANCE_DEADLINE_US,
+                        PROFILE_LEASE_US,
+                        kernel_generation,
+                    )
+                };
+                if rc != 0 {
+                    return Err(format!("{} stage returned {rc}", phase.name));
+                }
+                let ack = pull_applied_ack()?;
+                if ack.profile != ticket.profile as u8 || ack.generation != kernel_generation + 1 {
+                    return Err(format!(
+                        "{} scheduler applied profile {} generation {}",
+                        phase.name, ack.profile, ack.generation
+                    ));
+                }
+                publish_scheduler(&mut stream, &ticket, &ack)?;
+                session
+                    .commit_applied(ack.guest_us)
+                    .map_err(|err| format!("{} commit: {err}", phase.name))?;
+                expect_generation = ack.generation;
+                Ok(ack)
             };
-            if rc != 0 {
-                return Err(format!("{} stage returned {rc}", phase.name));
+            let ack = install(observation)?;
+            rounds += 1;
+            let first_guest_us = ack.guest_us;
+            let first_lease_until = ack.lease_until_guest_us;
+            if ack.profile != active_profile {
+                changed_us = ack.guest_us;
+                active_profile = ack.profile;
             }
-            let ack = pull_applied_ack()?;
-            if ack.profile != ticket.profile as u8 || ack.generation != kernel_generation + 1 {
-                return Err(format!(
-                    "{} scheduler applied profile {} generation {}",
-                    phase.name, ack.profile, ack.generation
-                ));
+            lease_until_us = ack.lease_until_guest_us;
+            let hold_until = first_guest_us.saturating_add(phase.duration_us);
+            let mut phase_applies = 1u32;
+            // Park for the rest of the phase. The profile stays installed.
+            set_duty(0, 0, 0);
+            while monotonic_us()? < hold_until {
+                let now = monotonic_us()?;
+                let renew_at = lease_until_us.saturating_sub(RENEW_SLACK_US);
+                if now < renew_at {
+                    wait_until(renew_at.min(hold_until))?;
+                    continue;
+                }
+                let parked = sample_window(0)?;
+                let previous_lease = lease_until_us;
+                let ack = install(workloads::measured(*phase, workloads::SAMPLE_US, parked))?;
+                if ack.profile != active_profile || ack.lease_until_guest_us <= previous_lease {
+                    return Err(format!(
+                        "{} renewal profile {} lease {} did not extend {previous_lease}",
+                        phase.name, ack.profile, ack.lease_until_guest_us
+                    ));
+                }
+                lease_until_us = ack.lease_until_guest_us;
+                phase_applies += 1;
+                rounds += 1;
             }
-            publish_scheduler(&mut stream, &ticket, &ack)?;
-            session
-                .commit_applied(ack.guest_us)
-                .map_err(|err| format!("{} commit: {err}", phase.name))?;
             let catch_up = if phase.name == "memory" {
                 workloads::memory_catch_up_us()
             } else {
                 0
             };
-            // The duty is already in force. The extra wait pays virtual-runtime debt.
+            // The outcome window, and the next phase's pre-decision read, both
+            // have to finish on this lease. Renew first so they start from a
+            // fresh three seconds instead of whatever the hold left over.
+            let parked = sample_window(0)?;
+            let previous_lease = lease_until_us;
+            let ack = install(workloads::measured(*phase, workloads::SAMPLE_US, parked))?;
+            if ack.profile != active_profile || ack.lease_until_guest_us <= previous_lease {
+                return Err(format!("{} final renewal did not extend the lease", phase.name));
+            }
+            lease_until_us = ack.lease_until_guest_us;
+            phase_applies += 1;
+            rounds += 1;
+            if phase_applies < 2 {
+                return Err(format!("{phase_name} applied only {phase_applies} times", phase_name = phase.name));
+            }
+            set_duty(duty.latency, duty.batch, duty.maintenance);
+            let sample_at = monotonic_us()?;
+            if sample_at < first_lease_until {
+                return Err(format!(
+                    "{} sample at {sample_at} is inside the first lease {first_lease_until}",
+                    phase.name
+                ));
+            }
             let sample = sample_window(100_000 + catch_up)?;
+            let weights = catalog_spec(CatalogId::CpuV1).profile(reference).weights();
+            println!(
+                "FERRUM_HOLD name={} profile={} applies={} held_us={} first_guest_us={} first_lease_until={} sample_us={}",
+                phase.name,
+                reference.as_str(),
+                phase_applies,
+                phase.duration_us,
+                first_guest_us,
+                first_lease_until,
+                sample_at
+            );
             println!(
                 "FERRUM_PHASE name={} profile={} spec_us={} held_us={} catch_up_us={} queue={}/{} emergency={} managed={} backlog={} runnable={}/{}/{} latency={} batch={} maintenance={}",
                 phase.name,
-                ticket.profile.as_str(),
+                reference.as_str(),
                 phase.duration_us,
                 workloads::SAMPLE_US,
                 catch_up,
@@ -1603,23 +1676,13 @@ fn mixed_v1_run() -> Result<(), String> {
             if let Err(fault) = workloads::service_follows(sample, duty, weights) {
                 return Err(format!("{}: {fault}", phase.name));
             }
-            // Park before the dwell wait so the wait does not keep charging the phase.
             set_duty(0, 0, 0);
-            expect_generation = ack.generation;
-            lease_until_us = ack.lease_until_guest_us;
-            dwell_ready_us = ack.guest_us.saturating_add(MIN_DWELL_US);
-            if dwell_ready_us >= ack.lease_until_guest_us {
-                return Err(format!(
-                    "{} dwell reaches the lease (ready={} lease={})",
-                    phase.name, dwell_ready_us, ack.lease_until_guest_us
-                ));
-            }
         }
         let mut generation = 0u64;
         if unsafe { sys_policy_generation(&mut generation) } != 0 || generation != expect_generation {
             return Err(format!("generation was {generation}, expected {expect_generation}"));
         }
-        println!("FERRUM_MIXED_OK");
+        println!("FERRUM_MIXED_OK rounds={rounds}");
         Ok(())
     })();
     std::mem::forget(stream);

@@ -227,6 +227,33 @@ def serve_once(
     return status
 
 
+def serve_follow(
+    conn: socket.socket,
+    key: bytes,
+    catalog: dict,
+    thresholds: dict,
+    identity: dict,
+) -> int:
+    """One session. Keep exchanging rounds until the guest closes."""
+    opened = accept_hello(conn, key, catalog, identity)
+    if opened is None:
+        return 1
+    hello, session_id = opened
+    rounds = 0
+    while True:
+        try:
+            status = exchange_round(conn, key, catalog, thresholds, identity, hello, session_id)
+        except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError, OSError) as err:
+            if rounds == 0:
+                print(f"session failed: {err}", file=sys.stderr)
+                return 1
+            print(f"ROUNDS {rounds}", flush=True)
+            return 0
+        if status != 0:
+            return status
+        rounds += 1
+
+
 def serve_rounds(
     conn: socket.socket,
     key: bytes,
@@ -435,6 +462,11 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="one connection, this many snapshot/proposal/report rounds, then exit",
     )
+    parser.add_argument(
+        "--follow",
+        action="store_true",
+        help="one connection, keep taking rounds until the guest closes, then exit",
+    )
     parser.add_argument("--hold", action="store_true", help="keep the session open after the scheduler report")
     parser.add_argument(
         "--lose-ack",
@@ -469,6 +501,18 @@ def main(argv: list[str] | None = None) -> int:
             return serve_lost_ack(listener, key, catalog, thresholds, identity)
         if args.reject_frames:
             return serve_reject_frames(listener, key, catalog, identity)
+        if args.follow and args.rounds:
+            print("follow and rounds are different sessions", file=sys.stderr)
+            return 2
+        if args.follow:
+            conn, _addr = listener.accept()
+            conn.settimeout(60)
+            with conn:
+                try:
+                    return serve_follow(conn, key, catalog, thresholds, identity)
+                except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
+                    print(f"session failed: {err}", file=sys.stderr)
+                    return 1
         if args.rounds:
             if args.rounds < 1:
                 print("rounds must be positive", file=sys.stderr)

@@ -733,4 +733,89 @@ mod tests {
             "controller log did not follow the phases: {log}"
         );
     }
+
+    #[test]
+    fn mixed_v1_renews_inside_the_lease() {
+        use policy_core::AckKind;
+        use policy_types::MIN_DWELL_US;
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut child = Command::new("python3")
+            .arg("-m")
+            .arg("aik_controller.server")
+            .arg("--rounds")
+            .arg("2")
+            .arg("--bind")
+            .arg("127.0.0.1:0")
+            .arg("--root")
+            .arg(&root)
+            .env("PYTHONPATH", root.join("controller/src"))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start mock controller");
+        let stdout = child.stdout.take().unwrap();
+        let mut lines = BufReader::new(stdout).lines();
+        let listening = lines.next().unwrap().unwrap();
+        let port: u16 = listening.split_whitespace().nth(2).unwrap().parse().unwrap();
+        let boot = BootId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let mut session = LiveSession::open(&mut stream, boot).unwrap();
+        let phase = workloads::mixed_v1()[0];
+        let now = MIN_DWELL_US;
+        let ticket = session
+            .request(
+                &mut stream,
+                now,
+                workloads::measured(phase, workloads::SAMPLE_US, [11, 22, 33]),
+            )
+            .unwrap();
+        assert_eq!(ticket.profile, ProfileId::Latency);
+        let ack = session.commit_applied(now).unwrap();
+        assert!(matches!(ack.kind, AckKind::Applied { renewal: false }));
+        report_applied(
+            &mut stream,
+            &ticket,
+            ack.previous_generation,
+            ack.generation,
+            ack.guest_us,
+            ack.lease_until_guest_us,
+        )
+        .unwrap();
+        let renew_at = now + 1_000_000;
+        let ticket = session
+            .request(
+                &mut stream,
+                renew_at,
+                workloads::measured(phase, workloads::SAMPLE_US, [44, 55, 66]),
+            )
+            .unwrap();
+        assert_eq!(ticket.profile, ProfileId::Latency);
+        let ack = session.commit_applied(renew_at).unwrap();
+        assert!(matches!(ack.kind, AckKind::Applied { renewal: true }));
+        assert_eq!(ack.generation, 3);
+        assert_eq!(ack.previous_generation, 2);
+        report_applied(
+            &mut stream,
+            &ticket,
+            ack.previous_generation,
+            ack.generation,
+            ack.guest_us,
+            ack.lease_until_guest_us,
+        )
+        .unwrap();
+        drop(stream);
+        let status = child.wait().unwrap();
+        let mut err = String::new();
+        child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+        assert!(status.success(), "controller failed: {err}");
+        let log: String = lines.map(|line| line.unwrap()).collect::<Vec<_>>().join("\n");
+        assert!(
+            log.contains("PROPOSAL profile=latency seq=1 window_us=400000 service=11/22/33")
+                && log.contains("PROPOSAL profile=latency seq=2 window_us=400000 service=44/55/66")
+                && log.contains("generation=3 previous=2")
+                && log.contains("ROUNDS 2"),
+            "controller log did not record the renewal: {log}"
+        );
+    }
 }
