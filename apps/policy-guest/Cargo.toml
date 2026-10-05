@@ -10,8 +10,9 @@ policy-types = { path = "../../crates/policy-types" }
 policy-wire = { path = "../../crates/policy-wire" }
 
 [target.'cfg(target_os = "hermit")'.dependencies]
-hermit = { git = "https://github.com/hermit-os/hermit-rs.git", tag = "hermit-0.13.0", default-features = false, features = [
+hermit = { path = "../../vendor/hermit-rs/hermit", default-features = false, features = [
     "acpi",
+    "ai-policy",
     "fsgsbase",
     "kernel-stack",
     "pci",

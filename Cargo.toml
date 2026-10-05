@@ -8,7 +8,7 @@ members = [
     "crates/workloads",
     "apps/policy-guest",
 ]
-exclude = ["bootstrap"]
+exclude = ["bootstrap", "vendor"]
 
 [workspace.package]
 version = "0.1.0"

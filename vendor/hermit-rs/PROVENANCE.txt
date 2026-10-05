@@ -1,0 +1,16 @@
+Hermit pair vendored for the Ferrum ai-policy scheduler.
+
+hermit-rs 560ddfa7278e7d9fd4fe5f7126c4c3fe3b3ff03d
+kernel    ef27b798856b50d562a42c4ffd2edcb7493c5b5f
+
+This is the pair that already booted on this machine: loader v0.5.6,
+guest toolchain Rust 1.94.0, kernel toolchain nightly-2026-02-01.
+The template pin is hermit-os/hermit-rs-template da0826ec.
+
+The later pair named in the design notes (hermit-rs 3e7dfe50, kernel
+7f7dcf70) is not this tree. It has not booted here, and it needs two
+further nightly toolchains that this disk cannot hold.
+
+ai-policy is opt-in. A build without that feature keeps Hermit's
+priority scheduler. Registered threads are selected by class weight.
+Unregistered threads stay on the priority scheduler.

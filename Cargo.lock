@@ -76,7 +76,6 @@ dependencies = [
 [[package]]
 name = "hermit"
 version = "0.13.0"
-source = "git+https://github.com/hermit-os/hermit-rs.git?tag=hermit-0.13.0#560ddfa7278e7d9fd4fe5f7126c4c3fe3b3ff03d"
 dependencies = [
  "cc",
  "home",
