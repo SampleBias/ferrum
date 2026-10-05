@@ -19,6 +19,7 @@ from aik_controller.framing import (
 )
 from aik_controller.features import FeatureError, FeatureHistory, feature_line, laya_status, load_edges
 from aik_controller.heuristic import choose, load_thresholds
+from aik_controller.shadow import send_heuristic_then_shadow, shadow_line
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -114,6 +115,7 @@ def exchange_round(
     session_id: str,
     edges: dict,
     history: FeatureHistory,
+    shadow=None,
 ) -> int:
     snapshot = read_payload(conn, key)
     if snapshot.get("kind") != "snapshot":
@@ -137,26 +139,32 @@ def exchange_round(
     print(feature_line(state), flush=True)
     profile = choose(body, thresholds)
     print(proposal_line(snapshot, profile), flush=True)
-    write_payload(
-        conn,
-        key,
-        {
-            "protocol": 1,
-            "kind": "proposal",
-            "boot_id": hello["boot_id"],
-            "session_id": session_id,
-            "request_seq": snapshot["request_seq"],
-            "base_generation": snapshot["base_generation"],
-            "catalog_id": catalog["id"],
-            "catalog_hash": catalog["hash"],
-            "snapshot_hash": digest,
-            "profile": profile,
-            "answer_confidence_bp": 10000,
-            "model_manifest_hash": identity["model_manifest_hash"],
-            "calibration_hash": identity["calibration_hash"],
-            "reason_code": "heuristic",
-        },
-    )
+
+    def write_proposal(chosen: str) -> None:
+        write_payload(
+            conn,
+            key,
+            {
+                "protocol": 1,
+                "kind": "proposal",
+                "boot_id": hello["boot_id"],
+                "session_id": session_id,
+                "request_seq": snapshot["request_seq"],
+                "base_generation": snapshot["base_generation"],
+                "catalog_id": catalog["id"],
+                "catalog_hash": catalog["hash"],
+                "snapshot_hash": digest,
+                "profile": chosen,
+                "answer_confidence_bp": 10000,
+                "model_manifest_hash": identity["model_manifest_hash"],
+                "calibration_hash": identity["calibration_hash"],
+                "reason_code": "heuristic",
+            },
+        )
+
+    note = send_heuristic_then_shadow(write_proposal, shadow, state, profile)
+    if note is not None:
+        print(shadow_line(note), flush=True)
 
     report = read_payload(conn, key)
     return accept_scheduler_report(
@@ -223,13 +231,14 @@ def serve_once(
     identity: dict,
     hold: bool,
     edges: dict,
+    shadow=None,
 ) -> int:
     opened = accept_hello(conn, key, catalog, identity)
     if opened is None:
         return 1
     hello, session_id = opened
     status = exchange_round(
-        conn, key, catalog, thresholds, identity, hello, session_id, edges, FeatureHistory()
+        conn, key, catalog, thresholds, identity, hello, session_id, edges, FeatureHistory(), shadow
     )
     if status == 0 and hold:
         # Stay connected for the rest of the lease so a kill is a dead peer,
@@ -251,6 +260,7 @@ def serve_follow(
     thresholds: dict,
     identity: dict,
     edges: dict,
+    shadow=None,
 ) -> int:
     """One session. Keep exchanging rounds until the guest closes."""
     opened = accept_hello(conn, key, catalog, identity)
@@ -262,7 +272,7 @@ def serve_follow(
     while True:
         try:
             status = exchange_round(
-                conn, key, catalog, thresholds, identity, hello, session_id, edges, history
+                conn, key, catalog, thresholds, identity, hello, session_id, edges, history, shadow
             )
         except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError, OSError) as err:
             if rounds == 0:
@@ -283,6 +293,7 @@ def serve_rounds(
     identity: dict,
     rounds: int,
     edges: dict,
+    shadow=None,
 ) -> int:
     """One session. Each round is a snapshot, a heuristic proposal, and the scheduler report."""
     opened = accept_hello(conn, key, catalog, identity)
@@ -292,7 +303,7 @@ def serve_rounds(
     history = FeatureHistory()
     for _ in range(rounds):
         status = exchange_round(
-            conn, key, catalog, thresholds, identity, hello, session_id, edges, history
+            conn, key, catalog, thresholds, identity, hello, session_id, edges, history, shadow
         )
         if status != 0:
             return status
@@ -301,7 +312,13 @@ def serve_rounds(
 
 
 def propose_once(
-    conn: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict, edges: dict
+    conn: socket.socket,
+    key: bytes,
+    catalog: dict,
+    thresholds: dict,
+    identity: dict,
+    edges: dict,
+    shadow=None,
 ) -> dict:
     """Hello, snapshot, and one proposal. The caller decides whether to read the report."""
     hello = read_payload(conn, key)
@@ -359,31 +376,50 @@ def propose_once(
         "calibration_hash": identity["calibration_hash"],
         "reason_code": "heuristic",
     }
-    write_payload(conn, key, proposal)
+
+    def write_proposal(chosen: str) -> None:
+        proposal["profile"] = chosen
+        write_payload(conn, key, proposal)
+
+    note = send_heuristic_then_shadow(write_proposal, shadow, state, profile)
+    if note is not None:
+        print(shadow_line(note), flush=True)
     return proposal
 
 
 def serve_lost_ack(
-    listener: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict, edges: dict
+    listener: socket.socket,
+    key: bytes,
+    catalog: dict,
+    thresholds: dict,
+    identity: dict,
+    edges: dict,
+    shadow=None,
 ) -> int:
     """Drop the applied frame, then require the reconnect snapshot to carry the kernel generation.
 
     The original proposal is replayed on the new connection. The guest must reject it.
     """
     try:
-        return serve_lost_ack_session(listener, key, catalog, thresholds, identity, edges)
+        return serve_lost_ack_session(listener, key, catalog, thresholds, identity, edges, shadow)
     except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
         print(f"session failed: {err}", file=sys.stderr)
         return 1
 
 
 def serve_lost_ack_session(
-    listener: socket.socket, key: bytes, catalog: dict, thresholds: dict, identity: dict, edges: dict
+    listener: socket.socket,
+    key: bytes,
+    catalog: dict,
+    thresholds: dict,
+    identity: dict,
+    edges: dict,
+    shadow=None,
 ) -> int:
     first, _addr = listener.accept()
     first.settimeout(60)
     with first:
-        proposal = propose_once(first, key, catalog, thresholds, identity, edges)
+        proposal = propose_once(first, key, catalog, thresholds, identity, edges, shadow)
     print(f"DROPPED_ACK seq={proposal['request_seq']}", flush=True)
 
     second, _addr = listener.accept()
@@ -509,6 +545,11 @@ def main(argv: list[str] | None = None) -> int:
         help="send unauthenticated, duplicate, invalid, and oversized frames",
     )
     parser.add_argument("--root", type=Path, default=ROOT)
+    parser.add_argument(
+        "--shadow",
+        action="store_true",
+        help="score each snapshot with Laya after the heuristic proposal is sent",
+    )
     args = parser.parse_args(argv)
 
     root = args.root
@@ -520,6 +561,13 @@ def main(argv: list[str] | None = None) -> int:
     thresholds = load_thresholds(root / "configs" / "heuristic-v0.json")
     edges = load_edges(root / "configs" / "features-v0.json")
     identity = json.loads((root / "configs" / "lab-identity.json").read_text())
+    shadow = None
+    if args.shadow:
+        from aik_controller.shadow import prepare, warmup_features
+
+        shadow = prepare(root)
+        warm_us = shadow.warmup(warmup_features(root))
+        print(f"SHADOW_READY warm_us={warm_us} device=cpu", flush=True)
 
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -527,10 +575,11 @@ def main(argv: list[str] | None = None) -> int:
     listener.listen(1)
     bound_host, bound_port = listener.getsockname()
     print(f"LISTENING {bound_host} {bound_port}", flush=True)
-    print(f"LAYA checkpoint={laya_status(root)} live=heuristic", flush=True)
+    shadow_flag = "on" if shadow is not None else "off"
+    print(f"LAYA checkpoint={laya_status(root)} live=heuristic shadow={shadow_flag}", flush=True)
     try:
         if args.lose_ack:
-            return serve_lost_ack(listener, key, catalog, thresholds, identity, edges)
+            return serve_lost_ack(listener, key, catalog, thresholds, identity, edges, shadow)
         if args.reject_frames:
             return serve_reject_frames(listener, key, catalog, identity)
         if args.follow and args.rounds:
@@ -541,7 +590,7 @@ def main(argv: list[str] | None = None) -> int:
             conn.settimeout(60)
             with conn:
                 try:
-                    return serve_follow(conn, key, catalog, thresholds, identity, edges)
+                    return serve_follow(conn, key, catalog, thresholds, identity, edges, shadow)
                 except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
                     print(f"session failed: {err}", file=sys.stderr)
                     return 1
@@ -553,7 +602,9 @@ def main(argv: list[str] | None = None) -> int:
             conn.settimeout(60)
             with conn:
                 try:
-                    return serve_rounds(conn, key, catalog, thresholds, identity, args.rounds, edges)
+                    return serve_rounds(
+                        conn, key, catalog, thresholds, identity, args.rounds, edges, shadow
+                    )
                 except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
                     print(f"session failed: {err}", file=sys.stderr)
                     return 1
@@ -564,7 +615,9 @@ def main(argv: list[str] | None = None) -> int:
             conn.settimeout(60)
             with conn:
                 try:
-                    status = serve_once(conn, key, catalog, thresholds, identity, args.hold, edges)
+                    status = serve_once(
+                        conn, key, catalog, thresholds, identity, args.hold, edges, shadow
+                    )
                 except (FrameError, ConnectionError, TimeoutError, json.JSONDecodeError) as err:
                     print(f"session failed: {err}", file=sys.stderr)
                     status = 1
