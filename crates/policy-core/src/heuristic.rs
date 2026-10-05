@@ -101,4 +101,28 @@ mod tests {
         );
         let _ = MANAGED_ARENA_BYTES;
     }
+
+    #[test]
+    fn mixed_v1_phases_select_the_seed_profiles() {
+        use crate::catalog_spec;
+        use policy_types::CatalogId;
+        use workloads::{ideal_service, mixed_v1, service_follows};
+
+        let expected = [
+            ("burst", ProfileId::Latency),
+            ("steady", ProfileId::Throughput),
+            ("idle", ProfileId::Balanced),
+            ("memory", ProfileId::Reclaim),
+            ("recovery", ProfileId::Balanced),
+        ];
+        for (phase, (name, profile)) in mixed_v1().iter().zip(expected) {
+            assert_eq!(phase.name, name);
+            let choice = choose_heuristic(&workloads::observation(*phase), &HEURISTIC_V0);
+            assert_eq!(choice, profile, "{name}");
+            let weights = catalog_spec(CatalogId::CpuV1).profile(choice).weights();
+            let duty = phase.duty();
+            service_follows(ideal_service(duty, weights), duty, weights)
+                .unwrap_or_else(|err| panic!("{name} ideal window: {err}"));
+        }
+    }
 }

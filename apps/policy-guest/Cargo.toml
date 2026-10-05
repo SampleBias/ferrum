@@ -8,6 +8,7 @@ publish.workspace = true
 policy-core = { path = "../../crates/policy-core" }
 policy-types = { path = "../../crates/policy-types" }
 policy-wire = { path = "../../crates/policy-wire" }
+workloads = { path = "../../crates/workloads" }
 
 [target.'cfg(target_os = "hermit")'.dependencies]
 hermit = { path = "../../vendor/hermit-rs/hermit", default-features = false, features = [
