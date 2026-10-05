@@ -29,6 +29,12 @@ fn main() -> ExitCode {
     if env::args().skip(1).any(|arg| arg == "--fair-credit") {
         return fair_credit_exit();
     }
+    if env::args().skip(1).any(|arg| arg == "--fair-queue") {
+        return fair_queue_exit();
+    }
+    if env::args().skip(1).any(|arg| arg == "--reject-frames") {
+        return reject_frames_exit();
+    }
     match run(emergency, stage_race, stale, late) {
         Ok(()) => {
             println!("FERRUM_COMPLETE");
@@ -633,6 +639,424 @@ fn fair_credit() -> Result<(), String> {
         return Err("yielding thread received more service than the runner".to_string());
     }
     println!("FERRUM_CREDIT_OK");
+    Ok(())
+}
+
+fn fair_queue_exit() -> ExitCode {
+    match fair_queue() {
+        Ok(()) => {
+            println!("FERRUM_COMPLETE");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            println!("FERRUM_QUEUE_FAIL {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(not(target_os = "hermit"))]
+fn fair_queue() -> Result<(), String> {
+    Err("queue check runs inside the hermit guest".to_string())
+}
+
+/// Stage a profile and, before the scheduler installs it, exit one thread and
+/// block another. The ready queue must still apply that profile once.
+#[cfg(target_os = "hermit")]
+fn fair_queue() -> Result<(), String> {
+    use std::hint::spin_loop;
+    use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+    use std::thread;
+
+    const LATENCY: u8 = 1;
+    const BATCH: u8 = 2;
+    const MAINTENANCE: u8 = 3;
+    const PHASE_WAIT: u8 = 0;
+    const PHASE_EXIT: u8 = 1;
+    const PHASE_BLOCK: u8 = 2;
+
+    unsafe extern "C" {
+        fn sys_policy_register(class: u8) -> i32;
+        fn sys_policy_stage(
+            latency: u32,
+            batch: u32,
+            maintenance: u32,
+            accept_us: u64,
+            lease_us: u64,
+            base_generation: u64,
+        ) -> i32;
+        fn sys_policy_staged() -> i32;
+        fn sys_policy_generation(generation: *mut u64) -> i32;
+        fn sys_policy_read_ack(ack: *mut PolicyAck) -> i32;
+        fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
+        fn sys_usleep(usecs: u64);
+    }
+
+    static PHASE: AtomicU8 = AtomicU8::new(PHASE_WAIT);
+    static READY: AtomicU8 = AtomicU8::new(0);
+    static WOKE: AtomicBool = AtomicBool::new(false);
+    static FAILED: AtomicBool = AtomicBool::new(false);
+    static BASE: AtomicU64 = AtomicU64::new(1);
+
+    thread::spawn(|| {
+        if unsafe { sys_policy_register(LATENCY) } != 0 {
+            FAILED.store(true, Ordering::Release);
+            return;
+        }
+        READY.fetch_add(1, Ordering::Release);
+        loop {
+            if PHASE.load(Ordering::Acquire) == PHASE_EXIT {
+                break;
+            }
+            spin_loop();
+        }
+        let rc = unsafe { sys_policy_stage(2, 6, 2, 5_000_000, 3_000_000, 1) };
+        if rc != 0 {
+            FAILED.store(true, Ordering::Release);
+        }
+    });
+    thread::spawn(|| {
+        if unsafe { sys_policy_register(BATCH) } != 0 {
+            FAILED.store(true, Ordering::Release);
+            return;
+        }
+        READY.fetch_add(1, Ordering::Release);
+        loop {
+            if PHASE.load(Ordering::Acquire) == PHASE_BLOCK {
+                break;
+            }
+            spin_loop();
+        }
+        let base = BASE.load(Ordering::Acquire);
+        let rc = unsafe { sys_policy_stage(2, 2, 6, 5_000_000, 3_000_000, base) };
+        if rc != 0 {
+            FAILED.store(true, Ordering::Release);
+            return;
+        }
+        unsafe { sys_usleep(250_000) };
+        WOKE.store(true, Ordering::Release);
+        loop {
+            spin_loop();
+        }
+    });
+    thread::spawn(|| {
+        if unsafe { sys_policy_register(MAINTENANCE) } != 0 {
+            FAILED.store(true, Ordering::Release);
+            return;
+        }
+        READY.fetch_add(1, Ordering::Release);
+        loop {
+            spin_loop();
+        }
+    });
+
+    for _ in 0..40 {
+        if READY.load(Ordering::Acquire) == 3 || FAILED.load(Ordering::Acquire) {
+            break;
+        }
+        unsafe { sys_usleep(50_000) };
+    }
+    if FAILED.load(Ordering::Acquire) || READY.load(Ordering::Acquire) != 3 {
+        return Err("workers did not register".to_string());
+    }
+
+    let generation = || -> Result<u64, String> {
+        let mut generation = 0u64;
+        let rc = unsafe { sys_policy_generation(&mut generation) };
+        if rc == 0 {
+            Ok(generation)
+        } else {
+            Err(format!("generation returned {rc}"))
+        }
+    };
+    let read = |class: u8| -> Result<u64, String> {
+        let mut service_us = 0u64;
+        let rc = unsafe { sys_policy_read(class, &mut service_us) };
+        if rc == 0 {
+            Ok(service_us)
+        } else {
+            Err(format!("read class {class} returned {rc}"))
+        }
+    };
+    let pull_ack = || -> Result<Option<PolicyAck>, String> {
+        let mut ack = PolicyAck {
+            kind: 0,
+            reason: 0,
+            profile: 0,
+            _pad0: 0,
+            _pad1: 0,
+            previous_generation: 0,
+            generation: 0,
+            guest_us: 0,
+            lease_until_guest_us: 0,
+        };
+        let rc = unsafe { sys_policy_read_ack(&mut ack) };
+        if rc == 0 {
+            Ok(Some(ack))
+        } else if rc == 1 {
+            Ok(None)
+        } else {
+            Err(format!("read ack returned {rc}"))
+        }
+    };
+    let wait_applied = |previous: u64, profile: u8| -> Result<PolicyAck, String> {
+        for _ in 0..50 {
+            if FAILED.load(Ordering::Acquire) {
+                return Err("worker failed while a profile was staged".to_string());
+            }
+            if unsafe { sys_policy_staged() } == 0 && generation()? == previous + 1 {
+                break;
+            }
+            unsafe { sys_usleep(10_000) };
+        }
+        if unsafe { sys_policy_staged() } != 0 {
+            return Err("staged profile was still pending".to_string());
+        }
+        let Some(ack) = pull_ack()? else {
+            return Err("scheduler wrote no acknowledgment".to_string());
+        };
+        if ack.kind != 1 || ack.profile != profile || ack.previous_generation != previous || ack.generation != previous + 1 {
+            return Err(format!(
+                "acknowledgment kind={} profile={} previous={} generation={}",
+                ack.kind, ack.profile, ack.previous_generation, ack.generation
+            ));
+        }
+        if pull_ack()?.is_some() {
+            return Err("scheduler wrote an extra acknowledgment".to_string());
+        }
+        println!(
+            "FERRUM_ACK kind=applied reason=none profile={} previous={} generation={}",
+            ack_profile_name(ack.profile),
+            ack.previous_generation,
+            ack.generation
+        );
+        Ok(ack)
+    };
+
+    if generation()? != 1 {
+        return Err("boot generation was not 1".to_string());
+    }
+    PHASE.store(PHASE_EXIT, Ordering::Release);
+    let exit_ack = wait_applied(1, 2)?;
+    let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    unsafe { sys_usleep(150_000) };
+    let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    let exit_window = (
+        after.0.saturating_sub(before.0),
+        after.1.saturating_sub(before.1),
+        after.2.saturating_sub(before.2),
+    );
+    println!(
+        "FERRUM_QUEUE exit generation={} latency={} batch={} maintenance={}",
+        exit_ack.generation, exit_window.0, exit_window.1, exit_window.2
+    );
+    if exit_window.0 > 2_000 || exit_window.1 <= exit_window.2 || exit_window.1 < 50_000 {
+        return Err("exited thread stayed runnable or throughput was not applied".to_string());
+    }
+
+    let base = generation()?;
+    BASE.store(base, Ordering::Release);
+    PHASE.store(PHASE_BLOCK, Ordering::Release);
+    let block_ack = wait_applied(base, 3)?;
+    let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    unsafe { sys_usleep(150_000) };
+    let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    let blocked = (
+        after.0.saturating_sub(before.0),
+        after.1.saturating_sub(before.1),
+        after.2.saturating_sub(before.2),
+    );
+    println!(
+        "FERRUM_QUEUE block generation={} latency={} batch={} maintenance={}",
+        block_ack.generation, blocked.0, blocked.1, blocked.2
+    );
+    if blocked.0 > 2_000 || blocked.1 > 2_000 || blocked.2 < 80_000 {
+        return Err("blocked or exited thread was scheduled".to_string());
+    }
+    for _ in 0..40 {
+        if WOKE.load(Ordering::Acquire) {
+            break;
+        }
+        unsafe { sys_usleep(10_000) };
+    }
+    if !WOKE.load(Ordering::Acquire) {
+        return Err("blocked thread did not return to the run queue".to_string());
+    }
+    let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    unsafe { sys_usleep(200_000) };
+    let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    let woke = (
+        after.0.saturating_sub(before.0),
+        after.1.saturating_sub(before.1),
+        after.2.saturating_sub(before.2),
+    );
+    println!(
+        "FERRUM_QUEUE wake latency={} batch={} maintenance={}",
+        woke.0, woke.1, woke.2
+    );
+    if woke.0 > 2_000 || woke.1 == 0 || woke.2 <= woke.1 {
+        return Err("woken thread missed the reclaim profile or the exited thread ran".to_string());
+    }
+    println!("FERRUM_QUEUE_OK");
+    Ok(())
+}
+
+fn reject_frames_exit() -> ExitCode {
+    match reject_frames() {
+        Ok(()) => {
+            println!("FERRUM_COMPLETE");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            println!("FERRUM_FRAME_FAIL {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(not(target_os = "hermit"))]
+fn reject_frames() -> Result<(), String> {
+    Err("frame rejection runs inside the hermit guest".to_string())
+}
+
+/// Refuse bad controller frames and leave the boot profile in place.
+#[cfg(target_os = "hermit")]
+fn reject_frames() -> Result<(), String> {
+    use std::hint::spin_loop;
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+    use std::thread;
+
+    use policy_guest::FrameFault;
+
+    const LATENCY: u8 = 1;
+    const BATCH: u8 = 2;
+    const MAINTENANCE: u8 = 3;
+
+    unsafe extern "C" {
+        fn sys_policy_register(class: u8) -> i32;
+        fn sys_policy_staged() -> i32;
+        fn sys_policy_generation(generation: *mut u64) -> i32;
+        fn sys_policy_read_ack(ack: *mut PolicyAck) -> i32;
+        fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
+        fn sys_usleep(usecs: u64);
+    }
+
+    let (controller, boot) = {
+        let mut controller = default_controller();
+        let mut boot = BootId::from_hex("00112233445566778899aabbccddeeff").expect("boot id");
+        for arg in env::args().skip(1) {
+            if let Some(value) = arg.strip_prefix("--controller=") {
+                controller = value.to_string();
+            } else if let Some(value) = arg.strip_prefix("--boot-id=") {
+                boot = BootId::from_hex(value).map_err(|_| "bad boot id".to_string())?;
+            } else if arg == "--reject-frames" {
+            } else {
+                return Err(format!("unknown argument {arg}"));
+            }
+        }
+        (controller, boot)
+    };
+
+    let mut stream = connect_controller(&controller)?;
+    let faults = policy_guest::reject_bad_frames(&mut stream, boot, 3_000_000).map_err(|err| err.to_string())?;
+    std::mem::forget(stream);
+    let expected = [
+        FrameFault::Unauthenticated,
+        FrameFault::Duplicate,
+        FrameFault::Invalid,
+        FrameFault::Oversized,
+    ];
+    if faults != expected {
+        return Err(format!(
+            "frame faults were {} {} {} {}",
+            faults[0].as_str(),
+            faults[1].as_str(),
+            faults[2].as_str(),
+            faults[3].as_str()
+        ));
+    }
+    for fault in faults {
+        println!("FERRUM_FRAME_REJECTED {}", fault.as_str());
+    }
+
+    let mut generation = 0u64;
+    if unsafe { sys_policy_generation(&mut generation) } != 0 || generation != 1 {
+        return Err(format!("rejected frames moved generation to {generation}"));
+    }
+    if unsafe { sys_policy_staged() } != 0 {
+        return Err("rejected frames left a profile staged".to_string());
+    }
+    let mut ack = PolicyAck {
+        kind: 0,
+        reason: 0,
+        profile: 0,
+        _pad0: 0,
+        _pad1: 0,
+        previous_generation: 0,
+        generation: 0,
+        guest_us: 0,
+        lease_until_guest_us: 0,
+    };
+    if unsafe { sys_policy_read_ack(&mut ack) } != 1 {
+        return Err("rejected frames wrote a scheduler acknowledgment".to_string());
+    }
+
+    static READY: AtomicU8 = AtomicU8::new(0);
+    static FAILED: AtomicBool = AtomicBool::new(false);
+    for class in [LATENCY, BATCH, MAINTENANCE] {
+        thread::spawn(move || {
+            if unsafe { sys_policy_register(class) } == 0 {
+                READY.fetch_add(1, Ordering::Release);
+            } else {
+                FAILED.store(true, Ordering::Release);
+            }
+            loop {
+                spin_loop();
+            }
+        });
+    }
+    for _ in 0..40 {
+        if READY.load(Ordering::Acquire) == 3 || FAILED.load(Ordering::Acquire) {
+            break;
+        }
+        unsafe { sys_usleep(50_000) };
+    }
+    if FAILED.load(Ordering::Acquire) || READY.load(Ordering::Acquire) != 3 {
+        return Err("workers did not register".to_string());
+    }
+    let read = |class: u8| -> Result<u64, String> {
+        let mut service_us = 0u64;
+        let rc = unsafe { sys_policy_read(class, &mut service_us) };
+        if rc == 0 {
+            Ok(service_us)
+        } else {
+            Err(format!("read class {class} returned {rc}"))
+        }
+    };
+    let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    unsafe { sys_usleep(1_000_000) };
+    let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+    let sample = (
+        after.0.saturating_sub(before.0),
+        after.1.saturating_sub(before.1),
+        after.2.saturating_sub(before.2),
+    );
+    println!(
+        "FERRUM_SCHED window=balanced latency={} batch={} maintenance={}",
+        sample.0, sample.1, sample.2
+    );
+    let sum = sample.0 + sample.1 + sample.2;
+    let near_even = sum > 800_000
+        && sample.0 > 0
+        && sample.1 > 0
+        && sample.2 > 0
+        && sample.0 * 20 < sum * 9
+        && sample.1 * 20 < sum * 9
+        && sample.2 * 20 < sum * 9;
+    if !near_even {
+        return Err("rejected frames changed class service".to_string());
+    }
+    println!("FERRUM_FRAMES_OK");
     Ok(())
 }
 

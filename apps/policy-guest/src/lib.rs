@@ -13,8 +13,8 @@ use policy_types::{
     SessionId, CAP_CPU, GUEST_MEMORY_BYTES, MAX_WORKLOAD_THREADS, TELEMETRY_VERSION,
 };
 use policy_wire::{
-    decode_message, encode_applied, encode_hello, encode_reject, encode_snapshot, seal, Direction,
-    FrameDecoder, WireError, AppliedReport, Decoded, RejectReport,
+    decode_message, encode_applied, encode_hello, encode_reject, encode_snapshot, open, seal,
+    Direction, FrameDecoder, WireError, AppliedReport, Decoded, RejectReport,
 };
 
 /// 32 bytes of 0x11. Same bytes as configs/lab-psk.hex.
@@ -60,6 +60,26 @@ pub struct Recovered {
     pub generation: u64,
     pub profile: ProfileId,
     pub reason: RejectReason,
+}
+
+/// Why an inbound controller frame was refused before it could be staged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameFault {
+    Unauthenticated,
+    Oversized,
+    Invalid,
+    Duplicate,
+}
+
+impl FrameFault {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unauthenticated => "unauthenticated",
+            Self::Oversized => "oversized",
+            Self::Invalid => "invalid",
+            Self::Duplicate => "duplicate",
+        }
+    }
 }
 
 /// The one proposal the controller has issued for this connection.
@@ -215,6 +235,85 @@ pub fn recover_lost_ack(
         profile,
         reason,
     })
+}
+
+/// Read the four controller frames that must not become a staged profile.
+///
+/// Order is unauthenticated, duplicate, invalid, then oversized. None of them
+/// is passed to the policy engine.
+pub fn reject_bad_frames(
+    stream: &mut TcpStream,
+    boot_id: BootId,
+    now_us: u64,
+) -> Result<[FrameFault; 4], SessionError> {
+    prepare(stream);
+    let mut engine = PolicyEngine::boot(EngineConfig {
+        catalog: CatalogId::CpuV1,
+        boot_id,
+        objective: ObjectiveId::MixedLatencyV1,
+        approved_model: Hash32::repeat(0xcc),
+        approved_calibration: Hash32::repeat(0xdd),
+        run_mode: RunMode::Mock,
+        manual_rearm: false,
+    });
+    exchange_hello(stream, &mut engine, boot_id)?;
+    let observation = Observation::quiet(1_000_000);
+    let Capture::Send { snapshot, .. } = engine
+        .capture(now_us, observation)
+        .map_err(|_| SessionError::Protocol("capture failed"))?
+    else {
+        return Err(SessionError::Protocol("snapshot was retained"));
+    };
+    send(stream, Direction::GuestToController, &encode_snapshot(&snapshot)?)?;
+    let mut decoder = FrameDecoder::new();
+    let mut faults = [FrameFault::Invalid; 4];
+    for fault in &mut faults {
+        *fault = next_fault(stream, &mut decoder)?;
+    }
+    Ok(faults)
+}
+
+fn next_fault(stream: &mut TcpStream, decoder: &mut FrameDecoder) -> Result<FrameFault, SessionError> {
+    loop {
+        match decoder.push(&[]) {
+            Ok(Some(frame)) => return classify_frame(&frame),
+            Ok(None) => {}
+            Err(WireError::TooLong) => return Ok(FrameFault::Oversized),
+            Err(err) => return Err(SessionError::Wire(err)),
+        }
+        let mut buf = [0u8; 1024];
+        let n = stream.read(&mut buf)?;
+        if n == 0 {
+            return Err(SessionError::Protocol("connection closed"));
+        }
+        match decoder.push(&buf[..n]) {
+            Ok(Some(frame)) => return classify_frame(&frame),
+            Ok(None) => continue,
+            Err(WireError::TooLong) => return Ok(FrameFault::Oversized),
+            Err(err) => return Err(SessionError::Wire(err)),
+        }
+    }
+}
+
+fn classify_frame(frame: &[u8]) -> Result<FrameFault, SessionError> {
+    let payload = match open(Direction::ControllerToGuest, &LAB_KEY, frame) {
+        Ok(payload) => payload,
+        Err(WireError::BadMac) => return Ok(FrameFault::Unauthenticated),
+        Err(err) => return Err(SessionError::Wire(err)),
+    };
+    match decode_message(&payload) {
+        Err(WireError::DuplicateKey) => Ok(FrameFault::Duplicate),
+        Err(
+            WireError::Schema
+            | WireError::Float
+            | WireError::Utf8
+            | WireError::Structure
+            | WireError::OutOfRange
+            | WireError::UnsupportedVersion,
+        ) => Ok(FrameFault::Invalid),
+        Ok(_) => Err(SessionError::Protocol("controller frame was accepted")),
+        Err(err) => Err(SessionError::Wire(err)),
+    }
 }
 
 fn negotiate(stream: &mut TcpStream, boot_id: BootId, now_us: u64) -> Result<Negotiated, SessionError> {
@@ -423,6 +522,50 @@ mod tests {
                 && log.contains("RECOVERED generation=2 profile=latency")
                 && log.contains("REPLAY_REJECTED reason=identity_mismatch seq=1"),
             "controller log did not recover the generation: {log}"
+        );
+    }
+
+    #[test]
+    fn bad_frames_are_rejected_without_a_proposal() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut child = Command::new("python3")
+            .arg("-m")
+            .arg("aik_controller.server")
+            .arg("--reject-frames")
+            .arg("--bind")
+            .arg("127.0.0.1:0")
+            .arg("--root")
+            .arg(&root)
+            .env("PYTHONPATH", root.join("controller/src"))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start mock controller");
+        let stdout = child.stdout.take().unwrap();
+        let mut lines = BufReader::new(stdout).lines();
+        let listening = lines.next().unwrap().unwrap();
+        let port: u16 = listening.split_whitespace().nth(2).unwrap().parse().unwrap();
+        let boot = BootId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let faults = reject_bad_frames(&mut stream, boot, 3_000_000).unwrap();
+        assert_eq!(
+            faults,
+            [
+                FrameFault::Unauthenticated,
+                FrameFault::Duplicate,
+                FrameFault::Invalid,
+                FrameFault::Oversized,
+            ]
+        );
+        drop(stream);
+        let status = child.wait().unwrap();
+        let mut err = String::new();
+        child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+        assert!(status.success(), "controller failed: {err}");
+        let log: String = lines.map(|line| line.unwrap()).collect::<Vec<_>>().join("\n");
+        assert!(
+            log.contains("REJECTED_FRAMES unauthenticated duplicate invalid oversized"),
+            "controller log did not list the rejected frames: {log}"
         );
     }
 }

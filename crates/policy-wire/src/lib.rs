@@ -136,7 +136,9 @@ impl FrameDecoder {
         }
         let len = u32::from_be_bytes(self.buf[0..4].try_into().unwrap()) as usize;
         if len > MAX_PAYLOAD_BYTES {
-            self.buf.clear();
+            // Drop only the illegal length. A later frame already in the buffer
+            // stays available, and the body is never stored.
+            self.buf.drain(..4);
             return Err(WireError::TooLong);
         }
         let total = 4 + len + 32;
@@ -193,6 +195,20 @@ mod tests {
         let mut decoder = FrameDecoder::new();
         let header = (MAX_PAYLOAD_BYTES as u32 + 1).to_be_bytes();
         assert_eq!(decoder.push(&header), Err(WireError::TooLong));
+        assert!(decoder.buf.is_empty());
+    }
+
+    #[test]
+    fn oversized_header_does_not_discard_the_next_frame() {
+        let key = [0x11u8; 32];
+        let frame = seal(Direction::ControllerToGuest, &key, payload()).unwrap();
+        let mut bytes = frame.clone();
+        bytes.extend_from_slice(&(MAX_PAYLOAD_BYTES as u32 + 1).to_be_bytes());
+        bytes.extend_from_slice(&frame);
+        let mut decoder = FrameDecoder::new();
+        assert_eq!(decoder.push(&bytes).unwrap().unwrap(), frame);
+        assert_eq!(decoder.push(&[]), Err(WireError::TooLong));
+        assert_eq!(decoder.push(&[]).unwrap().unwrap(), frame);
     }
 
     fn hex(bytes: &[u8]) -> String {

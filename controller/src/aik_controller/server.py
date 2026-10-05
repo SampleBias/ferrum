@@ -327,6 +327,48 @@ def serve_lost_ack_session(
         return 0
 
 
+def serve_reject_frames(
+    listener: socket.socket, key: bytes, catalog: dict, identity: dict
+) -> int:
+    """Send four frames the guest must refuse without staging a profile."""
+    conn, _addr = listener.accept()
+    conn.settimeout(60)
+    with conn:
+        hello = read_payload(conn, key)
+        if hello.get("kind") != "hello" or hello.get("boot_id") is None:
+            print("rejected hello", file=sys.stderr)
+            return 1
+        session_id = secrets.token_hex(16)
+        print(f"HELLO boot={hello['boot_id']} session={session_id}", flush=True)
+        write_payload(
+            conn,
+            key,
+            {
+                "protocol": 1,
+                "kind": "hello_ack",
+                "boot_id": hello["boot_id"],
+                "session_id": session_id,
+                "catalog_id": catalog["id"],
+                "catalog_hash": catalog["hash"],
+                "model_manifest_hash": identity["model_manifest_hash"],
+                "calibration_hash": identity["calibration_hash"],
+                "ready": True,
+            },
+        )
+        snapshot = read_payload(conn, key)
+        if snapshot.get("kind") != "snapshot":
+            print("expected snapshot", file=sys.stderr)
+            return 1
+        bad_mac = bytearray(seal(CONTROLLER_TO_GUEST, key, b'{"protocol":1,"kind":"proposal"}'))
+        bad_mac[-1] ^= 0x01
+        duplicate = seal(CONTROLLER_TO_GUEST, key, b'{"protocol":1,"protocol":1}')
+        invalid = seal(CONTROLLER_TO_GUEST, key, b'{"protocol":1,"kind":"proposal","profile":1}')
+        oversized = struct.pack(">I", 16_384 + 1)
+        conn.sendall(bytes(bad_mac) + duplicate + invalid + oversized)
+        print("REJECTED_FRAMES unauthenticated duplicate invalid oversized", flush=True)
+        return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Ferrum mock policy controller")
     parser.add_argument("--bind", default="127.0.0.1:7777")
@@ -336,6 +378,11 @@ def main(argv: list[str] | None = None) -> int:
         "--lose-ack",
         action="store_true",
         help="drop the connection before the applied frame, then accept one reconnect",
+    )
+    parser.add_argument(
+        "--reject-frames",
+        action="store_true",
+        help="send unauthenticated, duplicate, invalid, and oversized frames",
     )
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args(argv)
@@ -358,6 +405,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.lose_ack:
             return serve_lost_ack(listener, key, catalog, thresholds, identity)
+        if args.reject_frames:
+            return serve_reject_frames(listener, key, catalog, identity)
         while True:
             conn, _addr = listener.accept()
             # The guest answers after the scheduler acknowledgment. A TCG
