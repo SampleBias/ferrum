@@ -187,6 +187,13 @@ pub extern "C" fn sys_policy_lease_expired() -> i32 {
 #[cfg(feature = "ai-policy")]
 #[hermit_macro::system]
 #[unsafe(no_mangle)]
+pub extern "C" fn sys_policy_install_emergency() -> i32 {
+	crate::policy::install_emergency()
+}
+
+#[cfg(feature = "ai-policy")]
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn sys_policy_read(class: u8, service_us: *mut u64) -> i32 {
 	if service_us.is_null() || !service_us.is_aligned() {
 		return -1;

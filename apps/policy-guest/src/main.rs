@@ -12,6 +12,7 @@ use policy_types::BootId;
 
 fn main() -> ExitCode {
     println!("FERRUM_START policy-guest");
+    let emergency = env::args().skip(1).any(|arg| arg == "--emergency");
     if env::args().skip(1).any(|arg| arg == "--fair-progress") {
         return fair_progress_exit();
     }
@@ -24,7 +25,7 @@ fn main() -> ExitCode {
                 "FERRUM_APPLIED profile={} generation={}",
                 applied.profile, applied.generation
             );
-            if let Err(err) = actuate(&applied.profile) {
+            if let Err(err) = actuate(&applied.profile, emergency) {
                 println!("FERRUM_FAIL {err}");
                 return ExitCode::from(1);
             }
@@ -46,6 +47,7 @@ fn run() -> Result<policy_guest::Applied, String> {
             controller = value.to_string();
         } else if let Some(value) = arg.strip_prefix("--boot-id=") {
             boot = BootId::from_hex(value).map_err(|_| format!("bad boot id"))?;
+        } else if arg == "--emergency" {
         } else {
             return Err(format!("unknown argument {arg}"));
         }
@@ -311,7 +313,7 @@ fn fair_progress() -> Result<(), String> {
 }
 
 #[cfg(target_os = "hermit")]
-fn actuate(profile: &str) -> Result<(), String> {
+fn actuate(profile: &str, emergency: bool) -> Result<(), String> {
     use std::hint::spin_loop;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::thread;
@@ -328,6 +330,7 @@ fn actuate(profile: &str) -> Result<(), String> {
         fn sys_policy_set_weights(latency: u32, batch: u32, maintenance: u32) -> i32;
         fn sys_policy_arm_lease(duration_us: u64) -> i32;
         fn sys_policy_lease_expired() -> i32;
+        fn sys_policy_install_emergency() -> i32;
         fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
         fn sys_usleep(usecs: u64);
     }
@@ -373,6 +376,16 @@ fn actuate(profile: &str) -> Result<(), String> {
         return Err(format!("arm lease returned {rc}"));
     }
 
+    let reclaim_share = |sample: (u64, u64, u64)| {
+        let sum = sample.0 + sample.1 + sample.2;
+        sum > 0
+            && sample.0 > 0
+            && sample.1 > 0
+            && sample.2 > 0
+            && sample.2 > sample.0
+            && sample.2 > sample.1
+            && sample.2 * 20 > sum * 9
+    };
     let read = |class: u8| -> Result<u64, String> {
         let mut service_us = 0u64;
         let rc = unsafe { sys_policy_read(class, &mut service_us) };
@@ -404,6 +417,57 @@ fn actuate(profile: &str) -> Result<(), String> {
     };
     if !served || !directed {
         return Err("applied profile did not change class service".to_string());
+    }
+    if emergency {
+        let rc = unsafe { sys_policy_install_emergency() };
+        if rc != 0 {
+            return Err(format!("install emergency returned {rc}"));
+        }
+        println!("FERRUM_EMERGENCY");
+        let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+        unsafe { sys_usleep(1_000_000) };
+        let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+        let installed = (
+            after.0.saturating_sub(before.0),
+            after.1.saturating_sub(before.1),
+            after.2.saturating_sub(before.2),
+        );
+        println!(
+            "FERRUM_SCHED window=reclaim latency={} batch={} maintenance={}",
+            installed.0, installed.1, installed.2
+        );
+        if !reclaim_share(installed) {
+            return Err("emergency did not install reclaim weights".to_string());
+        }
+        // The applied lease must not replace the override, including a direct
+        // request for the balanced weights that expiry would otherwise install.
+        let rc = unsafe { sys_policy_set_weights(1, 1, 1) };
+        if rc == 0 {
+            return Err("emergency accepted a weight change".to_string());
+        }
+        unsafe { sys_usleep(PROFILE_LEASE_US) };
+        if unsafe { sys_policy_lease_expired() } != 1 {
+            return Err("lease did not expire in the kernel".to_string());
+        }
+        println!("FERRUM_LEASE_EXPIRED");
+        let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+        unsafe { sys_usleep(1_000_000) };
+        let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
+        let held = (
+            after.0.saturating_sub(before.0),
+            after.1.saturating_sub(before.1),
+            after.2.saturating_sub(before.2),
+        );
+        println!(
+            "FERRUM_SCHED window=reclaim latency={} batch={} maintenance={}",
+            held.0, held.1, held.2
+        );
+        println!("FERRUM_EMERGENCY_HELD");
+        if !reclaim_share(held) {
+            return Err("expired lease replaced the emergency override".to_string());
+        }
+        println!("FERRUM_SCHED_OK");
+        return Ok(());
     }
     if id == ProfileId::Balanced {
         println!("FERRUM_SCHED_OK");
@@ -444,7 +508,7 @@ fn actuate(profile: &str) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "hermit"))]
-fn actuate(_profile: &str) -> Result<(), String> {
+fn actuate(_profile: &str, _emergency: bool) -> Result<(), String> {
     Ok(())
 }
 

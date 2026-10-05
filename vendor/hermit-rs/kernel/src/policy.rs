@@ -56,6 +56,9 @@ struct State {
 	/// Zero means no lease is armed.
 	lease_until: u64,
 	lease_expired: bool,
+	/// Local override. While set, expiry records the lease as expired and
+	/// leaves the reclaim weights in place.
+	emergency: bool,
 }
 
 static STATE: hermit_sync::InterruptTicketMutex<State> = hermit_sync::InterruptTicketMutex::new(
@@ -79,6 +82,7 @@ static STATE: hermit_sync::InterruptTicketMutex<State> = hermit_sync::InterruptT
 		active: false,
 		lease_until: 0,
 		lease_expired: false,
+		emergency: false,
 	},
 );
 
@@ -124,6 +128,9 @@ pub fn set_weights(latency: u32, batch: u32, maintenance: u32) -> i32 {
 		return -1;
 	}
 	let mut state = STATE.lock();
+	if state.emergency {
+		return -1;
+	}
 	state.weights = [latency, batch, maintenance];
 	0
 }
@@ -135,8 +142,20 @@ pub fn arm_lease(now: u64, duration_us: u64) -> i32 {
 		return -1;
 	}
 	let mut state = STATE.lock();
+	if state.emergency {
+		return -1;
+	}
 	state.lease_until = now.saturating_add(duration_us);
 	state.lease_expired = false;
+	0
+}
+
+/// Install the catalog `reclaim` weights and hold them across lease expiry.
+/// A second call leaves the override in place. There is no syscall that clears it.
+pub fn install_emergency() -> i32 {
+	let mut state = STATE.lock();
+	state.emergency = true;
+	state.weights = [2, 2, 6];
 	0
 }
 
@@ -257,14 +276,18 @@ fn preempt_at(now: u64, blocked_deadline: Option<u64>, state: &State, class: u8)
 }
 
 /// After the current slice has been charged, an elapsed lease installs
-/// balanced weights. Virtual runtime is left in place.
+/// balanced weights unless an emergency override is already in force.
+/// Virtual runtime is left in place either way.
 fn enforce_lease(state: &mut State, now: u64) {
 	if state.lease_until == 0 || now < state.lease_until {
 		return;
 	}
-	state.weights = [1, 1, 1];
 	state.lease_until = 0;
 	state.lease_expired = true;
+	if state.emergency {
+		return;
+	}
+	state.weights = [1, 1, 1];
 }
 
 fn lease_wakeup(now: u64, state: &State) -> Option<u64> {
