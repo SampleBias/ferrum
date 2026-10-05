@@ -11,6 +11,7 @@ import secrets
 import socket
 import struct
 import sys
+import time
 from pathlib import Path
 
 from aik_controller.framing import (
@@ -161,6 +162,7 @@ def exchange_round(
         # Score first. The guest judges this frame against the snapshot
         # deadline, so the forward has to finish before the proposal is sent.
         window = acceptance_window_us(snapshot)
+        started = time.perf_counter()
         note = live.score(model_state(state, include_profile=True), heuristic, window)
         print(live_line(note), flush=True)
         decision = withhold_expired(decide_live(note), note, window)
@@ -183,12 +185,12 @@ def exchange_round(
                 },
             )
             print(
-                f"ABSTAIN reason={decision['reason']} seq={snapshot['request_seq']}",
+                f"ABSTAIN reason={decision['reason']} seq={snapshot['request_seq']} "
+                f"round_trip_us={int((time.perf_counter() - started) * 1_000_000)}",
                 flush=True,
             )
             return 0
         profile = decision["profile"]
-        print(proposal_line(snapshot, profile), flush=True)
         write_payload(
             conn,
             key,
@@ -208,6 +210,11 @@ def exchange_round(
                 "calibration_hash": identity["calibration_hash"],
                 "reason_code": decision["reason_code"],
             },
+        )
+        print(
+            f"{proposal_line(snapshot, profile)} "
+            f"round_trip_us={int((time.perf_counter() - started) * 1_000_000)}",
+            flush=True,
         )
     else:
         profile = heuristic
@@ -718,16 +725,22 @@ def main(argv: list[str] | None = None) -> int:
     shadow = None
     live = None
     if args.shadow or args.live:
-        from aik_controller.shadow import prepare, warmup_features
+        from aik_controller.shadow import ShadowError, prepare, warmup_features
 
-        worker = prepare(root)
-        warm_us = worker.warmup(warmup_features(root))
+        try:
+            worker = prepare(root)
+            warm_us = worker.warmup(warmup_features(root))
+        except ShadowError as err:
+            print(str(err), file=sys.stderr)
+            return 2
+        device_name, dtype_name = worker.backend()
+        ready = f"warm_us={warm_us} device={device_name} dtype={dtype_name}"
         if args.live:
             live = worker
-            print(f"LIVE_READY warm_us={warm_us} device=cpu", flush=True)
+            print(f"LIVE_READY {ready}", flush=True)
         else:
             shadow = worker
-            print(f"SHADOW_READY warm_us={warm_us} device=cpu", flush=True)
+            print(f"SHADOW_READY {ready}", flush=True)
 
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

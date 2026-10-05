@@ -231,6 +231,42 @@ class ShadowTests(unittest.TestCase):
             threading.Event().wait(0.01)
         self.fail("queued request did not arrive")
 
+    def test_a_changed_backend_does_not_start_a_forward(self):
+        cuda = FakeAgent([answer("latency")])
+        cuda.device = "cuda"
+        cuda.dtype = "torch.float32"
+        worker = ShadowWorker(cuda)
+        worker.warm = True
+        note = worker.score({}, "latency", 750_000)
+        self.assertEqual(note["structural"], "backend")
+        self.assertEqual(note["device"], "cuda")
+        self.assertEqual(decide_live(note)["reason"], "backend_error")
+        self.assertEqual(cuda.calls, 0)
+
+        narrow = FakeAgent([answer("latency")])
+        narrow.dtype = "torch.bfloat16"
+        refused = ShadowWorker(narrow)
+        with self.assertRaises(ShadowError):
+            refused.warmup(features())
+        self.assertEqual(narrow.calls, 0)
+        refused.warm = True
+        skipped = refused.score({}, "balanced", 750_000)
+        self.assertEqual(skipped["structural"], "backend")
+        self.assertEqual(skipped["dtype"], "torch.bfloat16")
+        self.assertEqual(narrow.calls, 0)
+
+    def test_cpu_float32_still_runs(self):
+        agent = FakeAgent([answer("reclaim")])
+        agent.dtype = "torch.float32"
+        worker = ShadowWorker(agent)
+        worker.warm = True
+        note = worker.score({"profile": "balanced"}, "latency", 750_000)
+        self.assertEqual(note["choice"], "reclaim")
+        self.assertEqual(note["device"], "cpu")
+        self.assertEqual(note["dtype"], "torch.float32")
+        self.assertTrue(note["warm"])
+        self.assertEqual(agent.calls, 1)
+
     def test_score_before_warmup_is_refused(self):
         worker = ShadowWorker(FakeAgent([]))
         with self.assertRaises(ShadowError):

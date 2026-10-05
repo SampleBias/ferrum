@@ -29,6 +29,9 @@ def note(**overrides):
         "forward_us": 900_000,
         "queue_wait_us": 0,
         "input_tokens": 310,
+        "device": "cpu",
+        "dtype": "torch.float32",
+        "warm": True,
         "staged": False,
     }
     row.update(overrides)

@@ -23,6 +23,7 @@ def shadow_line(note: dict) -> str:
         f"structural={note['structural']} heuristic={note['heuristic']} "
         f"confidence={note['answer_confidence']} forward_us={note['forward_us']} "
         f"queue_wait_us={note['queue_wait_us']} tokens={note['input_tokens']} "
+        f"device={note['device']} dtype={note['dtype']} warm={str(note['warm']).lower()} "
         f"staged={note['staged']}"
     )
 
@@ -45,6 +46,22 @@ def send_heuristic_then_shadow(write_proposal, worker, features, heuristic: str)
     if worker is None:
         return None
     return worker.score(model_state(features, include_profile=True), heuristic)
+
+
+def _precision(agent) -> tuple[str, str]:
+    """Device type and dtype, as strings. A torch device reports its type."""
+    device = getattr(agent, "device", "")
+    device_name = str(getattr(device, "type", device))
+    dtype = getattr(agent, "dtype", None)
+    dtype_name = "unset" if dtype is None else str(dtype)
+    return device_name, dtype_name
+
+
+def _qualified(device_name: str, dtype_name: str) -> bool:
+    """The measured envelope is CPU float32. Any other backend is not live."""
+    if device_name != "cpu":
+        return False
+    return dtype_name in {"unset", "torch.float32"}
 
 
 class _Waiter:
@@ -89,9 +106,13 @@ class ShadowWorker:
         self._running = False
         self._queued: _Waiter | None = None
 
+    def backend(self) -> tuple[str, str]:
+        return _precision(self.agent)
+
     def warmup(self, features: dict) -> int:
-        if str(getattr(self.agent, "device", "")) != "cpu":
-            raise ShadowError("shadow backend is not cpu")
+        device_name, dtype_name = _precision(self.agent)
+        if not _qualified(device_name, dtype_name):
+            raise ShadowError(f"shadow backend {device_name} {dtype_name} is not cpu torch.float32")
         _result, elapsed = self._forward(model_state(features, include_profile=True))
         self.warm = True
         return elapsed
@@ -111,7 +132,18 @@ class ShadowWorker:
                 displaced = self._queued
                 self._queued = waiter
         if displaced is not None:
-            displaced.displace(_note(None, displaced.heuristic, 0, structural="model_busy"))
+            device_name, dtype_name = _precision(self.agent)
+            displaced.displace(
+                _note(
+                    None,
+                    displaced.heuristic,
+                    0,
+                    structural="model_busy",
+                    device=device_name,
+                    dtype=dtype_name,
+                    warm=self.warm,
+                )
+            )
         if owned:
             try:
                 return self._execute(state, heuristic, window_us, 0)
@@ -140,12 +172,39 @@ class ShadowWorker:
         nxt.release()
 
     def _execute(self, state: dict, heuristic: str, window_us: int | None, queue_wait_us: int) -> dict:
-        if str(getattr(self.agent, "device", "")) != "cpu":
-            return _note(None, heuristic, 0, structural="backend", queue_wait_us=queue_wait_us)
+        device_name, dtype_name = _precision(self.agent)
+        if not _qualified(device_name, dtype_name):
+            return _note(
+                None,
+                heuristic,
+                0,
+                structural="backend",
+                queue_wait_us=queue_wait_us,
+                device=device_name,
+                dtype=dtype_name,
+                warm=self.warm,
+            )
         if window_us is not None and queue_wait_us > window_us:
-            return _note(None, heuristic, 0, structural="expired", queue_wait_us=queue_wait_us)
+            return _note(
+                None,
+                heuristic,
+                0,
+                structural="expired",
+                queue_wait_us=queue_wait_us,
+                device=device_name,
+                dtype=dtype_name,
+                warm=self.warm,
+            )
         result, elapsed = self._forward(state)
-        return _note(result, heuristic, elapsed, queue_wait_us=queue_wait_us)
+        return _note(
+            result,
+            heuristic,
+            elapsed,
+            queue_wait_us=queue_wait_us,
+            device=device_name,
+            dtype=dtype_name,
+            warm=self.warm,
+        )
 
     def _forward(self, state) -> tuple[dict, int]:
         start = self.clock()
@@ -159,6 +218,9 @@ def _note(
     forward_us: int,
     structural: str | None = None,
     queue_wait_us: int = 0,
+    device: str = "unknown",
+    dtype: str = "unknown",
+    warm: bool = False,
 ) -> dict:
     if structural is not None:
         return {
@@ -170,6 +232,9 @@ def _note(
             "forward_us": forward_us,
             "queue_wait_us": queue_wait_us,
             "input_tokens": None,
+            "device": device,
+            "dtype": dtype,
+            "warm": warm,
             "staged": False,
         }
     row = classify(result, heuristic)
@@ -183,6 +248,9 @@ def _note(
         "forward_us": forward_us,
         "queue_wait_us": queue_wait_us,
         "input_tokens": row["input_tokens"],
+        "device": device,
+        "dtype": dtype,
+        "warm": warm,
         "staged": False,
     }
 
@@ -285,7 +353,8 @@ def live_line(note: dict) -> str:
         f"LIVE choice={note['choice']} kind={note['kind']} "
         f"structural={note['structural']} heuristic={note['heuristic']} "
         f"confidence={note['answer_confidence']} forward_us={note['forward_us']} "
-        f"queue_wait_us={note['queue_wait_us']} tokens={note['input_tokens']}"
+        f"queue_wait_us={note['queue_wait_us']} tokens={note['input_tokens']} "
+        f"device={note['device']} dtype={note['dtype']} warm={str(note['warm']).lower()}"
     )
 
 
@@ -304,6 +373,9 @@ def prepare(root, directory=None) -> ShadowWorker:
     import laya
 
     agent = laya.load(str(directory), device="cpu")
-    if str(getattr(agent, "device", "")) != "cpu":
-        raise SystemExit("shadow backend is not cpu; refusing to score")
+    device_name, dtype_name = _precision(agent)
+    if not _qualified(device_name, dtype_name):
+        raise SystemExit(
+            f"shadow backend {device_name} {dtype_name} is not cpu torch.float32; refusing to score"
+        )
     return ShadowWorker(agent)
