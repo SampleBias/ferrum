@@ -188,3 +188,13 @@ def check_calibration_labels(labels: dict, root: Path, manifest: Path | None = N
         raise SplitError("labels were measured under a different split manifest")
     if labels.get("split") != "calibration":
         raise SplitError("calibration reads calibration labels only")
+
+
+def check_sealed_labels(labels: dict, root: Path, split: str, manifest: Path | None = None) -> None:
+    """A sealed evaluation reads final-test or out-of-distribution labels from this exact manifest."""
+    path = manifest if manifest is not None else branched_path(root)
+    load_branched(root, path)
+    if labels.get("manifest_sha256") != manifest_sha256(path):
+        raise SplitError("labels were measured under a different split manifest")
+    if split not in SEALED or labels.get("split") != split:
+        raise SplitError(f"a sealed evaluation of {split} reads {split} labels only")

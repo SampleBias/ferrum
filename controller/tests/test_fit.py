@@ -8,14 +8,17 @@ from aik_controller.fit import (
     FitError,
     _zero_shot_choices,
     calibrate,
+    evaluate,
     fit_logistic,
     freeze,
     fit_threshold,
+    git_committed,
     load_config,
     load_labels,
     logistic_choice,
     run,
     score,
+    sealed_scores,
     select,
     threshold_choice,
     wilson,
@@ -118,6 +121,34 @@ class ScoreTests(unittest.TestCase):
             select(CONFIG, dev)
 
 
+class SealedScoreTests(unittest.TestCase):
+    def unit(self, base, scenario, pending):
+        return base | {
+            "scenario": scenario,
+            "status": "labelled",
+            "branches": [{"key": f"{scenario}/1/balanced/r{r}/a0", "snapshot": snap(pending)} for r in range(3)],
+        }
+
+    def test_seen_unseen_and_out_of_distribution_are_scored_apart(self):
+        docs = {
+            "final_test": [{"units": [self.unit(UNDER, "s4-u15", 1), self.unit(OVER, "s4-u72", 60)]}],
+            "out_of_distribution": [{"units": [self.unit(OVER, "s32-u65", 12)]}],
+        }
+        params = {"cut": 14.5, "below": "latency", "above": "reclaim"}
+        rules = {"candidate-v0": lambda s: threshold_choice(params, s), "fixed-balanced": lambda s: "balanced"}
+        scores, left = sealed_scores(rules, docs, CONFIG, ["s4-u45", "s4-u72"])
+        self.assertEqual(left, [])
+        candidate = scores["candidate-v0"]
+        self.assertEqual((candidate["final_test"]["hits"], candidate["final_test"]["decisions"]), (6, 6))
+        self.assertEqual(candidate["final_test_seen"]["units"][0]["scenario"], "s4-u15")
+        self.assertEqual(candidate["final_test_unseen"]["units"][0]["scenario"], "s4-u72")
+        self.assertEqual((candidate["out_of_distribution"]["hits"], candidate["out_of_distribution"]["infeasible"]), (0, 3))
+        self.assertEqual(candidate["out_of_distribution"]["unit_level"]["units_feasible"], 0)
+        self.assertEqual(candidate["final_test"]["unit_level"]["units_all_hit"], 2)
+        balanced = scores["fixed-balanced"]
+        self.assertEqual((balanced["final_test_seen"]["misses"], balanced["out_of_distribution"]["hits"]), (3, 3))
+
+
 class ZeroShotTests(unittest.TestCase):
     def test_a_structural_failure_keeps_the_fallback_and_counts_as_an_abstain(self):
         docs = [{"labels_sha256": "a"}]
@@ -168,12 +199,12 @@ class LabelFileTests(unittest.TestCase):
         path.write_text(json.dumps(doc))
         return path
 
-    def test_training_labels_are_not_development_or_calibration_labels(self):
-        for split in ("development", "calibration"):
+    def test_training_labels_are_not_read_as_any_other_split(self):
+        for split in ("development", "calibration", "final_test", "out_of_distribution"):
             with self.subTest(split), self.assertRaises(SplitError):
                 load_labels(ROOT, INTEL[0], split)
         with self.assertRaises(FitError):
-            load_labels(ROOT, INTEL[0], "final_test")
+            load_labels(ROOT, INTEL[0], "validation")
 
     def test_edited_or_mismatched_labels_are_refused(self):
         def records_sha(doc):
@@ -274,6 +305,33 @@ class FreezeAndCalibrateTests(unittest.TestCase):
             calibrate(ROOT, other, [calibration])
         with self.assertRaises(SplitError):
             calibrate(ROOT, frozen, [INTEL[2]])
+
+    def test_a_sealed_evaluation_needs_a_committed_calibrated_candidate_and_whole_splits(self):
+        fit_path = self.write("fit.json", self.report | {"selected": "pending-threshold"})
+        frozen = self.write("candidate.json", freeze(ROOT, fit_path))
+        calibration = self.write("calibration.json", calibrate(ROOT, frozen, [self.stand_in_calibration()]))
+        doc = json.loads(INTEL[2].read_text())
+        shutil.copy(DATA / doc["records"], self.dir / doc["records"])
+        final = self.write("labels-final-test-stand-in.json", doc | {"split": "final_test"})
+        ood = self.write("labels-ood-stand-in.json", doc | {"split": "out_of_distribution"})
+        yes = lambda root, path: True
+
+        with self.assertRaisesRegex(FitError, "committed"):
+            evaluate(ROOT, frozen, calibration, fit_path, [final], [ood], committed=lambda root, path: False)
+        other = self.write("calibration-other.json", json.loads(calibration.read_text()) | {"candidate_sha256": "0" * 64})
+        with self.assertRaisesRegex(FitError, "calibration report"):
+            evaluate(ROOT, frozen, other, fit_path, [final], [ood], committed=yes)
+        with self.assertRaisesRegex(FitError, "fit report"):
+            evaluate(ROOT, frozen, calibration, calibration, [final], [ood], committed=yes)
+        with self.assertRaises(SplitError):
+            evaluate(ROOT, frozen, calibration, fit_path, [INTEL[2]], [ood], committed=yes)
+        with self.assertRaisesRegex(FitError, "cover the split exactly; missing s12-u35/301"):
+            evaluate(ROOT, frozen, calibration, fit_path, [final], [ood], committed=yes)
+
+    def test_only_a_tracked_unchanged_file_counts_as_committed(self):
+        self.assertTrue(git_committed(ROOT, ROOT / "configs" / "fit-v0.json"))
+        self.assertFalse(git_committed(ROOT, self.write("loose.json", {})))
+        self.assertFalse(git_committed(ROOT, ROOT / "configs" / "no-such-candidate.json"))
 
     def test_the_wilson_interval_needs_units(self):
         self.assertIsNone(wilson(0, 0))

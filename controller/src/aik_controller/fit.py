@@ -10,8 +10,9 @@ controller would see at that decision point.
 `zero-shot` runs the pinned Laya checkpoint on those states. It needs the Laya
 environment. `run` does not import Laya; it reads the zero-shot report.
 `freeze` writes the selected candidate, and `calibrate` scores that frozen
-candidate once on the calibration labels of the same host. The final test and
-the out-of-distribution subset are refused everywhere here.
+candidate once on the calibration labels of the same host. `evaluate` reads
+the final test and the out-of-distribution subset together, once, for a
+committed and calibrated candidate. Nothing else here reads them.
 """
 
 import argparse
@@ -19,6 +20,7 @@ import hashlib
 import json
 import math
 import platform
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -197,6 +199,8 @@ LABEL_CHECKS = {
     "training": splits.check_fit_labels,
     "development": splits.check_selection_labels,
     "calibration": splits.check_calibration_labels,
+    "final_test": lambda doc, root: splits.check_sealed_labels(doc, root, "final_test"),
+    "out_of_distribution": lambda doc, root: splits.check_sealed_labels(doc, root, "out_of_distribution"),
 }
 
 
@@ -204,7 +208,7 @@ def load_labels(root: Path, path: Path, split: str) -> dict:
     """One labels file with the branches its units read. The file must reproduce from its records."""
     doc = json.loads(path.read_text())
     if split not in LABEL_CHECKS:
-        raise FitError(f"{split} labels are not read by a fit, a selection, or a calibration")
+        raise FitError(f"{split} is not a split of {splits.CURRENT}")
     LABEL_CHECKS[split](doc, root)
     records_path = path.parent / doc["records"]
     if not records_path.is_file() or _sha256(records_path) != doc["records_sha256"]:
@@ -254,6 +258,13 @@ def _gather(root: Path, paths: list[Path], split: str) -> list[dict]:
                 raise FitError(f"unit {key[0]}/{key[1]} appears in more than one {split} file")
             seen.add(key)
     return docs
+
+
+def _files(docs: list[dict]) -> list[dict]:
+    return [
+        {key: doc[key] for key in ("labels", "labels_sha256", "records", "records_sha256")} | {"units": len(doc["units"])}
+        for doc in docs
+    ]
 
 
 def _host(docs: list[dict]) -> tuple[str, str]:
@@ -407,11 +418,6 @@ def run(root: Path, training: list[Path], development: list[Path], zero_shot: Pa
                 entry["development"] = score([(u, choice(b["snapshot"]), False) for u, b in dev])
         scores[cid] = entry
     selected = select(config, {cid: s["development"] for cid, s in scores.items()}) if dev else None
-    files = lambda docs: [
-        {key: doc[key] for key in ("labels", "labels_sha256", "records", "records_sha256")}
-        | {"units": len(doc["units"])}
-        for doc in docs
-    ]
     manifest_path = splits.branched_path(root)
     manifest = splits.load_branched(root, manifest_path)
     return {
@@ -424,8 +430,8 @@ def run(root: Path, training: list[Path], development: list[Path], zero_shot: Pa
         "objective_sha256": manifest["objective_sha256"],
         "host_cpu": host_cpu,
         "kvm_module": kvm_module,
-        "training": files(train_docs),
-        "development": files(dev_docs) if dev_docs else None,
+        "training": _files(train_docs),
+        "development": _files(dev_docs) if dev_docs else None,
         "decisions": {"training": len(train), "development": len(dev)},
         "unscored": {"training": train_left, "development": dev_left},
         "fitted": fitted,
@@ -491,32 +497,48 @@ def wilson(k: int, n: int, z: float = 1.96) -> list[float] | None:
     return [max(0.0, centre - half), min(1.0, centre + half)]
 
 
+def _candidate(root: Path, path: Path) -> dict:
+    candidate = json.loads(path.read_text())
+    if candidate.get("id") != CANDIDATE_ID:
+        raise FitError(f"{path.name} is not a {CANDIDATE_ID} file")
+    if candidate.get("manifest_sha256") != splits.manifest_sha256(splits.branched_path(root)):
+        raise FitError("the candidate was frozen under a different split manifest")
+    if candidate["kind"] == "heuristic" and candidate["params"]["sha256"] != _sha256(root / "configs" / "heuristic-v0.json"):
+        raise FitError("heuristic-v0 changed after the candidate was frozen")
+    return candidate
+
+
+def _units(result: dict) -> dict:
+    """Unit-level counts with Wilson intervals. Branches of one unit are not independent."""
+    units = len(result["units"])
+    all_hit = sum(row["hits"] == row["decisions"] for row in result["units"])
+    feasible = sum(row["infeasible"] == 0 for row in result["units"])
+    return {
+        "units": units,
+        "units_all_hit": all_hit,
+        "units_all_hit_wilson95": wilson(all_hit, units),
+        "units_feasible": feasible,
+        "units_feasible_wilson95": wilson(feasible, units),
+    }
+
+
 def calibrate(root: Path, candidate_path: Path, paths: list[Path]) -> dict:
     """Score a frozen candidate once on calibration labels from its own host.
 
     A deterministic candidate has no confidence to rescale, so this is its
     error estimate on independent units before the sealed test opens.
     """
-    candidate = json.loads(candidate_path.read_text())
-    if candidate.get("id") != CANDIDATE_ID:
-        raise FitError(f"{candidate_path.name} is not a {CANDIDATE_ID} file")
-    if candidate.get("manifest_sha256") != splits.manifest_sha256(splits.branched_path(root)):
-        raise FitError("the candidate was frozen under a different split manifest")
+    candidate = _candidate(root, candidate_path)
     config = load_config(root)
     docs = _gather(root, paths, "calibration")
     if _host(docs) != (candidate["host_cpu"], candidate["kvm_module"]):
         raise FitError("calibration labels come from a different host than the candidate's fit")
     thresholds = load_thresholds(root / "configs" / "heuristic-v0.json")
-    if candidate["kind"] == "heuristic" and candidate["params"]["sha256"] != _sha256(root / "configs" / "heuristic-v0.json"):
-        raise FitError("heuristic-v0 changed after the candidate was frozen")
     choice = rule(candidate["kind"], candidate["params"], thresholds)
     scored, left = decisions(docs, config)
     if not scored:
         raise FitError("no scored calibration unit")
     result = score([(unit, choice(branch["snapshot"]), False) for unit, branch in scored])
-    units = len(result["units"])
-    all_hit = sum(row["hits"] == row["decisions"] for row in result["units"])
-    feasible = sum(row["infeasible"] == 0 for row in result["units"])
     return {
         "candidate": candidate["id"],
         "selected": candidate["selected"],
@@ -524,18 +546,129 @@ def calibrate(root: Path, candidate_path: Path, paths: list[Path]) -> dict:
         "candidate_sha256": _sha256(candidate_path),
         "host_cpu": candidate["host_cpu"],
         "kvm_module": candidate["kvm_module"],
-        "calibration": [
-            {key: doc[key] for key in ("labels", "labels_sha256", "records", "records_sha256")}
-            | {"units": len(doc["units"])}
-            for doc in docs
-        ],
+        "calibration": _files(docs),
         "unscored": left,
         "score": result,
-        "units": units,
-        "units_all_hit": all_hit,
-        "units_all_hit_wilson95": wilson(all_hit, units),
-        "units_feasible": feasible,
-        "units_feasible_wilson95": wilson(feasible, units),
+        **_units(result),
+    }
+
+
+SEALED_GROUPS = ("final_test", "final_test_seen", "final_test_unseen", "out_of_distribution")
+
+
+def git_committed(root: Path, path: Path) -> bool:
+    """True when `path` is tracked and matches HEAD."""
+    try:
+        rel = str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return False
+    tracked = subprocess.run(["git", "-C", str(root), "ls-files", "--error-unmatch", "--", rel], capture_output=True)
+    clean = subprocess.run(["git", "-C", str(root), "diff", "--quiet", "HEAD", "--", rel], capture_output=True)
+    return tracked.returncode == 0 and clean.returncode == 0
+
+
+def _complete(root: Path, docs: list[dict], split: str) -> None:
+    """Every unit the manifest plans for `split`, and no other."""
+    planned = {(u["scenario"], u["seed"]) for u in splits.units(splits.load_branched(root), split, sealed_evaluation=True)}
+    present = {(u["scenario"], u["seed"]) for doc in docs for u in doc["units"]}
+    if present != planned:
+        missing = ", ".join(f"{s}/{n}" for s, n in sorted(planned - present)) or "none"
+        extra = ", ".join(f"{s}/{n}" for s, n in sorted(present - planned)) or "none"
+        raise FitError(f"{split} labels must cover the split exactly; missing {missing}; extra {extra}")
+
+
+def sealed_scores(rules: dict, docs: dict[str, list[dict]], config: dict, unseen: list[str]) -> tuple[dict, list[dict]]:
+    """Every rule on every scored sealed decision, by group, with unit-level counts."""
+    final, final_left = decisions(docs["final_test"], config)
+    ood, ood_left = decisions(docs["out_of_distribution"], config)
+    groups = {
+        "final_test": final,
+        "final_test_seen": [(u, b) for u, b in final if u["scenario"] not in unseen],
+        "final_test_unseen": [(u, b) for u, b in final if u["scenario"] in unseen],
+        "out_of_distribution": ood,
+    }
+    scores = {}
+    for cid, choice in rules.items():
+        scores[cid] = {}
+        for group, scored in groups.items():
+            if not scored:
+                scores[cid][group] = None
+                continue
+            result = score([(unit, choice(branch["snapshot"]), False) for unit, branch in scored])
+            scores[cid][group] = {**result, "unit_level": _units(result)}
+    left = [dict(row, split="final_test") for row in final_left] + [dict(row, split="out_of_distribution") for row in ood_left]
+    return scores, left
+
+
+def evaluate(
+    root: Path,
+    candidate_path: Path,
+    calibration_path: Path,
+    fit_report_path: Path,
+    final_test: list[Path],
+    out_of_distribution: list[Path],
+    committed=git_committed,
+) -> dict:
+    """Score a committed, calibrated candidate once on both sealed splits of its own host.
+
+    The fixed profiles and heuristic-v0 are scored on the same decisions. So is
+    every other fitted candidate in the fit report. Those are reported and not
+    selectable: a change made after reading this needs a new untouched test.
+    """
+    candidate = _candidate(root, candidate_path)
+    for path in (candidate_path, calibration_path):
+        if not committed(root, path):
+            raise FitError(f"{path.name} must be committed before a sealed split is read")
+    calibration = json.loads(calibration_path.read_text())
+    if calibration.get("candidate_sha256") != _sha256(candidate_path):
+        raise FitError("the calibration report does not score this candidate")
+    if _sha256(fit_report_path) != candidate["fit_report_sha256"]:
+        raise FitError("the fit report is not the one this candidate was frozen from")
+    report = json.loads(fit_report_path.read_text())
+    config = load_config(root)
+    manifest = splits.load_branched(root)
+    docs = {
+        "final_test": _gather(root, final_test, "final_test"),
+        "out_of_distribution": _gather(root, out_of_distribution, "out_of_distribution"),
+    }
+    for split, split_docs in docs.items():
+        _complete(root, split_docs, split)
+    if _host(docs["final_test"] + docs["out_of_distribution"]) != (candidate["host_cpu"], candidate["kvm_module"]):
+        raise FitError("sealed labels come from a different host than the candidate's fit")
+    thresholds = load_thresholds(root / "configs" / "heuristic-v0.json")
+    rules = {CANDIDATE_ID: rule(candidate["kind"], candidate["params"], thresholds)}
+    comparators = []
+    for spec in config["candidates"]:
+        cid, kind = spec["id"], spec["kind"]
+        if kind == "fixed":
+            rules[cid] = rule(kind, {"profile": spec["profile"]}, thresholds)
+        elif kind == "heuristic":
+            rules[cid] = rule(kind, {}, thresholds)
+        elif cid in report["fitted"] and cid != candidate["selected"]:
+            rules[cid] = rule(kind, report["fitted"][cid], thresholds)
+        else:
+            continue
+        comparators.append(cid)
+    scores, left = sealed_scores(rules, docs, config, manifest["unseen_in_final_test"])
+    return {
+        "candidate": candidate["id"],
+        "selected": candidate["selected"],
+        "candidate_file": candidate_path.name,
+        "candidate_sha256": _sha256(candidate_path),
+        "calibration_report": calibration_path.name,
+        "calibration_sha256": _sha256(calibration_path),
+        "fit_report": fit_report_path.name,
+        "fit_report_sha256": candidate["fit_report_sha256"],
+        "manifest": manifest["id"],
+        "manifest_sha256": candidate["manifest_sha256"],
+        "host_cpu": candidate["host_cpu"],
+        "kvm_module": candidate["kvm_module"],
+        "unseen_in_final_test": manifest["unseen_in_final_test"],
+        "final_test": _files(docs["final_test"]),
+        "out_of_distribution": _files(docs["out_of_distribution"]),
+        "comparators": comparators,
+        "unscored": left,
+        "scores": scores,
     }
 
 
@@ -633,9 +766,49 @@ def main(argv: list[str] | None = None) -> int:
     cal.add_argument("--candidate", required=True, type=Path)
     cal.add_argument("--calibration", action="append", required=True, type=Path)
     cal.add_argument("--out", required=True, type=Path)
+    seal = sub.add_parser("evaluate")
+    seal.add_argument("--candidate", required=True, type=Path)
+    seal.add_argument("--calibration-report", required=True, type=Path)
+    seal.add_argument("--fit-report", required=True, type=Path)
+    seal.add_argument("--final-test", action="append", required=True, type=Path)
+    seal.add_argument("--out-of-distribution", action="append", required=True, type=Path)
+    seal.add_argument("--out", required=True, type=Path)
     args = parser.parse_args(argv)
     root = Path(__file__).resolve().parents[3]
     try:
+        if args.command == "evaluate":
+            if args.out.exists():
+                raise FitError(f"{args.out} already exists; a sealed evaluation runs once")
+            doc = evaluate(
+                root, args.candidate, args.calibration_report, args.fit_report,
+                args.final_test, args.out_of_distribution,
+            )
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
+            for cid, groups in doc["scores"].items():
+                for group in SEALED_GROUPS:
+                    print(_line(cid, group, groups[group]))
+            for group in ("final_test", "out_of_distribution"):
+                entry = doc["scores"][CANDIDATE_ID][group]
+                for row in entry["units"] if entry else []:
+                    print(
+                        f"UNIT group={group} {row['scenario']}/{row['seed']} label={','.join(row['label'])} "
+                        f"hits={row['hits']}/{row['decisions']} infeasible={row['infeasible']} "
+                        f"choices={json.dumps(row['choices'], sort_keys=True)}"
+                    )
+            for unit in doc["unscored"]:
+                print(f"UNSCORED split={unit['split']} unit={unit['scenario']}/{unit['seed']} status={unit['status']}")
+            for group in SEALED_GROUPS:
+                entry = doc["scores"][CANDIDATE_ID][group]
+                if entry:
+                    level = entry["unit_level"]
+                    print(
+                        f"EVALUATION group={group} units={level['units']} all_hit={level['units_all_hit']} "
+                        f"wilson95={level['units_all_hit_wilson95']} feasible={level['units_feasible']} "
+                        f"wilson95={level['units_feasible_wilson95']}"
+                    )
+            print(f"EVALUATION_SHA256 {_sha256(args.out)}")
+            return 0
         if args.command == "freeze":
             if args.out.exists():
                 raise FitError(f"{args.out} already exists; a frozen candidate is not overwritten")

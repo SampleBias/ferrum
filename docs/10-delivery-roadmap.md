@@ -114,7 +114,15 @@ cd controller && PYTHONPATH=src python3 -m aik_controller.fit calibrate \
   --out ../data/jobs-v2/calibration-v0-i7-10750h.json
 ```
 
-Step 4 is not built yet. `branches collect --sealed-evaluation` can already boot the final-test and out-of-distribution units. Two pieces are still missing. The first is an evaluate step that reads sealed labels once, only for a candidate that is already committed, and scores it next to the fixed profiles and heuristic-v0. That is the offline held-out score. The second is a guest branch mode in which the frozen candidate chooses the forced profile from the live pre-decision snapshot. A forced branch measures one profile. The candidate's own branch measures the controller, which is the closed-loop result. Both open the sealed splits, so build and test them on development units first.
+Step 4 has its offline half. `branches collect --split final_test --sealed-evaluation` and the same for `out_of_distribution` boot the sealed units. `collect-labels.sh` refuses them on purpose. `fit evaluate` then reads both sealed splits together and requires the following:
+
+- The candidate and its calibration report are tracked by git and unchanged from HEAD.
+- The calibration report scores that candidate.
+- The fit report is the one the candidate was frozen from.
+- Each split's labels cover exactly the units the manifest plans for it.
+- The labels come from the candidate's host.
+
+It refuses to overwrite its output. It scores the candidate, the fixed profiles, heuristic-v0, and the fit report's other fitted candidates on the same decisions. It reports the seen final-test configurations, the unseen 45% and 72% loads, and the out-of-distribution subset separately, with Wilson intervals over units. The other fitted candidates are reported and cannot be selected. The closed-loop half is not built. It needs a guest branch mode in which the frozen candidate chooses the forced profile from the live pre-decision snapshot. A forced branch measures one profile, and the candidate's own branch measures the controller. Build and test that mode on development units before it runs on a sealed unit.
 
 ### WP7–WP8: broader policy and final handoff
 

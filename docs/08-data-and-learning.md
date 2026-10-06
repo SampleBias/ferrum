@@ -145,6 +145,14 @@ PYTHONPATH=src python3 -m aik_controller.fit calibrate --candidate ../configs/ca
   --calibration ../data/jobs-v2/labels-calibration-seed201-<host>.json \
   --calibration ../data/jobs-v2/labels-calibration-seed202-<host>.json \
   --out ../data/jobs-v2/calibration-v0-<host>.json
+# Once, after the candidate and calibration report are committed and both sealed splits are labelled.
+PYTHONPATH=src python3 -m aik_controller.fit evaluate --candidate ../configs/candidate-v0-<host>.json \
+  --calibration-report ../data/jobs-v2/calibration-v0-<host>.json --fit-report ../data/jobs-v2/fit-v0-<host>.json \
+  --final-test ../data/jobs-v2/labels-final_test-seed301-<host>.json \
+  --final-test ../data/jobs-v2/labels-final_test-seed302-<host>.json \
+  --out-of-distribution ../data/jobs-v2/labels-out_of_distribution-seed401-<host>.json \
+  --out-of-distribution ../data/jobs-v2/labels-out_of_distribution-seed402-<host>.json \
+  --out ../data/jobs-v2/evaluation-v0-<host>.json
 ```
 
 **Training fits.** Without development labels `fit` reports the fits and selects nothing. On the Intel training seeds the cut is 14 pending jobs, between observed values 2 and 26: `latency` below and `balanced` at or above. It hits all 288 decisions. On the office training seeds the cut is 14.5, between 2 and 27, with `latency` below and `reclaim` above, also 288 of 288. The office upper side is `reclaim` because reclaim is in all twelve office overload label sets and balanced is in eleven. In jobs-v2 that choice gives the same split as balanced. It would not with maintenance work, and fit-v0 is not changed after the fact to prefer the fallback. On both hosts the logistic regression also hits all 288, heuristic-v0 hits 144 and is infeasible in the other 144, and fixed latency matches heuristic-v0.
