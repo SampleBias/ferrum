@@ -199,12 +199,21 @@ def _jsonable(summary: dict) -> dict:
     return {key: (None if value == INF else value) for key, value in summary.items()}
 
 
+def kept_branches(records: list[dict], objective: dict) -> dict[str, list[dict]]:
+    """The branches a label reads: the first `repeats` usable records of each candidate."""
+    repeats = objective["repeats"]
+    return {
+        profile: [r for r in records if r["profile"] == profile][:repeats]
+        for profile in objective["candidates"]
+    }
+
+
 def label_unit(records: list[dict], objective: dict, thresholds: dict | None = None) -> dict:
     """The objective's label for one unit. Records must be the usable branches of that unit."""
     candidates = objective["candidates"]
     repeats = objective["repeats"]
     reference = objective["reference_profile"]
-    by_profile = {profile: [r for r in records if r["profile"] == profile][:repeats] for profile in candidates}
+    by_profile = kept_branches(records, objective)
     first = records[0]
     unit = {"scenario": first["scenario"], "seed": first["seed"]}
     if any(len(by_profile[profile]) < repeats for profile in candidates):
@@ -246,14 +255,19 @@ def label_unit(records: list[dict], objective: dict, thresholds: dict | None = N
     return out
 
 
-def label_records(records: list[dict], family: dict, objective: dict, thresholds: dict | None = None) -> list[dict]:
+def usable_units(records: list[dict], family: dict, objective: dict) -> dict[tuple[str, int], list[dict]]:
+    """Usable records grouped by unit, in unit order. A refused attempt is left out."""
     usable: dict[tuple[str, int], list[dict]] = {}
     for record in records:
         if record.get("error") or record.get("flags"):
             continue
         check_record(record, family, objective)
         usable.setdefault((record["scenario"], record["seed"]), []).append(record)
-    return [label_unit(group, objective, thresholds) for _, group in sorted(usable.items())]
+    return dict(sorted(usable.items()))
+
+
+def label_records(records: list[dict], family: dict, objective: dict, thresholds: dict | None = None) -> list[dict]:
+    return [label_unit(group, objective, thresholds) for group in usable_units(records, family, objective).values()]
 
 
 def plan(units: list[dict], candidates: list[str], repeats: int, order_seed: int) -> list[tuple[dict, str, int]]:

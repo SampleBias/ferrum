@@ -166,3 +166,15 @@ def check_fit_labels(labels: dict, root: Path, manifest: Path | None = None) -> 
         raise SplitError(f"{labels.get('split')} labels cannot feed a fit")
     if labels.get("split") != "training":
         raise SplitError("a fit reads training labels only")
+
+
+def check_selection_labels(labels: dict, root: Path, manifest: Path | None = None) -> None:
+    """Model selection reads development labels measured under this exact manifest."""
+    path = manifest if manifest is not None else branched_path(root)
+    load_branched(root, path)
+    if labels.get("manifest_sha256") != manifest_sha256(path):
+        raise SplitError("labels were measured under a different split manifest")
+    if labels.get("split") in SEALED:
+        raise SplitError(f"{labels.get('split')} labels stay sealed until a frozen candidate is evaluated")
+    if labels.get("split") != "development":
+        raise SplitError("model selection reads development labels only")

@@ -7,6 +7,7 @@ from aik_controller.splits import (
     SplitError,
     check_fit_labels,
     check_screening,
+    check_selection_labels,
     fit,
     fit_units,
     load_branched,
@@ -147,6 +148,18 @@ class SplitV2Tests(unittest.TestCase):
         ):
             with self.assertRaises(SplitError):
                 check_fit_labels(labels, ROOT)
+
+    def test_a_selection_reads_development_labels_from_this_manifest_only(self):
+        sha = manifest_sha256(V2)
+        check_selection_labels({"split": "development", "manifest_sha256": sha}, ROOT)
+        for labels in (
+            {"split": "development", "manifest_sha256": manifest_sha256(V1)},
+            {"split": "training", "manifest_sha256": sha},
+            {"split": "calibration", "manifest_sha256": sha},
+            {"split": "out_of_distribution", "manifest_sha256": sha},
+        ):
+            with self.assertRaises(SplitError):
+                check_selection_labels(labels, ROOT)
 
 
 if __name__ == "__main__":

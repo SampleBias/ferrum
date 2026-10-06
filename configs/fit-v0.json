@@ -1,0 +1,43 @@
+{
+  "id": "fit-v0",
+  "manifest": "splits-v2",
+  "fit_reads": ["training"],
+  "selection_reads": ["development"],
+  "scored_status": ["labelled", "tie"],
+  "decision": "Every usable branch of a unit that a label reads is one decision: that branch's own pre-decision state, scored against the unit's label set and the unit's measured profile summaries. A diverged unit is listed and not scored. An incomplete unit is skipped.",
+  "candidates": [
+    {"id": "fixed-balanced", "kind": "fixed", "profile": "balanced"},
+    {"id": "fixed-latency", "kind": "fixed", "profile": "latency"},
+    {"id": "fixed-throughput", "kind": "fixed", "profile": "throughput"},
+    {"id": "fixed-reclaim", "kind": "fixed", "profile": "reclaim"},
+    {"id": "heuristic-v0", "kind": "heuristic", "config": "heuristic-v0"},
+    {
+      "id": "pending-threshold",
+      "kind": "threshold",
+      "feature": "latency_pending",
+      "rule": "Each midpoint between consecutive distinct training values is a cut. Each side takes the profile found in the most training label sets on that side, ties to catalog order. The cut with the most training hits wins, then the widest gap between the values it separates, then the smaller cut. pending >= cut selects the upper side."
+    },
+    {
+      "id": "logistic-v0",
+      "kind": "logistic",
+      "features": ["log1p_pending", "log1p_wait_ms", "latency_share"],
+      "standardize": "training mean and population deviation; a zero deviation divides by 1",
+      "targets": "the label set spread evenly over its profiles",
+      "l2": 0.01,
+      "steps": 2000,
+      "learning_rate": 0.5,
+      "init": "zero weights and bias",
+      "predict": "highest probability, ties to catalog order"
+    },
+    {
+      "id": "laya-zero-shot",
+      "kind": "laya",
+      "pin": "laya-english-v0",
+      "features": "features-v0",
+      "state": "model_state with the profile field, as the live and shadow controllers send it",
+      "abstain": "A truncated, missing, or outside answer keeps the balanced fallback in force and is scored as balanced."
+    }
+  ],
+  "selection": "Every declared candidate must be scored on development. Fewest infeasible decisions wins, then fewest misses. A remaining tie goes to the earlier candidate in this list, so a learned model or Laya is selected only when it strictly beats every simpler candidate.",
+  "note": "Frozen before any development label was measured on either host. A fit and a selection read the labels of one host only. Calibration, the final test, and the out-of-distribution subset are not read here."
+}
