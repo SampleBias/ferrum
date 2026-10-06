@@ -8,7 +8,12 @@ from aik_controller.interval import (
     load_declared,
     select_budget,
 )
-from aik_controller.laya_timing import RECORDED_WARM_LATER_US, RECORDED_WARM_US, envelope
+from aik_controller.laya_timing import (
+    RECORDED_WARM_LATER_US,
+    RECORDED_WARM_OFFICE_US,
+    RECORDED_WARM_US,
+    envelope,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -60,6 +65,31 @@ class IntervalTests(unittest.TestCase):
         self.assertFalse(decision["fits_published"])
         self.assertFalse(decision["replaces_guest_deadline"])
         self.assertFalse(recorded["replaces_guest_deadline"])
+
+    def test_office_ryzen_envelope_selects_five_seconds_on_its_own_record(self):
+        summary = envelope(list(RECORDED_WARM_OFFICE_US))
+        self.assertEqual(summary["n"], 19)
+        self.assertEqual(summary["p50_us"], 1_861_752)
+        self.assertEqual(summary["p99_us"], 2_340_956)
+        decision = judge(summary["p99_us"], 2_999_050)
+        recorded = load_declared(ROOT / "configs" / "acceptance-5s-v0-r5-1600.json")
+        self.assertEqual(recorded["host"], "amd-r5-1600")
+        self.assertEqual(decision["experiment"], recorded["id"])
+        self.assertEqual(decision["headroom_us"], 2_659_044)
+        self.assertTrue(decision["cold_fits_budget"])
+        self.assertFalse(recorded["replaces_guest_deadline"])
+
+    def test_a_record_from_an_unmeasured_host_is_refused(self):
+        import json
+        import tempfile
+
+        doc = json.loads((ROOT / "configs" / "acceptance-5s-v0-r5-1600.json").read_text())
+        doc["host"] = "amd-r7-5800x"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "record.json"
+            path.write_text(json.dumps(doc))
+            with self.assertRaises(IntervalError):
+                load_declared(path)
 
 
 if __name__ == "__main__":

@@ -75,6 +75,30 @@ RECORDED_WARM_LATER_US = (
     844_682,
     870_976,
 )
+# Warmed forwards on the office AMD Ryzen 5 1600, same checkpoint and question,
+# Python 3.12.13, torch 2.14.1+cpu, Laya 0.3.27, six torch threads, schedutil
+# governor with boost on. About 2.3 times the Intel figures.
+RECORDED_WARM_OFFICE_US = (
+    2_066_672,
+    1_671_252,
+    2_024_104,
+    2_339_351,
+    2_178_306,
+    1_861_752,
+    1_783_889,
+    1_758_576,
+    1_796_769,
+    2_193_633,
+    2_340_956,
+    2_175_255,
+    1_859_872,
+    2_266_184,
+    2_226_466,
+    1_813_905,
+    1_681_577,
+    1_742_136,
+    1_661_057,
+)
 
 
 def percentile_us(samples_us: list[int], fraction: float) -> int:

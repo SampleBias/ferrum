@@ -1,0 +1,8 @@
+{
+  "id": "acceptance-5s-v0",
+  "host": "amd-r5-1600",
+  "published_budget_us": 750000,
+  "budget_us": 5000000,
+  "replaces_guest_deadline": false,
+  "note": "The office AMD Ryzen 5 1600 warmed pass had p50 1861752 us and p99 2340956 us at six torch threads. That misses 750 ms and does not fit 2 s once one second is reserved for transport and apply, so this host declares the five-second experiment. The cold forward, 2999050 us, fits it. The guest still seals snapshots with the published deadline."
+}

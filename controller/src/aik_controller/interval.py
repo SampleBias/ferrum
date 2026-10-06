@@ -70,14 +70,16 @@ DECLARED_BUDGET_US = {
     "acceptance-2s-v0": 2_000_000,
     "acceptance-5s-v0": 5_000_000,
 }
+# Each host selects an experiment from its own warmed pass.
+DECLARED_HOSTS = ("intel-i7-10750h", "amd-r5-1600")
 
 
 def load_declared(path: Path) -> dict:
-    """An Intel experiment record. A file that would replace the guest deadline is refused."""
+    """One host's experiment record. A file that would replace the guest deadline is refused."""
     doc = json.loads(path.read_text())
     budget = DECLARED_BUDGET_US.get(doc.get("id"))
-    if budget is None or doc.get("host") != "intel-i7-10750h":
-        raise IntervalError("file is not an Intel declared experiment")
+    if budget is None or doc.get("host") not in DECLARED_HOSTS:
+        raise IntervalError("file is not a declared experiment of a measured host")
     if doc.get("published_budget_us") != PUBLISHED_BUDGET_US or doc.get("budget_us") != budget:
         raise IntervalError("declared budgets do not match the experiment id")
     if doc.get("replaces_guest_deadline") is not False:
