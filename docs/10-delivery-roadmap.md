@@ -88,7 +88,7 @@ The first item has its implemented form in `jobs-v2`, `objective-v2`, and `split
 4. Open the sealed final test and the out-of-distribution subset once, for the held-out closed loop.
 5. Decide the guest deadline separately. The 750 ms deadline stays until that explicit decision.
 
-Progress by host. On the office AMD Ryzen 5 1600, steps 1–3 have run. The fit-v0 selection is the pending-jobs threshold, frozen as `configs/candidate-v0-r5-1600.json` before any calibration label existed ([document 08](08-data-and-learning.md#branched-labels)). The Intel i7-10750H has training labels and the training fit only. Its candidate is frozen from its own development labels and is never copied from the office host. On the Intel host, run these from the repository root, in this order:
+Progress by host. On the office AMD Ryzen 5 1600, steps 1–3 have run. The fit-v0 selection is the pending-jobs threshold, frozen as `configs/candidate-v0-r5-1600.json` before any calibration label existed ([document 08](08-data-and-learning.md#branched-labels)). On calibration it hit all 16 units, with a 95% Wilson interval of 0.806–1.0. The office host is ready for step 4's offline half. The Intel i7-10750H has training labels and the training fit only. Its candidate is frozen from its own development labels and is never copied from the office host. On the Intel host, run these from the repository root, in this order:
 
 ```bash
 tools/collect-labels.sh development 151            # about 140 boots
