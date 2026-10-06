@@ -10,6 +10,7 @@ from aik_controller.interval import (
 )
 from aik_controller.laya_timing import (
     RECORDED_WARM_LATER_US,
+    RECORDED_WARM_OFFICE_LATER_US,
     RECORDED_WARM_OFFICE_US,
     RECORDED_WARM_US,
     envelope,
@@ -78,6 +79,19 @@ class IntervalTests(unittest.TestCase):
         self.assertEqual(decision["headroom_us"], 2_659_044)
         self.assertTrue(decision["cold_fits_budget"])
         self.assertFalse(recorded["replaces_guest_deadline"])
+
+    def test_second_office_pass_reaches_the_same_experiment(self):
+        summary = envelope(list(RECORDED_WARM_OFFICE_LATER_US))
+        self.assertEqual(summary["n"], 19)
+        self.assertEqual(summary["min_us"], 1_764_680)
+        self.assertEqual(summary["p50_us"], 2_040_619)
+        self.assertEqual(summary["p99_us"], 2_339_361)
+        decision = judge(summary["p99_us"], 1_983_876)
+        recorded = load_declared(ROOT / "configs" / "acceptance-5s-v0-r5-1600.json")
+        self.assertEqual(decision["experiment"], recorded["id"])
+        self.assertEqual(decision["headroom_us"], 2_660_639)
+        self.assertTrue(decision["cold_fits_budget"])
+        self.assertFalse(decision["fits_published"])
 
     def test_a_record_from_an_unmeasured_host_is_refused(self):
         import json

@@ -114,6 +114,54 @@ Refusals rose from 14% of boots in the v1 pilot to 29%. In-trial speed ran a med
 
 **What the v2 labels mean for the next step.** In this family the measured answer depends on one quantity: whether offered latency load exceeds an even split. The pre-decision state carries it directly. Across the usable branches of all three training seeds, pending jobs at the decision point were 0–2 under an even split and 26–274 over it. The oldest wait was 16–193 ms under it and 0.41–1.47 s over it. A one-feature threshold on pending jobs separates every training unit with a wide margin. Heuristic-v0 chooses `latency` once the oldest wait reaches 5 ms, and every unit's oldest wait is at least 16 ms, so it chooses `latency` everywhere. This sets a precise bar for the classifier step in document 10. The deterministic baseline is a pending-jobs threshold tuned on training labels, and a learned model or an adapted Laya earns its place by beating that threshold on the unseen 45% and 72% loads or out of distribution. Under overload, objective-v2's 95% batch-retention rule prefers finishing 52–82% of the jobs to halving batch work. That preference belongs to the frozen objective, and a later objective version can revisit it explicitly.
 
+**Training split on the office host (AMD Ryzen 5 1600, `kvm_amd`).** Seeds 101–103 ran with the same guest, family, objective, and manifest. 288 branches took 303 boots, 15 refused as disturbed and none failed, about 1.05 boots per branch against 1.45 on the Intel laptop. Every unit received a label and none diverged. The labels match the Intel host in 23 of 24 units: `latency` at 15% and 35% load and {balanced, reclaim} at 65% and 80%. The exception is s12-u80/103, labelled `reclaim` alone. Both p99s were censored, so the rule ranked by completion. Balanced finished 63.3–63.6% of the jobs and reclaim 64.3–65.2%, so the repeat ranges missed each other by 0.7 points. Those two profiles give latency and batch the same 1:1 split in this family, so that is the equal-weight pair separating by noise. Across the 12 office overload units reclaim's median completion was higher in 8, which a sign test does not distinguish from chance (p ≈ 0.39). Pending jobs at the decision point were 0–2 under an even split and 27–276 over it, and the oldest wait was 16–170 ms under it and 0.44–1.31 s over it.
+
+**Fit and selection (fit-v0).** Code: `controller/src/aik_controller/fit.py`. The declaration `configs/fit-v0.json` (sha256 `61c8ea11ac8e609ba86836a76390149bc4208aa9a6e899b2443cf9340be741d4`) was committed before any development label was measured on either host. A decision is one usable branch that a unit's label reads: that branch's own pre-decision state, scored against the unit's label set and its measured profile summaries. Every branch runs the same balanced prefix, so a unit's twelve branches are twelve draws of the state a controller would see there. A choice in the label set is a hit. A choice that fails the 95% batch or completion floor is infeasible. Diverged units are listed and not scored. Before scoring, each labels file must reproduce its labels from its records. The candidates, simplest first, are:
+
+1. The four fixed profiles.
+2. Heuristic-v0.
+3. The pending-jobs threshold. Each side of the cut takes the profile found in the most training label sets on that side.
+4. A logistic regression on log pending jobs, log oldest wait, and latency service share, with soft targets spread over the label set.
+5. Zero-shot Laya, given the live state with its profile field.
+
+Selection takes the fewest infeasible development decisions, then the fewest misses. A remaining tie goes to the earlier candidate, so a learned model or Laya is selected only when it strictly beats every simpler candidate. `freeze` writes `candidate-v0` for that host. `calibrate` then scores the frozen candidate once on that host's calibration labels, with a Wilson interval over units. A threshold has no confidence to rescale, so for it calibration is an error estimate on independent units before the sealed splits open. `fit` refuses labels that name more than one host.
+
+```bash
+cd controller
+PYTHONPATH=src python3 -m aik_controller.fit run \
+  --training ../data/jobs-v2/labels-training-seed101-<host>.json \
+  --training ../data/jobs-v2/labels-training-seed102-<host>.json \
+  --training ../data/jobs-v2/labels-training-seed103-<host>.json \
+  --development ../data/jobs-v2/labels-development-seed151-<host>.json \
+  --zero-shot ../data/jobs-v2/zero-shot-development-seed151-<host>.json \
+  --out ../data/jobs-v2/fit-v0-<host>.json
+# The zero-shot report needs the Laya environment and runs before the fit.
+PYTHONPATH=src <laya-python> -m aik_controller.fit zero-shot \
+  --development ../data/jobs-v2/labels-development-seed151-<host>.json \
+  --out ../data/jobs-v2/zero-shot-development-seed151-<host>.json
+PYTHONPATH=src python3 -m aik_controller.fit freeze \
+  --report ../data/jobs-v2/fit-v0-<host>.json --out ../configs/candidate-v0-<host>.json
+PYTHONPATH=src python3 -m aik_controller.fit calibrate --candidate ../configs/candidate-v0-<host>.json \
+  --calibration ../data/jobs-v2/labels-calibration-seed201-<host>.json \
+  --calibration ../data/jobs-v2/labels-calibration-seed202-<host>.json \
+  --out ../data/jobs-v2/calibration-v0-<host>.json
+```
+
+**Training fits.** Without development labels `fit` reports the fits and selects nothing. On the Intel training seeds the cut is 14 pending jobs, between observed values 2 and 26: `latency` below and `balanced` at or above. It hits all 288 decisions. On the office training seeds the cut is 14.5, between 2 and 27, with `latency` below and `reclaim` above, also 288 of 288. The office upper side is `reclaim` because reclaim is in all twelve office overload label sets and balanced is in eleven. In jobs-v2 that choice gives the same split as balanced. It would not with maintenance work, and fit-v0 is not changed after the fact to prefer the fallback. On both hosts the logistic regression also hits all 288, heuristic-v0 hits 144 and is infeasible in the other 144, and fixed latency matches heuristic-v0.
+
+**Development and selection on the office host.** Development seed 151 took 96 boots for 96 branches, with none refused or failed. Records are `data/jobs-v2/development-seed151-r5-1600.jsonl` (sha256 `ac304b4849ce660af2c324fb70df549128d6e05c56d0ef40143a451e217183f8`) and labels are `data/jobs-v2/labels-development-seed151-r5-1600.json` (sha256 `24fd2deccddd21ebee3ca0574de2947c86913ff744249059684bba3ef3ec8ff2`). The four units under an even split labelled `latency`, the four over it tied {balanced, reclaim}, and none diverged. Pending jobs at the decision point were 0–3 under an even split and 17–291 over it. The low end is a 12 ms, 65% branch, 2.5 jobs above the office cut. The oldest wait kept its margin: 32–85 ms under and 0.49–1.51 s over. Zero-shot Laya ran on the pinned checkpoint, CPU float32, six torch threads. It chose `balanced` for all 96 states, with `answer_confidence` 0.340–0.443, 312–314 input tokens, nothing truncated, and forwards of 1.73–2.47 s. The report is `data/jobs-v2/zero-shot-development-seed151-r5-1600.json` (sha256 `469a01da7423a5a480fd922effa35fc0de02d2f9097ee7c12b20181baac90cd9`). Its `kind` field compares Laya with heuristic-v0, which chose `latency` everywhere, so all 96 rows read `disagree`. The development scores, out of 96 decisions, were:
+
+| Candidate | Hits | Infeasible |
+| --- | --- | --- |
+| fixed balanced, fixed reclaim, zero-shot Laya | 48 | 0 |
+| fixed latency, heuristic-v0 | 48 | 48 |
+| fixed throughput | 0 | 72 |
+| pending-jobs threshold, logistic regression | 96 | 0 |
+
+Every miss by balanced, reclaim, or Laya is a unit under an even split, where latency's p99 was lower at full batch retention. Every infeasible latency choice is an overload unit. The threshold and the logistic regression tie, so the declared order selects the threshold. The fit report is `data/jobs-v2/fit-v0-r5-1600.json` (sha256 `d179fc4745b96dbd38bb3028b7c85c389b1c7956a84d9389a850a3378c5842fb`). `configs/candidate-v0-r5-1600.json` (sha256 `3f1304fcefc46384dfc735d526982ccf546a90cb3ee39d3cc41d5015abfc6e89`) freezes cut 14.5, `latency` below and `reclaim` at or above. It was committed in 3bff0a4 at 09:39:07 local time. The first calibration label file was written after that.
+
+**What the frozen threshold is expected to miss.** This was written before any sealed unit ran. Pending jobs count jobs, not queued work. Over an even split the backlog after the 3 s prefix is about (load − 50%) × 3 s of work, and pending jobs are that divided by job size. The office medians were 0.85–1.3 times that estimate, for example 32 at 12 ms and 65% against 37.5. The unseen 45% and 72% loads sit far from the cut. The out-of-distribution 32 ms jobs at 65% load predict about 14 pending, with a training-scaled spread of roughly 6 to 20, which straddles the cut. A branch under it gets `latency`, which is infeasible in every overload unit measured so far. The oldest wait and the latency share do not depend on job size. Over an even split the latency share was 0.499–0.501 in every training state, against 0.09–0.42 under it. The logistic regression weights all three features. Its standardized weights against `latency` are −1.35 for pending, −1.15 for oldest wait, and −0.81 for share. It prefers `reclaim` for any pending count from 6 to 20 when the share is 0.5 and the oldest wait is 0.49–1.5 s. candidate-v0 is not changed for this. The final test scores it as frozen. A later fit version that prefers job-size-free features would be new work. Its evidence would come from splits that have not yet been opened.
+
 ## Data splits and leakage control
 
 Split by complete scenario families/configurations and generator seeds before fitting anything. Separate training, model-selection/development, calibration, and final test sets. Adjacent windows from one run stay in the same split. Test sets should include unseen load ranges and a declared out-of-distribution subset.

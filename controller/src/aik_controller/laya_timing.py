@@ -99,6 +99,29 @@ RECORDED_WARM_OFFICE_US = (
     1_742_136,
     1_661_057,
 )
+# A second office pass after the development zero-shot run, same host and
+# settings, with no guest running. The p99 is within 2 ms of the first pass.
+RECORDED_WARM_OFFICE_LATER_US = (
+    2_074_722,
+    1_946_522,
+    2_040_619,
+    2_336_030,
+    1_985_213,
+    2_158_494,
+    1_778_270,
+    1_987_128,
+    2_127_355,
+    2_192_543,
+    2_339_361,
+    2_270_346,
+    1_897_995,
+    1_764_680,
+    2_047_710,
+    2_260_181,
+    1_952_392,
+    1_831_000,
+    1_949_954,
+)
 
 
 def percentile_us(samples_us: list[int], fraction: float) -> int:

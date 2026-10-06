@@ -80,13 +80,41 @@ Exit evidence: all deterministic profiles affect actual scheduling; no inference
 
 Exit evidence: live S3 causal trace, model-quality report including weaknesses, qualified end-to-end deadline, and reproducible artifact bundle.
 
-The first item has its implemented form in `jobs-v2`, `objective-v2`, and `splits-v2` ([document 08](08-data-and-learning.md#branched-labels)). The full training split, seeds 101–103, is labelled on the Intel host. The first version, `jobs-v1`, stays as development evidence. The remaining WP4–WP6 order is:
+The first item has its implemented form in `jobs-v2`, `objective-v2`, and `splits-v2` ([document 08](08-data-and-learning.md#branched-labels)). The full training split, seeds 101–103, is labelled on both hosts. The first version, `jobs-v1`, stays as development evidence. The remaining WP4–WP6 order is:
 
 1. Collect development and calibration labels on the Intel host, and every split on the office host if it is to carry labels. A unit's branches stay on one host. Budget about 1.45 boots per branch.
 2. Fit the deterministic baseline, a pending-jobs threshold, and a small classifier on training labels, and select on development. In jobs-v2 one feature separates every training unit, so a learned model or an adapted Laya has to beat the tuned threshold, most likely on the unseen 45% and 72% loads or out of distribution. Keep the zero-shot checkpoint.
 3. Freeze one candidate, then calibrate on the calibration split.
 4. Open the sealed final test and the out-of-distribution subset once, for the held-out closed loop.
 5. Decide the guest deadline separately. The 750 ms deadline stays until that explicit decision.
+
+Progress by host. On the office AMD Ryzen 5 1600, steps 1–3 have run. The fit-v0 selection is the pending-jobs threshold, frozen as `configs/candidate-v0-r5-1600.json` before any calibration label existed ([document 08](08-data-and-learning.md#branched-labels)). The Intel i7-10750H has training labels and the training fit only. Its candidate is frozen from its own development labels and is never copied from the office host. On the Intel host, run these from the repository root, in this order:
+
+```bash
+tools/collect-labels.sh development 151            # about 140 boots
+cd controller
+PYTHONPATH=src <laya-python> -m aik_controller.fit zero-shot \
+  --development ../data/jobs-v2/labels-development-seed151-i7-10750h.json \
+  --out ../data/jobs-v2/zero-shot-development-seed151-i7-10750h.json
+PYTHONPATH=src python3 -m aik_controller.fit run \
+  --training ../data/jobs-v2/labels-training-seed101-i7-10750h.json \
+  --training ../data/jobs-v2/labels-training-seed102-i7-10750h.json \
+  --training ../data/jobs-v2/labels-training-seed103-i7-10750h.json \
+  --development ../data/jobs-v2/labels-development-seed151-i7-10750h.json \
+  --zero-shot ../data/jobs-v2/zero-shot-development-seed151-i7-10750h.json \
+  --out ../data/jobs-v2/fit-v0-i7-10750h.json
+PYTHONPATH=src python3 -m aik_controller.fit freeze \
+  --report ../data/jobs-v2/fit-v0-i7-10750h.json --out ../configs/candidate-v0-i7-10750h.json
+# Commit the candidate and its evidence before any calibration boot.
+cd .. && tools/collect-labels.sh calibration 201 202   # about 280 boots
+cd controller && PYTHONPATH=src python3 -m aik_controller.fit calibrate \
+  --candidate ../configs/candidate-v0-i7-10750h.json \
+  --calibration ../data/jobs-v2/labels-calibration-seed201-i7-10750h.json \
+  --calibration ../data/jobs-v2/labels-calibration-seed202-i7-10750h.json \
+  --out ../data/jobs-v2/calibration-v0-i7-10750h.json
+```
+
+Step 4 is not built yet. `branches collect --sealed-evaluation` can already boot the final-test and out-of-distribution units. Two pieces are still missing. The first is an evaluate step that reads sealed labels once, only for a candidate that is already committed, and scores it next to the fixed profiles and heuristic-v0. That is the offline held-out score. The second is a guest branch mode in which the frozen candidate chooses the forced profile from the live pre-decision snapshot. A forced branch measures one profile. The candidate's own branch measures the controller, which is the closed-loop result. Both open the sealed splits, so build and test them on development units first.
 
 ### WP7–WP8: broader policy and final handoff
 
