@@ -7,7 +7,9 @@ from pathlib import Path
 from aik_controller.fit import (
     FitError,
     _zero_shot_choices,
+    calibrate,
     fit_logistic,
+    freeze,
     fit_threshold,
     load_config,
     load_labels,
@@ -16,6 +18,7 @@ from aik_controller.fit import (
     score,
     select,
     threshold_choice,
+    wilson,
     zero_shot_rows,
 )
 from aik_controller.splits import SplitError
@@ -165,11 +168,12 @@ class LabelFileTests(unittest.TestCase):
         path.write_text(json.dumps(doc))
         return path
 
-    def test_training_labels_are_not_development_labels(self):
-        with self.assertRaises(SplitError):
-            load_labels(ROOT, INTEL[0], "development")
+    def test_training_labels_are_not_development_or_calibration_labels(self):
+        for split in ("development", "calibration"):
+            with self.subTest(split), self.assertRaises(SplitError):
+                load_labels(ROOT, INTEL[0], split)
         with self.assertRaises(FitError):
-            load_labels(ROOT, INTEL[0], "calibration")
+            load_labels(ROOT, INTEL[0], "final_test")
 
     def test_edited_or_mismatched_labels_are_refused(self):
         def records_sha(doc):
@@ -215,6 +219,67 @@ class IntelTrainingFitTests(unittest.TestCase):
     def test_no_selection_without_development_labels(self):
         self.assertIsNone(self.report["selected"])
         self.assertIsNone(self.report["scores"]["laya-zero-shot"]["development"])
+
+
+class FreezeAndCalibrateTests(unittest.TestCase):
+    """Uses the Intel training fit with a stand-in selection; no calibration label exists yet."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.dir = Path(cls.tmp.name)
+        report = run(ROOT, INTEL[:2], [], None)
+        report["scores"]["pending-threshold"]["development"] = report["scores"]["pending-threshold"]["training"]
+        cls.report = report
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def write(self, name, doc):
+        path = self.dir / name
+        path.write_text(json.dumps(doc))
+        return path
+
+    def stand_in_calibration(self):
+        doc = json.loads(INTEL[2].read_text())
+        shutil.copy(DATA / doc["records"], self.dir / doc["records"])
+        doc["split"] = "calibration"
+        return self.write("labels-calibration-stand-in.json", doc)
+
+    def test_nothing_is_frozen_without_a_development_selection(self):
+        with self.assertRaises(FitError):
+            freeze(ROOT, self.write("unselected.json", self.report))
+        laya = self.report | {"selected": "laya-zero-shot"}
+        with self.assertRaises(FitError):
+            freeze(ROOT, self.write("laya.json", laya))
+        edited = self.report | {"selected": "pending-threshold", "fit_sha256": "0" * 64}
+        with self.assertRaises(FitError):
+            freeze(ROOT, self.write("edited.json", edited))
+
+    def test_a_frozen_threshold_is_scored_once_on_its_own_host(self):
+        path = self.write("fit.json", self.report | {"selected": "pending-threshold"})
+        candidate = freeze(ROOT, path)
+        self.assertEqual(candidate["kind"], "threshold")
+        self.assertEqual(candidate["params"], self.report["fitted"]["pending-threshold"])
+        self.assertEqual(candidate["development"]["hits"], 192)
+        frozen = self.write("candidate.json", candidate)
+        calibration = self.stand_in_calibration()
+        out = calibrate(ROOT, frozen, [calibration])
+        self.assertEqual((out["score"]["decisions"], out["score"]["hits"], out["score"]["infeasible"]), (96, 96, 0))
+        self.assertEqual((out["units"], out["units_all_hit"]), (8, 8))
+        self.assertAlmostEqual(out["units_all_hit_wilson95"][0], 0.6756, places=4)
+        other = self.write("other-host.json", candidate | {"host_cpu": "AMD Ryzen 5 1600 Six-Core Processor"})
+        with self.assertRaises(FitError):
+            calibrate(ROOT, other, [calibration])
+        with self.assertRaises(SplitError):
+            calibrate(ROOT, frozen, [INTEL[2]])
+
+    def test_the_wilson_interval_needs_units(self):
+        self.assertIsNone(wilson(0, 0))
+        low, high = wilson(4, 8)
+        self.assertLess(low, 0.5)
+        self.assertGreater(high, 0.5)
 
 
 if __name__ == "__main__":

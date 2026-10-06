@@ -178,3 +178,13 @@ def check_selection_labels(labels: dict, root: Path, manifest: Path | None = Non
         raise SplitError(f"{labels.get('split')} labels stay sealed until a frozen candidate is evaluated")
     if labels.get("split") != "development":
         raise SplitError("model selection reads development labels only")
+
+
+def check_calibration_labels(labels: dict, root: Path, manifest: Path | None = None) -> None:
+    """A frozen candidate is calibrated on calibration labels from this exact manifest."""
+    path = manifest if manifest is not None else branched_path(root)
+    load_branched(root, path)
+    if labels.get("manifest_sha256") != manifest_sha256(path):
+        raise SplitError("labels were measured under a different split manifest")
+    if labels.get("split") != "calibration":
+        raise SplitError("calibration reads calibration labels only")
