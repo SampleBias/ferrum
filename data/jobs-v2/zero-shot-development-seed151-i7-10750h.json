@@ -1,0 +1,2180 @@
+{
+ "device": "cpu",
+ "dtype": "torch.float32",
+ "fit": "fit-v0",
+ "host_cpu": "Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz",
+ "labels": [
+  "labels-development-seed151-i7-10750h.json"
+ ],
+ "labels_sha256": [
+  "fbd20aed168669bc3882387508f5d775af0233796dcc1d7930237601a9ab194e"
+ ],
+ "laya": "0.3.27",
+ "profile_field": "present",
+ "python": "3.12.14",
+ "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148",
+ "rows": [
+  {
+   "answer_confidence": 0.3556,
+   "choice": "balanced",
+   "forward_us": 650789,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s12-u15/151/balanced/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3556,
+    "latency": 0.1736,
+    "reclaim": 0.1855,
+    "throughput": 0.2853
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3625,
+   "choice": "balanced",
+   "forward_us": 656405,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s12-u15/151/balanced/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3625,
+    "latency": 0.1796,
+    "reclaim": 0.1792,
+    "throughput": 0.2787
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3622,
+   "choice": "balanced",
+   "forward_us": 695300,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s12-u15/151/balanced/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3622,
+    "latency": 0.1839,
+    "reclaim": 0.1808,
+    "throughput": 0.2732
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3558,
+   "choice": "balanced",
+   "forward_us": 655306,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s12-u15/151/latency/r0/a1",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3558,
+    "latency": 0.1838,
+    "reclaim": 0.1796,
+    "throughput": 0.2808
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3588,
+   "choice": "balanced",
+   "forward_us": 657553,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s12-u15/151/latency/r1/a1",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3588,
+    "latency": 0.1788,
+    "reclaim": 0.1888,
+    "throughput": 0.2737
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3507,
+   "choice": "balanced",
+   "forward_us": 797860,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s12-u15/151/latency/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3507,
+    "latency": 0.1873,
+    "reclaim": 0.1818,
+    "throughput": 0.2803
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3489,
+   "choice": "balanced",
+   "forward_us": 673189,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s12-u15/151/throughput/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3489,
+    "latency": 0.1857,
+    "reclaim": 0.1876,
+    "throughput": 0.2777
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3535,
+   "choice": "balanced",
+   "forward_us": 681057,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s12-u15/151/throughput/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3535,
+    "latency": 0.1798,
+    "reclaim": 0.1907,
+    "throughput": 0.276
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3716,
+   "choice": "balanced",
+   "forward_us": 699066,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s12-u15/151/throughput/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3716,
+    "latency": 0.1821,
+    "reclaim": 0.1708,
+    "throughput": 0.2756
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3537,
+   "choice": "balanced",
+   "forward_us": 680180,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s12-u15/151/reclaim/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3537,
+    "latency": 0.1885,
+    "reclaim": 0.1858,
+    "throughput": 0.272
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3542,
+   "choice": "balanced",
+   "forward_us": 685702,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s12-u15/151/reclaim/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3542,
+    "latency": 0.1837,
+    "reclaim": 0.1892,
+    "throughput": 0.2729
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3553,
+   "choice": "balanced",
+   "forward_us": 714930,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s12-u15/151/reclaim/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3553,
+    "latency": 0.1846,
+    "reclaim": 0.1867,
+    "throughput": 0.2734
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3827,
+   "choice": "balanced",
+   "forward_us": 696818,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u35/151/balanced/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3827,
+    "latency": 0.1782,
+    "reclaim": 0.1843,
+    "throughput": 0.2548
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3979,
+   "choice": "balanced",
+   "forward_us": 683488,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u35/151/balanced/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3979,
+    "latency": 0.1721,
+    "reclaim": 0.1701,
+    "throughput": 0.2599
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3944,
+   "choice": "balanced",
+   "forward_us": 687245,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u35/151/balanced/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3944,
+    "latency": 0.1718,
+    "reclaim": 0.1765,
+    "throughput": 0.2574
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3985,
+   "choice": "balanced",
+   "forward_us": 692132,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u35/151/latency/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3985,
+    "latency": 0.1746,
+    "reclaim": 0.1666,
+    "throughput": 0.2603
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3976,
+   "choice": "balanced",
+   "forward_us": 686758,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u35/151/latency/r1/a1",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3976,
+    "latency": 0.1663,
+    "reclaim": 0.1783,
+    "throughput": 0.2578
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3865,
+   "choice": "balanced",
+   "forward_us": 693437,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u35/151/latency/r2/a3",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3865,
+    "latency": 0.1729,
+    "reclaim": 0.1849,
+    "throughput": 0.2556
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3827,
+   "choice": "balanced",
+   "forward_us": 698605,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u35/151/throughput/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3827,
+    "latency": 0.1782,
+    "reclaim": 0.1843,
+    "throughput": 0.2548
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3963,
+   "choice": "balanced",
+   "forward_us": 721346,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u35/151/throughput/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3963,
+    "latency": 0.1749,
+    "reclaim": 0.169,
+    "throughput": 0.2598
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3909,
+   "choice": "balanced",
+   "forward_us": 708690,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u35/151/throughput/r2/a1",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3909,
+    "latency": 0.1749,
+    "reclaim": 0.1759,
+    "throughput": 0.2583
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3786,
+   "choice": "balanced",
+   "forward_us": 718794,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u35/151/reclaim/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3786,
+    "latency": 0.1809,
+    "reclaim": 0.1858,
+    "throughput": 0.2547
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3866,
+   "choice": "balanced",
+   "forward_us": 706056,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u35/151/reclaim/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3866,
+    "latency": 0.1757,
+    "reclaim": 0.1783,
+    "throughput": 0.2593
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3848,
+   "choice": "balanced",
+   "forward_us": 697540,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u35/151/reclaim/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3848,
+    "latency": 0.1796,
+    "reclaim": 0.1816,
+    "throughput": 0.254
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4167,
+   "choice": "balanced",
+   "forward_us": 712309,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u65/151/balanced/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4167,
+    "latency": 0.1565,
+    "reclaim": 0.1645,
+    "throughput": 0.2623
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4186,
+   "choice": "balanced",
+   "forward_us": 709912,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u65/151/balanced/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4186,
+    "latency": 0.1584,
+    "reclaim": 0.1501,
+    "throughput": 0.2728
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4197,
+   "choice": "balanced",
+   "forward_us": 711725,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u65/151/balanced/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4197,
+    "latency": 0.1632,
+    "reclaim": 0.1598,
+    "throughput": 0.2573
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4383,
+   "choice": "balanced",
+   "forward_us": 716197,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u65/151/latency/r0/a1",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4383,
+    "latency": 0.1552,
+    "reclaim": 0.1515,
+    "throughput": 0.2551
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4036,
+   "choice": "balanced",
+   "forward_us": 758966,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u65/151/latency/r1/a1",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4036,
+    "latency": 0.1587,
+    "reclaim": 0.1684,
+    "throughput": 0.2693
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4305,
+   "choice": "balanced",
+   "forward_us": 715873,
+   "heuristic": "latency",
+   "input_tokens": 312,
+   "key": "s12-u65/151/latency/r2/a1",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4305,
+    "latency": 0.1591,
+    "reclaim": 0.1514,
+    "throughput": 0.259
+   },
+   "state_tokens": 208,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3953,
+   "choice": "balanced",
+   "forward_us": 710749,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u65/151/throughput/r0/a1",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.3953,
+    "latency": 0.1696,
+    "reclaim": 0.1689,
+    "throughput": 0.2662
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3885,
+   "choice": "balanced",
+   "forward_us": 713169,
+   "heuristic": "latency",
+   "input_tokens": 312,
+   "key": "s12-u65/151/throughput/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.3885,
+    "latency": 0.1577,
+    "reclaim": 0.1728,
+    "throughput": 0.281
+   },
+   "state_tokens": 208,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4316,
+   "choice": "balanced",
+   "forward_us": 721871,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u65/151/throughput/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4316,
+    "latency": 0.1597,
+    "reclaim": 0.1517,
+    "throughput": 0.257
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4295,
+   "choice": "balanced",
+   "forward_us": 710004,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u65/151/reclaim/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4295,
+    "latency": 0.157,
+    "reclaim": 0.1488,
+    "throughput": 0.2647
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4344,
+   "choice": "balanced",
+   "forward_us": 710043,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u65/151/reclaim/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4344,
+    "latency": 0.1571,
+    "reclaim": 0.1504,
+    "throughput": 0.2581
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3974,
+   "choice": "balanced",
+   "forward_us": 708725,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u65/151/reclaim/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.3974,
+    "latency": 0.1635,
+    "reclaim": 0.1664,
+    "throughput": 0.2727
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3845,
+   "choice": "balanced",
+   "forward_us": 753706,
+   "heuristic": "latency",
+   "input_tokens": 312,
+   "key": "s12-u80/151/balanced/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.3845,
+    "latency": 0.1558,
+    "reclaim": 0.1761,
+    "throughput": 0.2836
+   },
+   "state_tokens": 208,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3986,
+   "choice": "balanced",
+   "forward_us": 713304,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u80/151/balanced/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.3986,
+    "latency": 0.1579,
+    "reclaim": 0.1633,
+    "throughput": 0.2802
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4113,
+   "choice": "balanced",
+   "forward_us": 717050,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u80/151/balanced/r2/a1",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4113,
+    "latency": 0.1596,
+    "reclaim": 0.1675,
+    "throughput": 0.2616
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3983,
+   "choice": "balanced",
+   "forward_us": 713227,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u80/151/latency/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.3983,
+    "latency": 0.1633,
+    "reclaim": 0.1679,
+    "throughput": 0.2706
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4063,
+   "choice": "balanced",
+   "forward_us": 720376,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u80/151/latency/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4063,
+    "latency": 0.1594,
+    "reclaim": 0.1678,
+    "throughput": 0.2665
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3942,
+   "choice": "balanced",
+   "forward_us": 717473,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u80/151/latency/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.3942,
+    "latency": 0.1617,
+    "reclaim": 0.1681,
+    "throughput": 0.276
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4066,
+   "choice": "balanced",
+   "forward_us": 730568,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u80/151/throughput/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4066,
+    "latency": 0.1588,
+    "reclaim": 0.1568,
+    "throughput": 0.2777
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.414,
+   "choice": "balanced",
+   "forward_us": 721118,
+   "heuristic": "latency",
+   "input_tokens": 312,
+   "key": "s12-u80/151/throughput/r1/a1",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.414,
+    "latency": 0.1624,
+    "reclaim": 0.1532,
+    "throughput": 0.2704
+   },
+   "state_tokens": 208,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.399,
+   "choice": "balanced",
+   "forward_us": 789650,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u80/151/throughput/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.399,
+    "latency": 0.1651,
+    "reclaim": 0.1653,
+    "throughput": 0.2706
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3845,
+   "choice": "balanced",
+   "forward_us": 747677,
+   "heuristic": "latency",
+   "input_tokens": 312,
+   "key": "s12-u80/151/reclaim/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.3845,
+    "latency": 0.1558,
+    "reclaim": 0.1761,
+    "throughput": 0.2836
+   },
+   "state_tokens": 208,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3845,
+   "choice": "balanced",
+   "forward_us": 735087,
+   "heuristic": "latency",
+   "input_tokens": 312,
+   "key": "s12-u80/151/reclaim/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.3845,
+    "latency": 0.1558,
+    "reclaim": 0.1761,
+    "throughput": 0.2836
+   },
+   "state_tokens": 208,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4387,
+   "choice": "balanced",
+   "forward_us": 746382,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s12-u80/151/reclaim/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4387,
+    "latency": 0.158,
+    "reclaim": 0.1413,
+    "throughput": 0.262
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3658,
+   "choice": "balanced",
+   "forward_us": 756518,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s4-u15/151/balanced/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3658,
+    "latency": 0.184,
+    "reclaim": 0.1975,
+    "throughput": 0.2527
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3587,
+   "choice": "balanced",
+   "forward_us": 741066,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s4-u15/151/balanced/r1/a2",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3587,
+    "latency": 0.1823,
+    "reclaim": 0.1993,
+    "throughput": 0.2597
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3769,
+   "choice": "balanced",
+   "forward_us": 751651,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s4-u15/151/balanced/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3769,
+    "latency": 0.1811,
+    "reclaim": 0.189,
+    "throughput": 0.2529
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3672,
+   "choice": "balanced",
+   "forward_us": 731148,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s4-u15/151/latency/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3672,
+    "latency": 0.1775,
+    "reclaim": 0.1953,
+    "throughput": 0.2599
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3781,
+   "choice": "balanced",
+   "forward_us": 759931,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s4-u15/151/latency/r1/a1",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3781,
+    "latency": 0.1779,
+    "reclaim": 0.1827,
+    "throughput": 0.2612
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3609,
+   "choice": "balanced",
+   "forward_us": 743095,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s4-u15/151/latency/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3609,
+    "latency": 0.1875,
+    "reclaim": 0.1979,
+    "throughput": 0.2537
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3612,
+   "choice": "balanced",
+   "forward_us": 735880,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s4-u15/151/throughput/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3612,
+    "latency": 0.187,
+    "reclaim": 0.1936,
+    "throughput": 0.2583
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3687,
+   "choice": "balanced",
+   "forward_us": 779338,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s4-u15/151/throughput/r1/a1",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3687,
+    "latency": 0.1798,
+    "reclaim": 0.1905,
+    "throughput": 0.261
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3618,
+   "choice": "balanced",
+   "forward_us": 751358,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s4-u15/151/throughput/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3618,
+    "latency": 0.1843,
+    "reclaim": 0.1961,
+    "throughput": 0.2579
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3605,
+   "choice": "balanced",
+   "forward_us": 747684,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s4-u15/151/reclaim/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3605,
+    "latency": 0.1816,
+    "reclaim": 0.2015,
+    "throughput": 0.2564
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3743,
+   "choice": "balanced",
+   "forward_us": 763475,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s4-u15/151/reclaim/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3743,
+    "latency": 0.1821,
+    "reclaim": 0.1883,
+    "throughput": 0.2553
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3778,
+   "choice": "balanced",
+   "forward_us": 746113,
+   "heuristic": "latency",
+   "input_tokens": 314,
+   "key": "s4-u15/151/reclaim/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3778,
+    "latency": 0.1846,
+    "reclaim": 0.1796,
+    "throughput": 0.258
+   },
+   "state_tokens": 210,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3999,
+   "choice": "balanced",
+   "forward_us": 762654,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u35/151/balanced/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.3999,
+    "latency": 0.1685,
+    "reclaim": 0.1776,
+    "throughput": 0.2541
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4316,
+   "choice": "balanced",
+   "forward_us": 760405,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u35/151/balanced/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.4316,
+    "latency": 0.1643,
+    "reclaim": 0.1726,
+    "throughput": 0.2314
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4053,
+   "choice": "balanced",
+   "forward_us": 803656,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u35/151/balanced/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.4053,
+    "latency": 0.167,
+    "reclaim": 0.1693,
+    "throughput": 0.2585
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4,
+   "choice": "balanced",
+   "forward_us": 852493,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u35/151/latency/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.4,
+    "latency": 0.1707,
+    "reclaim": 0.1741,
+    "throughput": 0.2552
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4053,
+   "choice": "balanced",
+   "forward_us": 765940,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u35/151/latency/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.4053,
+    "latency": 0.174,
+    "reclaim": 0.1635,
+    "throughput": 0.2572
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4412,
+   "choice": "balanced",
+   "forward_us": 755834,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u35/151/latency/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.4412,
+    "latency": 0.1626,
+    "reclaim": 0.1689,
+    "throughput": 0.2273
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4059,
+   "choice": "balanced",
+   "forward_us": 743313,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u35/151/throughput/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.4059,
+    "latency": 0.1737,
+    "reclaim": 0.1668,
+    "throughput": 0.2536
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.401,
+   "choice": "balanced",
+   "forward_us": 752433,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u35/151/throughput/r1/a1",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.401,
+    "latency": 0.1685,
+    "reclaim": 0.1765,
+    "throughput": 0.254
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.402,
+   "choice": "balanced",
+   "forward_us": 775858,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u35/151/throughput/r2/a1",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.402,
+    "latency": 0.1702,
+    "reclaim": 0.1748,
+    "throughput": 0.253
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4205,
+   "choice": "balanced",
+   "forward_us": 774919,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u35/151/reclaim/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.4205,
+    "latency": 0.1642,
+    "reclaim": 0.1883,
+    "throughput": 0.227
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4009,
+   "choice": "balanced",
+   "forward_us": 752872,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u35/151/reclaim/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.4009,
+    "latency": 0.1707,
+    "reclaim": 0.1706,
+    "throughput": 0.2579
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4127,
+   "choice": "balanced",
+   "forward_us": 770136,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u35/151/reclaim/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "latency"
+   ],
+   "probabilities": {
+    "balanced": 0.4127,
+    "latency": 0.1669,
+    "reclaim": 0.1872,
+    "throughput": 0.2331
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "labelled",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4006,
+   "choice": "balanced",
+   "forward_us": 804921,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u65/151/balanced/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4006,
+    "latency": 0.1586,
+    "reclaim": 0.1671,
+    "throughput": 0.2736
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4157,
+   "choice": "balanced",
+   "forward_us": 858173,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u65/151/balanced/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4157,
+    "latency": 0.1615,
+    "reclaim": 0.1626,
+    "throughput": 0.2602
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4032,
+   "choice": "balanced",
+   "forward_us": 762746,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u65/151/balanced/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4032,
+    "latency": 0.1598,
+    "reclaim": 0.1621,
+    "throughput": 0.2749
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4231,
+   "choice": "balanced",
+   "forward_us": 747749,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u65/151/latency/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4231,
+    "latency": 0.1619,
+    "reclaim": 0.1606,
+    "throughput": 0.2544
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4348,
+   "choice": "balanced",
+   "forward_us": 830822,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u65/151/latency/r1/a2",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4348,
+    "latency": 0.156,
+    "reclaim": 0.1533,
+    "throughput": 0.2559
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4246,
+   "choice": "balanced",
+   "forward_us": 810275,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u65/151/latency/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4246,
+    "latency": 0.1603,
+    "reclaim": 0.1568,
+    "throughput": 0.2583
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4386,
+   "choice": "balanced",
+   "forward_us": 779471,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u65/151/throughput/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4386,
+    "latency": 0.1563,
+    "reclaim": 0.1542,
+    "throughput": 0.2509
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4017,
+   "choice": "balanced",
+   "forward_us": 800753,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u65/151/throughput/r1/a1",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4017,
+    "latency": 0.1628,
+    "reclaim": 0.1655,
+    "throughput": 0.2701
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4079,
+   "choice": "balanced",
+   "forward_us": 770811,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u65/151/throughput/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4079,
+    "latency": 0.1612,
+    "reclaim": 0.1561,
+    "throughput": 0.2749
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4012,
+   "choice": "balanced",
+   "forward_us": 808177,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u65/151/reclaim/r0/a1",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4012,
+    "latency": 0.1574,
+    "reclaim": 0.1663,
+    "throughput": 0.2751
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4417,
+   "choice": "balanced",
+   "forward_us": 752260,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u65/151/reclaim/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4417,
+    "latency": 0.1537,
+    "reclaim": 0.1482,
+    "throughput": 0.2564
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4033,
+   "choice": "balanced",
+   "forward_us": 809595,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u65/151/reclaim/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4033,
+    "latency": 0.1664,
+    "reclaim": 0.1626,
+    "throughput": 0.2676
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3975,
+   "choice": "balanced",
+   "forward_us": 775407,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u80/151/balanced/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.3975,
+    "latency": 0.1626,
+    "reclaim": 0.1618,
+    "throughput": 0.2781
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4186,
+   "choice": "balanced",
+   "forward_us": 770010,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u80/151/balanced/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4186,
+    "latency": 0.1622,
+    "reclaim": 0.1581,
+    "throughput": 0.2612
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4305,
+   "choice": "balanced",
+   "forward_us": 979047,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u80/151/balanced/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4305,
+    "latency": 0.1594,
+    "reclaim": 0.1519,
+    "throughput": 0.2582
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4191,
+   "choice": "balanced",
+   "forward_us": 738149,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u80/151/latency/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4191,
+    "latency": 0.1609,
+    "reclaim": 0.1643,
+    "throughput": 0.2556
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4325,
+   "choice": "balanced",
+   "forward_us": 756705,
+   "heuristic": "latency",
+   "input_tokens": 312,
+   "key": "s4-u80/151/latency/r1/a1",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4325,
+    "latency": 0.1575,
+    "reclaim": 0.1517,
+    "throughput": 0.2583
+   },
+   "state_tokens": 208,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3968,
+   "choice": "balanced",
+   "forward_us": 770121,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u80/151/latency/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.3968,
+    "latency": 0.1679,
+    "reclaim": 0.1663,
+    "throughput": 0.2691
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4333,
+   "choice": "balanced",
+   "forward_us": 823077,
+   "heuristic": "latency",
+   "input_tokens": 312,
+   "key": "s4-u80/151/throughput/r0/a1",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4333,
+    "latency": 0.1609,
+    "reclaim": 0.1407,
+    "throughput": 0.2651
+   },
+   "state_tokens": 208,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4001,
+   "choice": "balanced",
+   "forward_us": 967482,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u80/151/throughput/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4001,
+    "latency": 0.1611,
+    "reclaim": 0.1675,
+    "throughput": 0.2713
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4195,
+   "choice": "balanced",
+   "forward_us": 837992,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u80/151/throughput/r2/a2",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4195,
+    "latency": 0.1595,
+    "reclaim": 0.1578,
+    "throughput": 0.2632
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.3794,
+   "choice": "balanced",
+   "forward_us": 796675,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u80/151/reclaim/r0/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.3794,
+    "latency": 0.1741,
+    "reclaim": 0.176,
+    "throughput": 0.2704
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4313,
+   "choice": "balanced",
+   "forward_us": 764105,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u80/151/reclaim/r1/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4313,
+    "latency": 0.1604,
+    "reclaim": 0.154,
+    "throughput": 0.2542
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  },
+  {
+   "answer_confidence": 0.4425,
+   "choice": "balanced",
+   "forward_us": 928946,
+   "heuristic": "latency",
+   "input_tokens": 313,
+   "key": "s4-u80/151/reclaim/r2/a0",
+   "kind": "disagree",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "probabilities": {
+    "balanced": 0.4425,
+    "latency": 0.1571,
+    "reclaim": 0.1432,
+    "throughput": 0.2573
+   },
+   "state_tokens": 209,
+   "state_tokens_dropped": 0,
+   "status": "tie",
+   "truncated": false
+  }
+ ],
+ "torch": "2.14.1+cpu",
+ "torch_threads": 6
+}

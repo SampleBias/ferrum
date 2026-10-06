@@ -1,0 +1,34 @@
+{
+ "development": {
+  "abstain": 0,
+  "decisions": 96,
+  "hits": 96,
+  "infeasible": 0,
+  "misses": 0
+ },
+ "fit": "fit-v0",
+ "fit_report": "fit-v0-i7-10750h.json",
+ "fit_report_sha256": "842f0623c3caf82a63c6de1fd8f9dc2c195cca5271f06abb3c45a68d9a81841a",
+ "fit_sha256": "61c8ea11ac8e609ba86836a76390149bc4208aa9a6e899b2443cf9340be741d4",
+ "host_cpu": "Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz",
+ "id": "candidate-v0",
+ "kind": "threshold",
+ "kvm_module": "kvm_intel",
+ "manifest": "splits-v2",
+ "manifest_sha256": "a1c9793a9f7c07cb8a71fe433baab20c5a9a705db9ea6f38f17194f65faf8c6a",
+ "note": "Frozen from the development selection before any calibration label was read.",
+ "objective": "objective-v2",
+ "objective_sha256": "1361b3ea433536a3920b46ad8f114065b5f29e4d1a8c7813e385285e3194f9bd",
+ "params": {
+  "above": "balanced",
+  "below": "latency",
+  "cut": 14.0,
+  "examples": 288,
+  "gap": [
+   2,
+   26
+  ],
+  "training_hits": 288
+ },
+ "selected": "pending-threshold"
+}
