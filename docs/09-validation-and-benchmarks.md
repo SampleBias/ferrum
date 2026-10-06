@@ -93,6 +93,8 @@ Use at least 20 paired trials per primary scenario/controller as an initial plan
 
 Randomize controller order within paired seeds to reduce thermal and background-load bias. Warm the model before measurement, record cold-start separately, run a fixed workload warm-up, and start measurement from a specified event. Keep CPU affinity, devices, images, and resource budgets constant. Fix or record host frequency behavior.
 
+Branched label trials record frequency behavior per boot: the warmed calibration and the in-trial batch speed. A boot more than 5% from its own calibration is rerun, and the refused attempt stays in the records. On the Intel laptop, pinning QEMU to one host CPU widened the equal-weight p99 spread to 125–297 ms, against 97–130 ms unpinned, because the pinned core shares a hyperthread sibling with desktop load. Pin only to a core whose sibling is reserved.
+
 Calculate paired differences and bootstrap intervals over independent runs/seeds, not millions of correlated per-request samples treated as independent observations. Report per-scenario results and an aggregation rule chosen beforehand. Do not conceal regressions by averaging unrelated units or by excluding failed trials.
 
 For mixed workloads, use measured service demand/overload levels rather than relying solely on nominal job counts. Report p99 sample counts, generator lag, offered work, completions, drops, and batch throughput together.

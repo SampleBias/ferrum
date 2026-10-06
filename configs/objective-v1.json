@@ -1,0 +1,22 @@
+{
+  "id": "objective-v1",
+  "family": "jobs-v1",
+  "catalog": "cpu-v1",
+  "candidates": ["balanced", "latency", "throughput", "reclaim"],
+  "repeats": 3,
+  "reference_profile": "balanced",
+  "primary": "p99_us",
+  "aggregate": "median",
+  "batch_metric": "batch_service_us",
+  "batch_retain_bp": 9500,
+  "completion_retain_bp": 9500,
+  "censored": "A censored p99 ranks after every uncensored p99. Censored candidates rank by median completion, then median batch CPU.",
+  "tie": "A feasible candidate ties the best when its repeat range overlaps the best's range on the ranking metric.",
+  "comparability": {
+    "schedule_digest": "identical across every branch of a unit",
+    "trial_speed_drift_bp": 500,
+    "pending_spread_jobs": 4,
+    "pending_spread_bp": 2500
+  },
+  "note": "Feasibility is relative to the balanced branch of the same unit, the profile the guest falls back to. Measuring retention against the best batch branch would make the throughput branch the bar, and the latency profile could never qualify once latency and batch contend. Batch is measured as guest CPU time over the horizon; batch units are recorded too. Latency demand is open-loop, so batch time falls only when a profile takes CPU that batch would otherwise have used, and it carries about 1.5% boot-to-boot noise where units carry about 5%. A branch whose in-trial speed drifts more than trial_speed_drift_bp from its own calibration is disturbed: it is kept and rerun. A unit whose prefix state diverges is kept for evaluation and left out of supervised labels."
+}

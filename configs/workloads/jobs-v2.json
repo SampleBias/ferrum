@@ -1,0 +1,33 @@
+{
+  "id": "jobs-v2",
+  "kind": "open-loop short jobs against continuous batch",
+  "prefix_profile": "balanced",
+  "prefix_us": 3000000,
+  "state_window_us": 1000000,
+  "horizon_us": 5000000,
+  "drain_us": 1000000,
+  "tick_us": 100,
+  "batch_unit_us": 500,
+  "latency_workers": 3,
+  "batch_workers": 3,
+  "maintenance_workers": 0,
+  "arrivals": "Bernoulli per tick with p = rate_per_s * tick_us / 1e6, SplitMix64 seeded with seed ^ fnv1a64(name)",
+  "scenarios": [
+    {"name": "s4-u15", "job_us": 4000, "rate_per_s": 38, "offered_bp": 1520},
+    {"name": "s4-u35", "job_us": 4000, "rate_per_s": 88, "offered_bp": 3520},
+    {"name": "s4-u45", "job_us": 4000, "rate_per_s": 112, "offered_bp": 4480},
+    {"name": "s4-u65", "job_us": 4000, "rate_per_s": 162, "offered_bp": 6480},
+    {"name": "s4-u72", "job_us": 4000, "rate_per_s": 180, "offered_bp": 7200},
+    {"name": "s4-u80", "job_us": 4000, "rate_per_s": 200, "offered_bp": 8000},
+    {"name": "s4-u95", "job_us": 4000, "rate_per_s": 238, "offered_bp": 9520},
+    {"name": "s12-u15", "job_us": 12000, "rate_per_s": 13, "offered_bp": 1560},
+    {"name": "s12-u35", "job_us": 12000, "rate_per_s": 29, "offered_bp": 3480},
+    {"name": "s12-u45", "job_us": 12000, "rate_per_s": 37, "offered_bp": 4440},
+    {"name": "s12-u65", "job_us": 12000, "rate_per_s": 54, "offered_bp": 6480},
+    {"name": "s12-u72", "job_us": 12000, "rate_per_s": 60, "offered_bp": 7200},
+    {"name": "s12-u80", "job_us": 12000, "rate_per_s": 67, "offered_bp": 8040},
+    {"name": "s32-u35", "job_us": 32000, "rate_per_s": 11, "offered_bp": 3520},
+    {"name": "s32-u65", "job_us": 32000, "rate_per_s": 20, "offered_bp": 6400}
+  ],
+  "note": "jobs-v1 with overload moved to 65% and above. The jobs-v1 pilot put an overload 5 points over an even split, where a 1% host speed change moved the pre-decision backlog by 10-20%. Loads between 45% and 64% stay out of the family. Maintenance is off, so reclaim and balanced give latency and batch the same 1:1 split. Job wakeups use a millisecond block timeout, which sets a 1 ms latency floor."
+}

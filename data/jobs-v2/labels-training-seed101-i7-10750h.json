@@ -1,0 +1,980 @@
+{
+ "attempts": 135,
+ "family": "jobs-v2",
+ "host_cpu": "Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz",
+ "kvm_module": "kvm_intel",
+ "manifest": "splits-v2",
+ "manifest_sha256": "a1c9793a9f7c07cb8a71fe433baab20c5a9a705db9ea6f38f17194f65faf8c6a",
+ "objective": "objective-v2",
+ "objective_sha256": "1361b3ea433536a3920b46ad8f114065b5f29e4d1a8c7813e385285e3194f9bd",
+ "records": "training-seed101-i7-10750h.jsonl",
+ "records_sha256": "10c86d945b777967707feecb17d3201f3ccec9e5ad1121337b820b5c1df68440",
+ "refused": 39,
+ "split": "training",
+ "units": [
+  {
+   "best": "latency",
+   "heuristic": "latency",
+   "label": [
+    "latency"
+   ],
+   "pending_spread": 0,
+   "prefix_drift_bp_max": 359,
+   "primary_censored": false,
+   "profiles": {
+    "balanced": {
+     "batch_retained_bp": 10000,
+     "batch_service_median": 4185745,
+     "batch_units_median": 8328,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": true,
+     "p99_max": 106209.0,
+     "p99_median": 97960.0,
+     "p99_min": 97740.0,
+     "repeats": 3
+    },
+    "latency": {
+     "batch_retained_bp": 9975,
+     "batch_service_median": 4175318,
+     "batch_units_median": 8165,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": true,
+     "p99_max": 50896.0,
+     "p99_median": 50490.0,
+     "p99_min": 50239.0,
+     "repeats": 3
+    },
+    "reclaim": {
+     "batch_retained_bp": 9989,
+     "batch_service_median": 4181194,
+     "batch_units_median": 8265,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": true,
+     "p99_max": 110799.0,
+     "p99_median": 109720.0,
+     "p99_min": 108076.0,
+     "repeats": 3
+    },
+    "throughput": {
+     "batch_retained_bp": 9943,
+     "batch_service_median": 4161946,
+     "batch_units_median": 8204,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": true,
+     "p99_max": 268806.0,
+     "p99_median": 250993.0,
+     "p99_min": 245596.0,
+     "repeats": 3
+    }
+   },
+   "scenario": "s12-u15",
+   "seed": 101,
+   "snapshot": {
+    "current_profile": "balanced",
+    "groups": [
+     {
+      "class": "latency",
+      "completions": 13,
+      "cpu_service_us": 151022,
+      "managed_bytes": 0,
+      "max_wait_us": 47400,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 13
+     },
+     {
+      "class": "batch",
+      "completions": 1759,
+      "cpu_service_us": 848967,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 3,
+      "runnable": 3,
+      "wait_samples": 0
+     },
+     {
+      "class": "maintenance",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     },
+     {
+      "class": "system",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     }
+    ],
+    "pressure": {
+     "emergency": false,
+     "evictable_backlog_bytes": 0,
+     "headroom_bytes": 134217728,
+     "managed_cap_bytes": 268435456,
+     "managed_used_bytes": 0
+    },
+    "window_us": 1000000
+   },
+   "status": "labelled"
+  },
+  {
+   "best": "latency",
+   "heuristic": "latency",
+   "label": [
+    "latency"
+   ],
+   "pending_spread": 0,
+   "prefix_drift_bp_max": 444,
+   "primary_censored": false,
+   "profiles": {
+    "balanced": {
+     "batch_retained_bp": 10000,
+     "batch_service_median": 3426083,
+     "batch_units_median": 6971,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": true,
+     "p99_max": 111273.0,
+     "p99_median": 99742.0,
+     "p99_min": 98642.0,
+     "repeats": 3
+    },
+    "latency": {
+     "batch_retained_bp": 9950,
+     "batch_service_median": 3409018,
+     "batch_units_median": 6845,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": true,
+     "p99_max": 51812.0,
+     "p99_median": 48106.0,
+     "p99_min": 46306.0,
+     "repeats": 3
+    },
+    "reclaim": {
+     "batch_retained_bp": 9870,
+     "batch_service_median": 3381615,
+     "batch_units_median": 6688,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": true,
+     "p99_max": 116590.0,
+     "p99_median": 112831.0,
+     "p99_min": 100933.0,
+     "repeats": 3
+    },
+    "throughput": {
+     "batch_retained_bp": 10935,
+     "batch_service_median": 3746306,
+     "batch_units_median": 7464,
+     "completion_max": 9248,
+     "completion_median": 9172,
+     "completion_min": 9172,
+     "feasible": false,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    }
+   },
+   "scenario": "s12-u35",
+   "seed": 101,
+   "snapshot": {
+    "current_profile": "balanced",
+    "groups": [
+     {
+      "class": "latency",
+      "completions": 21,
+      "cpu_service_us": 248417,
+      "managed_bytes": 0,
+      "max_wait_us": 63115,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 21
+     },
+     {
+      "class": "batch",
+      "completions": 1532,
+      "cpu_service_us": 751570,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 3,
+      "runnable": 3,
+      "wait_samples": 0
+     },
+     {
+      "class": "maintenance",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     },
+     {
+      "class": "system",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     }
+    ],
+    "pressure": {
+     "emergency": false,
+     "evictable_backlog_bytes": 0,
+     "headroom_bytes": 134217728,
+     "managed_cap_bytes": 268435456,
+     "managed_used_bytes": 0
+    },
+    "window_us": 1000000
+   },
+   "status": "labelled"
+  },
+  {
+   "best": "reclaim",
+   "heuristic": "latency",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "pending_spread": 3,
+   "prefix_drift_bp_max": 477,
+   "primary_censored": true,
+   "profiles": {
+    "balanced": {
+     "batch_retained_bp": 10000,
+     "batch_service_median": 2498143,
+     "batch_units_median": 4919,
+     "completion_max": 7881,
+     "completion_median": 7769,
+     "completion_min": 7360,
+     "feasible": true,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    },
+    "latency": {
+     "batch_retained_bp": 5537,
+     "batch_service_median": 1383225,
+     "batch_units_median": 2763,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": false,
+     "p99_max": 557013.0,
+     "p99_median": 516513.0,
+     "p99_min": 508387.0,
+     "repeats": 3
+    },
+    "reclaim": {
+     "batch_retained_bp": 9998,
+     "batch_service_median": 2497727,
+     "batch_units_median": 5018,
+     "completion_max": 8104,
+     "completion_median": 7992,
+     "completion_min": 7769,
+     "feasible": true,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    },
+    "throughput": {
+     "batch_retained_bp": 14990,
+     "batch_service_median": 3744627,
+     "batch_units_median": 7428,
+     "completion_max": 3271,
+     "completion_median": 3197,
+     "completion_min": 3197,
+     "feasible": false,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    }
+   },
+   "scenario": "s12-u65",
+   "seed": 101,
+   "snapshot": {
+    "current_profile": "balanced",
+    "groups": [
+     {
+      "class": "latency",
+      "completions": 42,
+      "cpu_service_us": 499960,
+      "managed_bytes": 0,
+      "max_wait_us": 749238,
+      "queue_len": 34,
+      "runnable": 3,
+      "wait_samples": 42
+     },
+     {
+      "class": "batch",
+      "completions": 1001,
+      "cpu_service_us": 500026,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 3,
+      "runnable": 3,
+      "wait_samples": 0
+     },
+     {
+      "class": "maintenance",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     },
+     {
+      "class": "system",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     }
+    ],
+    "pressure": {
+     "emergency": false,
+     "evictable_backlog_bytes": 0,
+     "headroom_bytes": 134217728,
+     "managed_cap_bytes": 268435456,
+     "managed_used_bytes": 0
+    },
+    "window_us": 1000000
+   },
+   "status": "tie"
+  },
+  {
+   "best": "reclaim",
+   "heuristic": "latency",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "pending_spread": 6,
+   "prefix_drift_bp_max": 374,
+   "primary_censored": true,
+   "profiles": {
+    "balanced": {
+     "batch_retained_bp": 10000,
+     "batch_service_median": 2496882,
+     "batch_units_median": 5009,
+     "completion_max": 6578,
+     "completion_median": 6578,
+     "completion_min": 6378,
+     "feasible": true,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    },
+    "latency": {
+     "batch_retained_bp": 5003,
+     "batch_service_median": 1249148,
+     "batch_units_median": 2472,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": false,
+     "p99_max": 1040490.0,
+     "p99_median": 1012587.0,
+     "p99_min": 993324.0,
+     "repeats": 3
+    },
+    "reclaim": {
+     "batch_retained_bp": 10000,
+     "batch_service_median": 2496851,
+     "batch_units_median": 5125,
+     "completion_max": 6843,
+     "completion_median": 6777,
+     "completion_min": 6079,
+     "feasible": true,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    },
+    "throughput": {
+     "batch_retained_bp": 15003,
+     "batch_service_median": 3746159,
+     "batch_units_median": 7428,
+     "completion_max": 2491,
+     "completion_median": 2292,
+     "completion_min": 2126,
+     "feasible": false,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    }
+   },
+   "scenario": "s12-u80",
+   "seed": 101,
+   "snapshot": {
+    "current_profile": "balanced",
+    "groups": [
+     {
+      "class": "latency",
+      "completions": 42,
+      "cpu_service_us": 499983,
+      "managed_bytes": 0,
+      "max_wait_us": 940322,
+      "queue_len": 54,
+      "runnable": 3,
+      "wait_samples": 42
+     },
+     {
+      "class": "batch",
+      "completions": 992,
+      "cpu_service_us": 499973,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 3,
+      "runnable": 3,
+      "wait_samples": 0
+     },
+     {
+      "class": "maintenance",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     },
+     {
+      "class": "system",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     }
+    ],
+    "pressure": {
+     "emergency": false,
+     "evictable_backlog_bytes": 0,
+     "headroom_bytes": 134217728,
+     "managed_cap_bytes": 268435456,
+     "managed_used_bytes": 0
+    },
+    "window_us": 1000000
+   },
+   "status": "tie"
+  },
+  {
+   "best": "latency",
+   "heuristic": "latency",
+   "label": [
+    "latency"
+   ],
+   "pending_spread": 0,
+   "prefix_drift_bp_max": 343,
+   "primary_censored": false,
+   "profiles": {
+    "balanced": {
+     "batch_retained_bp": 10000,
+     "batch_service_median": 4165034,
+     "batch_units_median": 8215,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": true,
+     "p99_max": 35693.0,
+     "p99_median": 34088.0,
+     "p99_min": 29429.0,
+     "repeats": 3
+    },
+    "latency": {
+     "batch_retained_bp": 10035,
+     "batch_service_median": 4179459,
+     "batch_units_median": 8382,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": true,
+     "p99_max": 17040.0,
+     "p99_median": 16966.0,
+     "p99_min": 16371.0,
+     "repeats": 3
+    },
+    "reclaim": {
+     "batch_retained_bp": 10007,
+     "batch_service_median": 4168139,
+     "batch_units_median": 8284,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": true,
+     "p99_max": 34334.0,
+     "p99_median": 32327.0,
+     "p99_min": 27911.0,
+     "repeats": 3
+    },
+    "throughput": {
+     "batch_retained_bp": 9958,
+     "batch_service_median": 4147686,
+     "batch_units_median": 7951,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": true,
+     "p99_max": 272402.0,
+     "p99_median": 93402.0,
+     "p99_min": 80072.0,
+     "repeats": 3
+    }
+   },
+   "scenario": "s4-u15",
+   "seed": 101,
+   "snapshot": {
+    "current_profile": "balanced",
+    "groups": [
+     {
+      "class": "latency",
+      "completions": 23,
+      "cpu_service_us": 96961,
+      "managed_bytes": 0,
+      "max_wait_us": 30695,
+      "queue_len": 1,
+      "runnable": 1,
+      "wait_samples": 23
+     },
+     {
+      "class": "batch",
+      "completions": 1761,
+      "cpu_service_us": 903024,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 3,
+      "runnable": 3,
+      "wait_samples": 0
+     },
+     {
+      "class": "maintenance",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     },
+     {
+      "class": "system",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     }
+    ],
+    "pressure": {
+     "emergency": false,
+     "evictable_backlog_bytes": 0,
+     "headroom_bytes": 134217728,
+     "managed_cap_bytes": 268435456,
+     "managed_used_bytes": 0
+    },
+    "window_us": 1000000
+   },
+   "status": "labelled"
+  },
+  {
+   "best": "latency",
+   "heuristic": "latency",
+   "label": [
+    "latency"
+   ],
+   "pending_spread": 1,
+   "prefix_drift_bp_max": 409,
+   "primary_censored": false,
+   "profiles": {
+    "balanced": {
+     "batch_retained_bp": 10000,
+     "batch_service_median": 2946232,
+     "batch_units_median": 5706,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": true,
+     "p99_max": 139887.0,
+     "p99_median": 137005.0,
+     "p99_min": 125399.0,
+     "repeats": 3
+    },
+    "latency": {
+     "batch_retained_bp": 10169,
+     "batch_service_median": 2995953,
+     "batch_units_median": 5951,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": true,
+     "p99_max": 39633.0,
+     "p99_median": 35899.0,
+     "p99_min": 33018.0,
+     "repeats": 3
+    },
+    "reclaim": {
+     "batch_retained_bp": 10290,
+     "batch_service_median": 3031715,
+     "batch_units_median": 6103,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": true,
+     "p99_max": 141140.0,
+     "p99_median": 113253.0,
+     "p99_min": 112757.0,
+     "repeats": 3
+    },
+    "throughput": {
+     "batch_retained_bp": 12712,
+     "batch_service_median": 3745349,
+     "batch_units_median": 7482,
+     "completion_max": 7510,
+     "completion_median": 7510,
+     "completion_min": 7307,
+     "feasible": false,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    }
+   },
+   "scenario": "s4-u35",
+   "seed": 101,
+   "snapshot": {
+    "current_profile": "balanced",
+    "groups": [
+     {
+      "class": "latency",
+      "completions": 87,
+      "cpu_service_us": 356968,
+      "managed_bytes": 0,
+      "max_wait_us": 61321,
+      "queue_len": 1,
+      "runnable": 1,
+      "wait_samples": 87
+     },
+     {
+      "class": "batch",
+      "completions": 1265,
+      "cpu_service_us": 643010,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 3,
+      "runnable": 3,
+      "wait_samples": 0
+     },
+     {
+      "class": "maintenance",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     },
+     {
+      "class": "system",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     }
+    ],
+    "pressure": {
+     "emergency": false,
+     "evictable_backlog_bytes": 0,
+     "headroom_bytes": 134217728,
+     "managed_cap_bytes": 268435456,
+     "managed_used_bytes": 0
+    },
+    "window_us": 1000000
+   },
+   "status": "labelled"
+  },
+  {
+   "best": "balanced",
+   "heuristic": "latency",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "pending_spread": 22,
+   "prefix_drift_bp_max": 445,
+   "primary_censored": true,
+   "profiles": {
+    "balanced": {
+     "batch_retained_bp": 10000,
+     "batch_service_median": 2497620,
+     "batch_units_median": 4984,
+     "completion_max": 8005,
+     "completion_median": 7657,
+     "completion_min": 7567,
+     "feasible": true,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    },
+    "latency": {
+     "batch_retained_bp": 5198,
+     "batch_service_median": 1298380,
+     "batch_units_median": 2598,
+     "completion_max": 10000,
+     "completion_median": 10000,
+     "completion_min": 10000,
+     "feasible": false,
+     "p99_max": 840371.0,
+     "p99_median": 795995.0,
+     "p99_min": 738737.0,
+     "repeats": 3
+    },
+    "reclaim": {
+     "batch_retained_bp": 9997,
+     "batch_service_median": 2496861,
+     "batch_units_median": 4913,
+     "completion_max": 8236,
+     "completion_median": 7593,
+     "completion_min": 7554,
+     "feasible": true,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    },
+    "throughput": {
+     "batch_retained_bp": 14997,
+     "batch_service_median": 3745782,
+     "batch_units_median": 7423,
+     "completion_max": 2921,
+     "completion_median": 2870,
+     "completion_min": 2831,
+     "feasible": false,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    }
+   },
+   "scenario": "s4-u65",
+   "seed": 101,
+   "snapshot": {
+    "current_profile": "balanced",
+    "groups": [
+     {
+      "class": "latency",
+      "completions": 125,
+      "cpu_service_us": 499841,
+      "managed_bytes": 0,
+      "max_wait_us": 835884,
+      "queue_len": 149,
+      "runnable": 3,
+      "wait_samples": 125
+     },
+     {
+      "class": "batch",
+      "completions": 986,
+      "cpu_service_us": 500056,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 3,
+      "runnable": 3,
+      "wait_samples": 0
+     },
+     {
+      "class": "maintenance",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     },
+     {
+      "class": "system",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     }
+    ],
+    "pressure": {
+     "emergency": false,
+     "evictable_backlog_bytes": 0,
+     "headroom_bytes": 134217728,
+     "managed_cap_bytes": 268435456,
+     "managed_used_bytes": 0
+    },
+    "window_us": 1000000
+   },
+   "status": "tie"
+  },
+  {
+   "best": "balanced",
+   "heuristic": "latency",
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "pending_spread": 16,
+   "prefix_drift_bp_max": 210,
+   "primary_censored": true,
+   "profiles": {
+    "balanced": {
+     "batch_retained_bp": 10000,
+     "batch_service_median": 2497022,
+     "batch_units_median": 5053,
+     "completion_max": 5555,
+     "completion_median": 5473,
+     "completion_min": 5226,
+     "feasible": true,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    },
+    "latency": {
+     "batch_retained_bp": 5003,
+     "batch_service_median": 1249274,
+     "batch_units_median": 2440,
+     "completion_max": 9547,
+     "completion_median": 9104,
+     "completion_min": 9022,
+     "feasible": false,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    },
+    "reclaim": {
+     "batch_retained_bp": 10005,
+     "batch_service_median": 2498277,
+     "batch_units_median": 5009,
+     "completion_max": 5380,
+     "completion_median": 5360,
+     "completion_min": 5246,
+     "feasible": true,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    },
+    "throughput": {
+     "batch_retained_bp": 15001,
+     "batch_service_median": 3745757,
+     "batch_units_median": 7460,
+     "completion_max": 1481,
+     "completion_median": 1430,
+     "completion_min": 1265,
+     "feasible": false,
+     "p99_max": null,
+     "p99_median": null,
+     "p99_min": null,
+     "repeats": 3
+    }
+   },
+   "scenario": "s4-u80",
+   "seed": 101,
+   "snapshot": {
+    "current_profile": "balanced",
+    "groups": [
+     {
+      "class": "latency",
+      "completions": 126,
+      "cpu_service_us": 499815,
+      "managed_bytes": 0,
+      "max_wait_us": 1103353,
+      "queue_len": 230,
+      "runnable": 3,
+      "wait_samples": 126
+     },
+     {
+      "class": "batch",
+      "completions": 1005,
+      "cpu_service_us": 500170,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 3,
+      "runnable": 3,
+      "wait_samples": 0
+     },
+     {
+      "class": "maintenance",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     },
+     {
+      "class": "system",
+      "completions": 0,
+      "cpu_service_us": 0,
+      "managed_bytes": 0,
+      "max_wait_us": 0,
+      "queue_len": 0,
+      "runnable": 0,
+      "wait_samples": 0
+     }
+    ],
+    "pressure": {
+     "emergency": false,
+     "evictable_backlog_bytes": 0,
+     "headroom_bytes": 134217728,
+     "managed_cap_bytes": 268435456,
+     "managed_used_bytes": 0
+    },
+    "window_us": 1000000
+   },
+   "status": "tie"
+  }
+ ]
+}

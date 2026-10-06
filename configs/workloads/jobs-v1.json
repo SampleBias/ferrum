@@ -1,0 +1,28 @@
+{
+  "id": "jobs-v1",
+  "kind": "open-loop short jobs against continuous batch",
+  "prefix_profile": "balanced",
+  "prefix_us": 3000000,
+  "state_window_us": 1000000,
+  "horizon_us": 5000000,
+  "drain_us": 1000000,
+  "tick_us": 100,
+  "batch_unit_us": 500,
+  "latency_workers": 3,
+  "batch_workers": 3,
+  "maintenance_workers": 0,
+  "arrivals": "Bernoulli per tick with p = rate_per_s * tick_us / 1e6, SplitMix64 seeded with seed ^ fnv1a64(name)",
+  "scenarios": [
+    {"name": "s4-u15", "job_us": 4000, "rate_per_s": 38, "offered_bp": 1520},
+    {"name": "s4-u35", "job_us": 4000, "rate_per_s": 88, "offered_bp": 3520},
+    {"name": "s4-u45", "job_us": 4000, "rate_per_s": 112, "offered_bp": 4480},
+    {"name": "s4-u55", "job_us": 4000, "rate_per_s": 138, "offered_bp": 5520},
+    {"name": "s4-u75", "job_us": 4000, "rate_per_s": 188, "offered_bp": 7520},
+    {"name": "s12-u15", "job_us": 12000, "rate_per_s": 13, "offered_bp": 1560},
+    {"name": "s12-u35", "job_us": 12000, "rate_per_s": 29, "offered_bp": 3480},
+    {"name": "s12-u45", "job_us": 12000, "rate_per_s": 37, "offered_bp": 4440},
+    {"name": "s12-u55", "job_us": 12000, "rate_per_s": 46, "offered_bp": 5520},
+    {"name": "s32-u35", "job_us": 32000, "rate_per_s": 11, "offered_bp": 3520}
+  ],
+  "note": "Latency is measured from scheduled arrival. Maintenance is off, so reclaim and balanced give latency and batch the same 1:1 split. Job wakeups use a millisecond block timeout, which sets a 1 ms latency floor."
+}

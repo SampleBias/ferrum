@@ -11,8 +11,13 @@ use std::process::ExitCode;
 use policy_guest::exchange;
 use policy_types::BootId;
 
+mod branch;
+
 fn main() -> ExitCode {
     println!("FERRUM_START policy-guest");
+    if env::args().skip(1).any(|arg| arg == "--branch") {
+        return branch::exit();
+    }
     if env::args().skip(1).any(|arg| arg == "--live-trace") {
         return live_exit(true);
     }

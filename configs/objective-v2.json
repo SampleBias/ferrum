@@ -1,0 +1,23 @@
+{
+  "id": "objective-v2",
+  "family": "jobs-v2",
+  "catalog": "cpu-v1",
+  "candidates": ["balanced", "latency", "throughput", "reclaim"],
+  "repeats": 3,
+  "reference_profile": "balanced",
+  "primary": "p99_us",
+  "aggregate": "median",
+  "batch_metric": "batch_service_us",
+  "batch_retain_bp": 9500,
+  "completion_retain_bp": 9500,
+  "censored": "A censored p99 ranks after every uncensored p99. Censored candidates rank by median completion, then median batch CPU.",
+  "tie": "A feasible candidate ties the best when its repeat range overlaps the best's range on the ranking metric.",
+  "comparability": {
+    "schedule_digest": "identical across every branch of a unit",
+    "trial_speed_drift_bp": 500,
+    "prefix_speed_drift_bp": 500,
+    "pending_spread_jobs": 4,
+    "pending_spread_bp": 5000
+  },
+  "note": "objective-v1 with two changes from the jobs-v1 pilot. The speed gate also covers the pre-decision window, measured as batch units times their nominal time against batch CPU time; a branch that passed the horizon gate had run 12.9% fast during its prefix. The pending spread follows from that gate: at the lowest jobs-v2 overload, 64.8%, a 5% prefix speed band moves the backlog by up to about 22% either way, so two admissible branches can differ by about 44% of the median. The label rule itself is unchanged: feasibility is relative to the balanced branch of the same unit, batch is guest CPU time over the horizon, and overlapping repeat ranges tie."
+}

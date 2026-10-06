@@ -80,6 +80,14 @@ Exit evidence: all deterministic profiles affect actual scheduling; no inference
 
 Exit evidence: live S3 causal trace, model-quality report including weaknesses, qualified end-to-end deadline, and reproducible artifact bundle.
 
+The first item has its implemented form in `jobs-v2`, `objective-v2`, and `splits-v2` ([document 08](08-data-and-learning.md#branched-labels)). Training seed 101 is labelled on the Intel host. The first version, `jobs-v1`, stays as development evidence. The remaining WP4–WP6 order is:
+
+1. Collect training seeds 102 and 103 per host, then development and calibration labels. A unit's branches stay on one host. Budget about 1.4 boots per branch.
+2. Fit the deterministic baseline, a pending-jobs threshold, and a small classifier on training labels, and select on development. In jobs-v2 one feature separates every training unit, so a learned model or an adapted Laya has to beat the tuned threshold, most likely on the unseen 45% and 72% loads or out of distribution. Keep the zero-shot checkpoint.
+3. Freeze one candidate, then calibrate on the calibration split.
+4. Open the sealed final test and the out-of-distribution subset once, for the held-out closed loop.
+5. Decide the guest deadline separately. The 750 ms deadline stays until that explicit decision.
+
 ### WP7–WP8: broader policy and final handoff
 
 - Add tagged arenas and safe cache eviction with ownership tests.

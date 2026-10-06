@@ -1,0 +1,102 @@
+{
+  "id": "splits-v2",
+  "family": "jobs-v2",
+  "family_sha256": "8ece16acd2417995b4c230f29dcb8b039dadd0daef5b270538fc998f3421479f",
+  "objective": "objective-v2",
+  "objective_sha256": "1361b3ea433536a3920b46ad8f114065b5f29e4d1a8c7813e385285e3194f9bd",
+  "frozen_before_labels": true,
+  "fit_reads": [
+    "training"
+  ],
+  "sealed": [
+    "final_test",
+    "out_of_distribution"
+  ],
+  "unseen_in_final_test": [
+    "s4-u45",
+    "s12-u45",
+    "s4-u72",
+    "s12-u72"
+  ],
+  "training": [
+    {"scenario": "s4-u15", "seed": 101, "schedule_fnv64": "0x14ed8b6caeecef43"},
+    {"scenario": "s4-u15", "seed": 102, "schedule_fnv64": "0x8e9b87a49139cc53"},
+    {"scenario": "s4-u15", "seed": 103, "schedule_fnv64": "0x87beeceb04c354ad"},
+    {"scenario": "s4-u35", "seed": 101, "schedule_fnv64": "0xd58e8e4af254388f"},
+    {"scenario": "s4-u35", "seed": 102, "schedule_fnv64": "0x3b682875bb45aa8b"},
+    {"scenario": "s4-u35", "seed": 103, "schedule_fnv64": "0x6fd2ac686f5abd06"},
+    {"scenario": "s4-u65", "seed": 101, "schedule_fnv64": "0x04ddad5099ac58ef"},
+    {"scenario": "s4-u65", "seed": 102, "schedule_fnv64": "0xaffeb419b046e57b"},
+    {"scenario": "s4-u65", "seed": 103, "schedule_fnv64": "0x3293908e158dd1ec"},
+    {"scenario": "s4-u80", "seed": 101, "schedule_fnv64": "0xfcf0a87093d14da3"},
+    {"scenario": "s4-u80", "seed": 102, "schedule_fnv64": "0xd8d59b0103ae0ef8"},
+    {"scenario": "s4-u80", "seed": 103, "schedule_fnv64": "0xe5e87dfc295860ae"},
+    {"scenario": "s12-u15", "seed": 101, "schedule_fnv64": "0xad69e7bd5f6c39a9"},
+    {"scenario": "s12-u15", "seed": 102, "schedule_fnv64": "0x9a9632942790dedc"},
+    {"scenario": "s12-u15", "seed": 103, "schedule_fnv64": "0xd6a9648c95b583b2"},
+    {"scenario": "s12-u35", "seed": 101, "schedule_fnv64": "0xb07a3f92eab3c087"},
+    {"scenario": "s12-u35", "seed": 102, "schedule_fnv64": "0x472ae1c902c6f8c2"},
+    {"scenario": "s12-u35", "seed": 103, "schedule_fnv64": "0x60b47757a1dec56b"},
+    {"scenario": "s12-u65", "seed": 101, "schedule_fnv64": "0x63778f60d941933f"},
+    {"scenario": "s12-u65", "seed": 102, "schedule_fnv64": "0x923a94da91e32f0e"},
+    {"scenario": "s12-u65", "seed": 103, "schedule_fnv64": "0x2a460a8d48bc1261"},
+    {"scenario": "s12-u80", "seed": 101, "schedule_fnv64": "0x308d61beb66b4614"},
+    {"scenario": "s12-u80", "seed": 102, "schedule_fnv64": "0xbe4ded2de40fd33a"},
+    {"scenario": "s12-u80", "seed": 103, "schedule_fnv64": "0x41cc61bccf69ba2b"}
+  ],
+  "development": [
+    {"scenario": "s4-u15", "seed": 151, "schedule_fnv64": "0x7d7e7793e8a280d7"},
+    {"scenario": "s4-u35", "seed": 151, "schedule_fnv64": "0x7471b8e37368d9f6"},
+    {"scenario": "s4-u65", "seed": 151, "schedule_fnv64": "0x4e248207c831f68c"},
+    {"scenario": "s4-u80", "seed": 151, "schedule_fnv64": "0x6a039fa499af437b"},
+    {"scenario": "s12-u15", "seed": 151, "schedule_fnv64": "0xe53e719e6ae46e68"},
+    {"scenario": "s12-u35", "seed": 151, "schedule_fnv64": "0x22d8adecb165a6ce"},
+    {"scenario": "s12-u65", "seed": 151, "schedule_fnv64": "0xbcce088c4a318853"},
+    {"scenario": "s12-u80", "seed": 151, "schedule_fnv64": "0x510a6abab5b9e664"}
+  ],
+  "calibration": [
+    {"scenario": "s4-u15", "seed": 201, "schedule_fnv64": "0xa13bde6ffb75ef96"},
+    {"scenario": "s4-u15", "seed": 202, "schedule_fnv64": "0x5f48994225233197"},
+    {"scenario": "s4-u35", "seed": 201, "schedule_fnv64": "0x21476bb0c26ff73d"},
+    {"scenario": "s4-u35", "seed": 202, "schedule_fnv64": "0xb1d848fa77c4a9c5"},
+    {"scenario": "s4-u65", "seed": 201, "schedule_fnv64": "0xb7023befcf02df15"},
+    {"scenario": "s4-u65", "seed": 202, "schedule_fnv64": "0x76d5d4783fbb4152"},
+    {"scenario": "s4-u80", "seed": 201, "schedule_fnv64": "0x7f9311ade773b84b"},
+    {"scenario": "s4-u80", "seed": 202, "schedule_fnv64": "0x824b5b97c0fc435f"},
+    {"scenario": "s12-u15", "seed": 201, "schedule_fnv64": "0x721c998dded68b89"},
+    {"scenario": "s12-u15", "seed": 202, "schedule_fnv64": "0xd2a1c116a61a096a"},
+    {"scenario": "s12-u35", "seed": 201, "schedule_fnv64": "0x375178f94b8ff633"},
+    {"scenario": "s12-u35", "seed": 202, "schedule_fnv64": "0xdb4cb67cd634b6a2"},
+    {"scenario": "s12-u65", "seed": 201, "schedule_fnv64": "0x03ad0a8120fe0c9e"},
+    {"scenario": "s12-u65", "seed": 202, "schedule_fnv64": "0x96777c764ae8b087"},
+    {"scenario": "s12-u80", "seed": 201, "schedule_fnv64": "0xc623b5007077e62b"},
+    {"scenario": "s12-u80", "seed": 202, "schedule_fnv64": "0xdd4e1c15bc504ee6"}
+  ],
+  "final_test": [
+    {"scenario": "s4-u15", "seed": 301, "schedule_fnv64": "0x055c20cb593cc293"},
+    {"scenario": "s4-u15", "seed": 302, "schedule_fnv64": "0x9d9a07128641735a"},
+    {"scenario": "s4-u65", "seed": 301, "schedule_fnv64": "0x52fdc976ade234b4"},
+    {"scenario": "s4-u65", "seed": 302, "schedule_fnv64": "0x954b02a2fbfcbe7a"},
+    {"scenario": "s12-u35", "seed": 301, "schedule_fnv64": "0xe82f55bf12d36e74"},
+    {"scenario": "s12-u35", "seed": 302, "schedule_fnv64": "0xb604eaa12a8d0069"},
+    {"scenario": "s12-u80", "seed": 301, "schedule_fnv64": "0x9459130d0db9e800"},
+    {"scenario": "s12-u80", "seed": 302, "schedule_fnv64": "0xc83328344bb1a024"},
+    {"scenario": "s4-u45", "seed": 311, "schedule_fnv64": "0xcc002905e4896112"},
+    {"scenario": "s4-u45", "seed": 312, "schedule_fnv64": "0xd780c0f9661e404a"},
+    {"scenario": "s12-u45", "seed": 311, "schedule_fnv64": "0x6e4ae13b8956f1d3"},
+    {"scenario": "s12-u45", "seed": 312, "schedule_fnv64": "0xbc55743524f3cf02"},
+    {"scenario": "s4-u72", "seed": 311, "schedule_fnv64": "0xed61e7002a68b362"},
+    {"scenario": "s4-u72", "seed": 312, "schedule_fnv64": "0x0f01b732dcf4895d"},
+    {"scenario": "s12-u72", "seed": 311, "schedule_fnv64": "0x2b859c2bf9b17369"},
+    {"scenario": "s12-u72", "seed": 312, "schedule_fnv64": "0x31dbf4822500d198"}
+  ],
+  "out_of_distribution": [
+    {"scenario": "s4-u95", "seed": 401, "schedule_fnv64": "0x0f9aa6214da62083"},
+    {"scenario": "s4-u95", "seed": 402, "schedule_fnv64": "0x88afe132035fe0db"},
+    {"scenario": "s32-u35", "seed": 401, "schedule_fnv64": "0x634cf8bc9db21090"},
+    {"scenario": "s32-u35", "seed": 402, "schedule_fnv64": "0xe4d026e59b002992"},
+    {"scenario": "s32-u65", "seed": 401, "schedule_fnv64": "0x14c4e6da3c2ab990"},
+    {"scenario": "s32-u65", "seed": 402, "schedule_fnv64": "0x67ad896f26ad2984"}
+  ],
+  "note": "Whole (scenario, seed) units over jobs-v2. Every branch of a unit stays in that unit's split. Training feeds a fit, development feeds model selection, and calibration is read only after a backend is fixed. Training holds two job sizes at 15% and 35%, under an even split, and at 65% and 80%, over it. The final test holds four seen configurations on new seeds and the unseen 45% and 72% loads, one on each side of the even split. The out-of-distribution subset holds a 95% load and a 32 ms job size at 35% and 65%. Neither sealed split is run before a frozen candidate exists. The jobs-v1 pilot stays in splits-v1, and mixed-v1 stays in splits-v0."
+}

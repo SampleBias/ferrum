@@ -8,6 +8,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod jobs;
+
 use policy_types::{Observation, MANAGED_ARENA_BYTES};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
