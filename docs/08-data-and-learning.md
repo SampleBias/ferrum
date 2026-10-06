@@ -150,6 +150,8 @@ PYTHONPATH=src python3 -m aik_controller.fit evaluate --candidate ../configs/can
   --calibration-report ../data/jobs-v2/calibration-v0-<host>.json --fit-report ../data/jobs-v2/fit-v0-<host>.json \
   --final-test ../data/jobs-v2/labels-final_test-seed301-<host>.json \
   --final-test ../data/jobs-v2/labels-final_test-seed302-<host>.json \
+  --final-test ../data/jobs-v2/labels-final_test-seed311-<host>.json \
+  --final-test ../data/jobs-v2/labels-final_test-seed312-<host>.json \
   --out-of-distribution ../data/jobs-v2/labels-out_of_distribution-seed401-<host>.json \
   --out-of-distribution ../data/jobs-v2/labels-out_of_distribution-seed402-<host>.json \
   --out ../data/jobs-v2/evaluation-v0-<host>.json
