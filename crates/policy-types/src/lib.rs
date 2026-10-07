@@ -25,8 +25,12 @@ pub const QUANTUM_US: u64 = 2_000;
 pub const ACCOUNTING_INTERVAL_US: u64 = 100_000;
 pub const SYSTEM_RESERVATION_US: u64 = 5_000;
 pub const SNAPSHOT_INTERVAL_US: u64 = 1_000_000;
-/// Inclusive guest deadline: a proposal is late when `now > accept_until`.
+/// Inclusive guest deadline for heuristic and fault sessions: a proposal is late
+/// when `now > accept_until`.
 pub const ACCEPTANCE_DEADLINE_US: u64 = 750_000;
+/// Laya live sessions. A warmed forward on both hosts misses 750 ms and fits 5 s,
+/// so this session seals and applies inside the declared five-second budget.
+pub const LAYA_ACCEPTANCE_DEADLINE_US: u64 = 5_000_000;
 /// Lease length measured from snapshot capture, not from reply receipt.
 pub const PROFILE_LEASE_US: u64 = 3_000_000;
 pub const MIN_DWELL_US: u64 = 2_000_000;

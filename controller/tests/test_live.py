@@ -102,6 +102,13 @@ class LiveDecisionTests(unittest.TestCase):
         self.assertEqual(message["reason_code"], "model_choice")
         self.assertEqual(message["answer_confidence_bp"], 1100)
 
+    def test_a_forward_inside_the_laya_budget_is_sent(self):
+        decision = withhold_expired(
+            decide_live(note(forward_us=2_300_000)), note(forward_us=2_300_000), 5_000_000
+        )
+        self.assertEqual(decision["kind"], "proposal")
+        self.assertEqual(decision["profile"], "reclaim")
+
     def test_a_slow_forward_is_an_expired_abstain(self):
         snapshot = json.loads(
             (ROOT / "tests" / "protocol-vectors" / "snapshot.canonical.json").read_text()

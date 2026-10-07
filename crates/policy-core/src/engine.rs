@@ -4,6 +4,7 @@
 use policy_types::{
     checked_deadline, Abstain, CatalogId, ControlPhase, Hash32, HelloAck, ObjectiveId, Observation,
     ProfileId, Proposal, RejectReason, RunMode, SessionId, Snapshot, ACCEPTANCE_DEADLINE_US,
+    LAYA_ACCEPTANCE_DEADLINE_US,
     CAP_ADMISSION, CAP_MEMORY, GROUP_ORDER, MIN_DWELL_US, PROFILE_LEASE_US, TELEMETRY_VERSION,
 };
 
@@ -178,6 +179,7 @@ pub struct PolicyEngine {
     ack_head: usize,
     ack_len: usize,
     acks_dropped: u64,
+    acceptance_us: u64,
 }
 
 impl PolicyEngine {
@@ -211,6 +213,7 @@ impl PolicyEngine {
             ack_head: 0,
             ack_len: 0,
             acks_dropped: 0,
+            acceptance_us: ACCEPTANCE_DEADLINE_US,
         };
         engine.actuate(
             ProfileId::Balanced,
@@ -220,6 +223,13 @@ impl PolicyEngine {
             },
         );
         engine
+    }
+
+    /// Seal later snapshots with the five-second Laya budget.
+    ///
+    /// Heuristic and fault sessions keep the published 750 ms deadline.
+    pub fn use_laya_deadline(&mut self) {
+        self.acceptance_us = LAYA_ACCEPTANCE_DEADLINE_US;
     }
 
     pub fn status(&self) -> PolicyStatus {
@@ -349,7 +359,7 @@ impl PolicyEngine {
             self.unsent = Some(held);
             return Ok(Promote::Empty);
         }
-        let accept = checked_deadline(held.captured_us, ACCEPTANCE_DEADLINE_US)
+        let accept = checked_deadline(held.captured_us, self.acceptance_us)
             .ok_or(PolicyError::Overflow)?;
         if now_us > accept {
             return Ok(Promote::Expired);
@@ -683,7 +693,7 @@ impl PolicyEngine {
 
     fn seal(&mut self, now_us: u64, obs: Observation) -> Result<(Snapshot, Hash32), PolicyError> {
         let session = self.session.ok_or(PolicyError::NoSession)?;
-        let accept = checked_deadline(now_us, ACCEPTANCE_DEADLINE_US).ok_or(PolicyError::Overflow)?;
+        let accept = checked_deadline(now_us, self.acceptance_us).ok_or(PolicyError::Overflow)?;
         let lease = checked_deadline(now_us, PROFILE_LEASE_US).ok_or(PolicyError::Overflow)?;
         let snapshot = Snapshot {
             boot_id: self.config.boot_id,
@@ -1056,6 +1066,21 @@ mod tests {
             engine.on_proposal(too_soon, &other),
             ProposalOutcome::Rejected(RejectReason::Dwell)
         );
+        assert_eq!(engine.status().profile, ProfileId::Latency);
+    }
+
+    #[test]
+    fn a_laya_session_applies_a_forward_past_750ms() {
+        let mut engine = engine(RunMode::Live, CatalogId::CpuV1);
+        engine.use_laya_deadline();
+        arm(&mut engine);
+        let captured = MIN_DWELL_US;
+        let proposal = proposal_at(&mut engine, captured, ProfileId::Latency, 100);
+        let decision = captured + 2_300_000;
+        assert!(decision > captured + ACCEPTANCE_DEADLINE_US);
+        assert!(decision <= captured + LAYA_ACCEPTANCE_DEADLINE_US);
+        assert_eq!(engine.on_proposal(decision, &proposal), ProposalOutcome::Staged);
+        assert!(matches!(engine.activate(decision), ActivateOutcome::Applied(_)));
         assert_eq!(engine.status().profile, ProfileId::Latency);
     }
 

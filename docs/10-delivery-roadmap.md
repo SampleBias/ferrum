@@ -86,7 +86,7 @@ The first item has its implemented form in `jobs-v2`, `objective-v2`, and `split
 2. Fit the deterministic baseline, a pending-jobs threshold, and a small classifier on training labels, and select on development. In jobs-v2 one feature separates every training unit, so a learned model or an adapted Laya has to beat the tuned threshold, most likely on the unseen 45% and 72% loads or out of distribution. Keep the zero-shot checkpoint.
 3. Freeze one candidate, then calibrate on the calibration split.
 4. Open the sealed final test and the out-of-distribution subset once, for the held-out closed loop.
-5. Decide the guest deadline separately. The 750 ms deadline stays until that explicit decision.
+5. Decide the guest deadline separately. The 750 ms deadline stays for heuristic and fault sessions. The Laya live session uses the declared 5 s budget, so a forward slower than 750 ms is staged.
 
 Progress by host. On the office AMD Ryzen 5 1600, steps 1–3 have run. The fit-v0 selection is the pending-jobs threshold, frozen as `configs/candidate-v0-r5-1600.json` before any calibration label existed ([document 08](08-data-and-learning.md#branched-labels)). On calibration it hit all 16 units, with a 95% Wilson interval of 0.806–1.0. The office host is ready for step 4's offline half. On the Intel i7-10750H, steps 1–3 have also run. Its candidate is frozen from its own development labels and is never copied from the office host: `configs/candidate-v0-i7-10750h.json`, cut 14 pending jobs, `latency` below and `balanced` at or above, committed before any Intel calibration label. On calibration it hit all 16 units, with a 95% Wilson interval of 0.806–1.0. Both hosts are ready for step 4's offline half. The Intel sequence was, from the repository root:
 

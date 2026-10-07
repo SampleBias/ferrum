@@ -361,7 +361,7 @@ fn live_run(trace: bool) -> Result<(), String> {
                 profile.as_str(),
                 captured,
                 decision_us,
-                captured.saturating_add(policy_types::ACCEPTANCE_DEADLINE_US),
+                captured.saturating_add(policy_types::LAYA_ACCEPTANCE_DEADLINE_US),
                 status.generation,
                 status.profile.as_str()
             );
@@ -387,7 +387,7 @@ fn live_run(trace: bool) -> Result<(), String> {
                 ticket.profile.as_str(),
                 captured,
                 decision_us,
-                captured.saturating_add(policy_types::ACCEPTANCE_DEADLINE_US)
+                captured.saturating_add(policy_types::LAYA_ACCEPTANCE_DEADLINE_US)
             );
             Ok(())
         }
@@ -500,7 +500,7 @@ fn live_run(trace: bool) -> Result<(), String> {
     use policy_core::catalog_spec;
     use policy_guest::LiveOutcome;
     use policy_types::{
-        CatalogId, ProfileId, RejectReason, ACCEPTANCE_DEADLINE_US, MIN_DWELL_US, PROFILE_LEASE_US,
+        CatalogId, ProfileId, RejectReason, LAYA_ACCEPTANCE_DEADLINE_US, MIN_DWELL_US, PROFILE_LEASE_US,
     };
 
     const LATENCY: u8 = 1;
@@ -683,7 +683,7 @@ fn live_run(trace: bool) -> Result<(), String> {
                 monotonic_us().map_err(|_| policy_guest::SessionError::Protocol("clock"))
             })
             .map_err(|err| format!("{}: {err}", phase.name))?;
-        let accept_until = captured.saturating_add(ACCEPTANCE_DEADLINE_US);
+        let accept_until = captured.saturating_add(LAYA_ACCEPTANCE_DEADLINE_US);
         let mut held = false;
         match outcome {
             LiveOutcome::Rejected { reason, profile, decision_us } => {

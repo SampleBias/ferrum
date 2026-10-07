@@ -4,5 +4,5 @@
   "published_budget_us": 750000,
   "budget_us": 5000000,
   "replaces_guest_deadline": false,
-  "note": "The office AMD Ryzen 5 1600 warmed pass had p50 1861752 us and p99 2340956 us at six torch threads. That misses 750 ms and does not fit 2 s once one second is reserved for transport and apply, so this host declares the five-second experiment. The cold forward, 2999050 us, fits it. A second pass on the same host had p50 2040619 us, p99 2339361 us, and a cold forward of 1983876 us, and selects the same experiment. The guest still seals snapshots with the published deadline."
+  "note": "The office AMD Ryzen 5 1600 warmed pass had p50 1861752 us and p99 2340956 us at six torch threads. That misses 750 ms and does not fit 2 s once one second is reserved for transport and apply, so this host declares the five-second experiment. The cold forward, 2999050 us, fits it. A second pass on the same host had p50 2040619 us, p99 2339361 us, and a cold forward of 1983876 us, and selects the same experiment. The Laya live session seals snapshots with this budget. Heuristic and fault sessions keep the published 750 ms deadline."
 }

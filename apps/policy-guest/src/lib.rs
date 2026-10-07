@@ -613,6 +613,9 @@ impl LiveSession {
             run_mode: mode,
             manual_rearm: false,
         });
+        if mode == RunMode::Live {
+            engine.use_laya_deadline();
+        }
         exchange_hello(stream, &mut engine, boot_id, mode)?;
         engine
             .promote_to_active()
@@ -1158,7 +1161,7 @@ mod tests {
 
     #[test]
     fn a_proposal_is_rejected_when_it_arrives_after_the_deadline() {
-        use policy_types::{RejectReason, ACCEPTANCE_DEADLINE_US, MIN_DWELL_US};
+        use policy_types::{RejectReason, LAYA_ACCEPTANCE_DEADLINE_US, MIN_DWELL_US};
 
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let mut child = Command::new("python3")
@@ -1191,7 +1194,7 @@ mod tests {
                     workloads::SAMPLE_US,
                     [100_000, 10_000, 1_000],
                 ),
-                || Ok(captured + ACCEPTANCE_DEADLINE_US + 50_000),
+                || Ok(captured + LAYA_ACCEPTANCE_DEADLINE_US + 50_000),
             )
             .unwrap();
         assert!(matches!(
