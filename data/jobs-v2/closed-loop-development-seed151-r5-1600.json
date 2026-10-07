@@ -1,0 +1,374 @@
+{
+ "attempts": 24,
+ "candidate": "candidate-v0",
+ "candidate_file": "candidate-v0-r5-1600.json",
+ "candidate_sha256": "3f1304fcefc46384dfc735d526982ccf546a90cb3ee39d3cc41d5015abfc6e89",
+ "decide_us": {
+  "max": 44,
+  "median": 23.0,
+  "min": 14
+ },
+ "host_cpu": "AMD Ryzen 5 1600 Six-Core Processor",
+ "kvm_module": "kvm_amd",
+ "labels": [
+  {
+   "labels": "labels-development-seed151-r5-1600.json",
+   "labels_sha256": "24fd2deccddd21ebee3ca0574de2947c86913ff744249059684bba3ef3ec8ff2"
+  }
+ ],
+ "offline": {
+  "abstain": 0,
+  "decisions": 96,
+  "hits": 96,
+  "infeasible": 0,
+  "misses": 0
+ },
+ "records": [
+  {
+   "records": "closed-loop-development-seed151-r5-1600.jsonl",
+   "records_sha256": "044a4a5e4eaef0c36f60c0b3614143878d43a2fa5c8fcb0bda63b5e0d8851cfb"
+  }
+ ],
+ "refused": 0,
+ "rows": [
+  {
+   "best": "latency",
+   "choices": {
+    "latency": 3
+   },
+   "choices_in_label": 3,
+   "closed_loop": "miss",
+   "decide_us": [
+    17,
+    16,
+    14
+   ],
+   "label": [
+    "latency"
+   ],
+   "offline_choices": {
+    "latency": 12
+   },
+   "pending": [
+    1,
+    1,
+    1
+   ],
+   "scenario": "s12-u15",
+   "seed": 151,
+   "status": "labelled",
+   "summary": {
+    "batch_retained_bp": 9971,
+    "batch_service_median": 4209000,
+    "batch_units_median": 8303,
+    "completion_max": 10000,
+    "completion_median": 10000,
+    "completion_min": 10000,
+    "feasible": true,
+    "p99_max": 40418.0,
+    "p99_median": 40357.0,
+    "p99_min": 38168.0,
+    "repeats": 3
+   }
+  },
+  {
+   "best": "latency",
+   "choices": {
+    "latency": 3
+   },
+   "choices_in_label": 3,
+   "closed_loop": "hit",
+   "decide_us": [
+    17,
+    17,
+    18
+   ],
+   "label": [
+    "latency"
+   ],
+   "offline_choices": {
+    "latency": 12
+   },
+   "pending": [
+    3,
+    3,
+    3
+   ],
+   "scenario": "s12-u35",
+   "seed": 151,
+   "status": "labelled",
+   "summary": {
+    "batch_retained_bp": 10047,
+    "batch_service_median": 3207797,
+    "batch_units_median": 6419,
+    "completion_max": 10000,
+    "completion_median": 10000,
+    "completion_min": 10000,
+    "feasible": true,
+    "p99_max": 73246.0,
+    "p99_median": 65748.0,
+    "p99_min": 65679.0,
+    "repeats": 3
+   }
+  },
+  {
+   "best": "reclaim",
+   "choices": {
+    "reclaim": 3
+   },
+   "choices_in_label": 3,
+   "closed_loop": "hit",
+   "decide_us": [
+    22,
+    28,
+    20
+   ],
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "offline_choices": {
+    "reclaim": 12
+   },
+   "pending": [
+    19,
+    17,
+    19
+   ],
+   "scenario": "s12-u65",
+   "seed": 151,
+   "status": "tie",
+   "summary": {
+    "batch_retained_bp": 9997,
+    "batch_service_median": 2494379,
+    "batch_units_median": 4958,
+    "completion_max": 8867,
+    "completion_median": 8679,
+    "completion_min": 8641,
+    "feasible": true,
+    "p99_max": null,
+    "p99_median": null,
+    "p99_min": null,
+    "repeats": 3
+   }
+  },
+  {
+   "best": "reclaim",
+   "choices": {
+    "reclaim": 3
+   },
+   "choices_in_label": 3,
+   "closed_loop": "hit",
+   "decide_us": [
+    24,
+    24,
+    22
+   ],
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "offline_choices": {
+    "reclaim": 12
+   },
+   "pending": [
+    103,
+    100,
+    101
+   ],
+   "scenario": "s12-u80",
+   "seed": 151,
+   "status": "tie",
+   "summary": {
+    "batch_retained_bp": 9999,
+    "batch_service_median": 2494557,
+    "batch_units_median": 4937,
+    "completion_max": 4664,
+    "completion_median": 4664,
+    "completion_min": 4568,
+    "feasible": true,
+    "p99_max": null,
+    "p99_median": null,
+    "p99_min": null,
+    "repeats": 3
+   }
+  },
+  {
+   "best": "latency",
+   "choices": {
+    "latency": 3
+   },
+   "choices_in_label": 3,
+   "closed_loop": "miss",
+   "decide_us": [
+    18,
+    19,
+    18
+   ],
+   "label": [
+    "latency"
+   ],
+   "offline_choices": {
+    "latency": 12
+   },
+   "pending": [
+    0,
+    0,
+    0
+   ],
+   "scenario": "s4-u15",
+   "seed": 151,
+   "status": "labelled",
+   "summary": {
+    "batch_retained_bp": 9988,
+    "batch_service_median": 4272033,
+    "batch_units_median": 8442,
+    "completion_max": 10000,
+    "completion_median": 10000,
+    "completion_min": 10000,
+    "feasible": true,
+    "p99_max": 19143.0,
+    "p99_median": 16300.0,
+    "p99_min": 16172.0,
+    "repeats": 3
+   }
+  },
+  {
+   "best": "latency",
+   "choices": {
+    "latency": 3
+   },
+   "choices_in_label": 3,
+   "closed_loop": "hit",
+   "decide_us": [
+    39,
+    26,
+    26
+   ],
+   "label": [
+    "latency"
+   ],
+   "offline_choices": {
+    "latency": 12
+   },
+   "pending": [
+    2,
+    3,
+    3
+   ],
+   "scenario": "s4-u35",
+   "seed": 151,
+   "status": "labelled",
+   "summary": {
+    "batch_retained_bp": 9971,
+    "batch_service_median": 3186487,
+    "batch_units_median": 6285,
+    "completion_max": 10000,
+    "completion_median": 10000,
+    "completion_min": 10000,
+    "feasible": true,
+    "p99_max": 26257.0,
+    "p99_median": 25825.0,
+    "p99_min": 24933.0,
+    "repeats": 3
+   }
+  },
+  {
+   "best": "balanced",
+   "choices": {
+    "reclaim": 3
+   },
+   "choices_in_label": 3,
+   "closed_loop": "hit",
+   "decide_us": [
+    36,
+    37,
+    36
+   ],
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "offline_choices": {
+    "reclaim": 12
+   },
+   "pending": [
+    118,
+    112,
+    114
+   ],
+   "scenario": "s4-u65",
+   "seed": 151,
+   "status": "tie",
+   "summary": {
+    "batch_retained_bp": 9999,
+    "batch_service_median": 2494322,
+    "batch_units_median": 4884,
+    "completion_max": 7622,
+    "completion_median": 7598,
+    "completion_min": 7598,
+    "feasible": true,
+    "p99_max": null,
+    "p99_median": null,
+    "p99_min": null,
+    "repeats": 3
+   }
+  },
+  {
+   "best": "balanced",
+   "choices": {
+    "reclaim": 3
+   },
+   "choices_in_label": 3,
+   "closed_loop": "hit",
+   "decide_us": [
+    44,
+    43,
+    43
+   ],
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "offline_choices": {
+    "reclaim": 12
+   },
+   "pending": [
+    285,
+    286,
+    284
+   ],
+   "scenario": "s4-u80",
+   "seed": 151,
+   "status": "tie",
+   "summary": {
+    "batch_retained_bp": 9994,
+    "batch_service_median": 2493505,
+    "batch_units_median": 4899,
+    "completion_max": 4515,
+    "completion_median": 4426,
+    "completion_min": 4377,
+    "feasible": true,
+    "p99_max": null,
+    "p99_median": null,
+    "p99_min": null,
+    "repeats": 3
+   }
+  }
+ ],
+ "selected": "pending-threshold",
+ "split": "development",
+ "units": 8,
+ "units_complete": 8,
+ "units_feasible": 8,
+ "units_feasible_wilson95": [
+  0.6755843804891231,
+  1.0
+ ],
+ "units_hit": 6,
+ "units_hit_wilson95": [
+  0.40926987910258916,
+  0.9285223111419724
+ ],
+ "unscored": []
+}
