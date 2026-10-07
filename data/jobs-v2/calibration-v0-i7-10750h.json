@@ -1,0 +1,294 @@
+{
+ "calibration": [
+  {
+   "labels": "labels-calibration-seed201-i7-10750h.json",
+   "labels_sha256": "2eef6628bb879c8453cd3fecbbcd1977b82637258b631e2fcba04f1c5250bd7a",
+   "records": "calibration-seed201-i7-10750h.jsonl",
+   "records_sha256": "b12f3d114f6b91f3cc9380dcbf732da93a9887ac6831c2784eaf388d42932094",
+   "units": 8
+  },
+  {
+   "labels": "labels-calibration-seed202-i7-10750h.json",
+   "labels_sha256": "3dc699c10687158fcb067ef0e7948b9998f4b418c5d200fc14e06e4f62c05dcc",
+   "records": "calibration-seed202-i7-10750h.jsonl",
+   "records_sha256": "a28bf413ef65da9bf551c06d1cd57365dc684a8feaf6d31b253d4044dad63036",
+   "units": 8
+  }
+ ],
+ "candidate": "candidate-v0",
+ "candidate_file": "candidate-v0-i7-10750h.json",
+ "candidate_sha256": "5a7a02a3fe0be2f72d57309cd411616e2e8ff708c2e006aa9b252ca42cb67689",
+ "host_cpu": "Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz",
+ "kvm_module": "kvm_intel",
+ "score": {
+  "abstain": 0,
+  "decisions": 192,
+  "hits": 192,
+  "infeasible": 0,
+  "misses": 0,
+  "units": [
+   {
+    "abstain": 0,
+    "choices": {
+     "latency": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "latency"
+    ],
+    "p99_regret_max_us": 0.0,
+    "scenario": "s12-u15",
+    "seed": 201
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "latency": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "latency"
+    ],
+    "p99_regret_max_us": 0.0,
+    "scenario": "s12-u15",
+    "seed": 202
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "latency": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "balanced",
+     "latency",
+     "reclaim"
+    ],
+    "p99_regret_max_us": 0.0,
+    "scenario": "s12-u35",
+    "seed": 201
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "latency": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "latency"
+    ],
+    "p99_regret_max_us": 0.0,
+    "scenario": "s12-u35",
+    "seed": 202
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "balanced": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "balanced",
+     "reclaim"
+    ],
+    "p99_regret_max_us": null,
+    "scenario": "s12-u65",
+    "seed": 201
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "balanced": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "balanced",
+     "reclaim"
+    ],
+    "p99_regret_max_us": null,
+    "scenario": "s12-u65",
+    "seed": 202
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "balanced": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "balanced",
+     "reclaim"
+    ],
+    "p99_regret_max_us": null,
+    "scenario": "s12-u80",
+    "seed": 201
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "balanced": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "balanced"
+    ],
+    "p99_regret_max_us": null,
+    "scenario": "s12-u80",
+    "seed": 202
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "latency": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "latency"
+    ],
+    "p99_regret_max_us": 0.0,
+    "scenario": "s4-u15",
+    "seed": 201
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "latency": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "latency"
+    ],
+    "p99_regret_max_us": 0.0,
+    "scenario": "s4-u15",
+    "seed": 202
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "latency": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "latency"
+    ],
+    "p99_regret_max_us": 0.0,
+    "scenario": "s4-u35",
+    "seed": 201
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "latency": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "latency"
+    ],
+    "p99_regret_max_us": 0.0,
+    "scenario": "s4-u35",
+    "seed": 202
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "balanced": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "balanced",
+     "reclaim"
+    ],
+    "p99_regret_max_us": null,
+    "scenario": "s4-u65",
+    "seed": 201
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "balanced": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "balanced",
+     "reclaim"
+    ],
+    "p99_regret_max_us": null,
+    "scenario": "s4-u65",
+    "seed": 202
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "balanced": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "balanced",
+     "reclaim"
+    ],
+    "p99_regret_max_us": null,
+    "scenario": "s4-u80",
+    "seed": 201
+   },
+   {
+    "abstain": 0,
+    "choices": {
+     "balanced": 12
+    },
+    "decisions": 12,
+    "hits": 12,
+    "infeasible": 0,
+    "label": [
+     "balanced",
+     "reclaim"
+    ],
+    "p99_regret_max_us": null,
+    "scenario": "s4-u80",
+    "seed": 202
+   }
+  ]
+ },
+ "selected": "pending-threshold",
+ "units": 16,
+ "units_all_hit": 16,
+ "units_all_hit_wilson95": [
+  0.8063865817272802,
+  1.0
+ ],
+ "units_feasible": 16,
+ "units_feasible_wilson95": [
+  0.8063865817272802,
+  1.0
+ ],
+ "unscored": []
+}
