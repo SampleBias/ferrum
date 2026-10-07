@@ -122,7 +122,20 @@ Step 4 has its offline half. `branches collect --split final_test --sealed-evalu
 - Each split's labels cover exactly the units the manifest plans for it.
 - The labels come from the candidate's host.
 
-It refuses to overwrite its output. It scores the candidate, the fixed profiles, heuristic-v0, and the fit report's other fitted candidates on the same decisions. It reports the seen final-test configurations, the unseen 45% and 72% loads, and the out-of-distribution subset separately, with Wilson intervals over units. The other fitted candidates are reported and cannot be selected. The closed-loop half is not built. It needs a guest branch mode in which the frozen candidate chooses the forced profile from the live pre-decision snapshot. A forced branch measures one profile, and the candidate's own branch measures the controller. Build and test that mode on development units before it runs on a sealed unit.
+It refuses to overwrite its output. It scores the candidate, the fixed profiles, heuristic-v0, and the fit report's other fitted candidates on the same decisions. It reports the seen final-test configurations, the unseen 45% and 72% loads, and the out-of-distribution subset separately, with Wilson intervals over units. The other fitted candidates are reported and cannot be selected.
+
+Step 4's closed-loop half is built and has run on development units on the Intel host. In a closed-loop branch the guest applies the frozen candidate to its own live pre-decision state and forces the chosen profile for the horizon. `closed_loop collect` checks every live choice against the offline rule, and `closed_loop score` sets each unit's closed-loop repeats beside its forced branches under objective-v2. A sealed split also needs `--sealed-evaluation` and the candidate's committed calibration report. On Intel development seed 151, all 39 live decisions matched the offline rule, in 23–55 µs. The candidate hit 7 of 8 units, with a 95% Wilson interval of 0.529–0.978. The miss is s12-u80/151, where the candidate chose balanced and those repeats completed 10 basis points under the 95% floor set by the forced balanced branches from 90 minutes earlier ([document 08](08-data-and-learning.md#branched-labels)). The office host runs the same development check with its own candidate before any sealed closed-loop boot there:
+
+```bash
+cd controller
+PYTHONPATH=src python3 -m aik_controller.closed_loop collect --candidate ../configs/candidate-v0-i7-10750h.json \
+  --split development --seed 151 --out ../data/jobs-v2/closed-loop-development-seed151-i7-10750h.jsonl
+# --fill boots only slots still missing a usable record.
+PYTHONPATH=src python3 -m aik_controller.closed_loop score --candidate ../configs/candidate-v0-i7-10750h.json \
+  --labels ../data/jobs-v2/labels-development-seed151-i7-10750h.json \
+  --records ../data/jobs-v2/closed-loop-development-seed151-i7-10750h.jsonl \
+  --out ../data/jobs-v2/closed-loop-development-seed151-i7-10750h.json
+```
 
 ### WP7–WP8: broader policy and final handoff
 

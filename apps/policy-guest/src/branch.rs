@@ -12,6 +12,12 @@
 //! equal-weight branches differed by more than the 95% retention margin. The
 //! outcome line reports the in-trial speed so a boot whose host speed moved
 //! during the trial can be refused. `--spins-per-ms` overrides the calibration.
+//!
+//! `--candidate=pending-threshold --cut=… --below=… --above=…` replaces
+//! `--profile`. The frozen candidate then reads this boot's own pre-decision
+//! state and chooses the profile that is forced for the horizon. A forced
+//! branch measures one profile; a candidate branch measures the controller,
+//! including the time it takes to decide.
 
 use std::env;
 use std::process::ExitCode;
@@ -32,11 +38,46 @@ pub fn exit() -> ExitCode {
     }
 }
 
+/// What sets the profile for the horizon.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Choice {
+    Forced(ProfileId),
+    /// fit-v0's pending-jobs threshold: `pending >= cut` selects `above`.
+    PendingThreshold {
+        cut: f64,
+        below: ProfileId,
+        above: ProfileId,
+    },
+}
+
+impl Choice {
+    /// The name the begin and outcome lines carry.
+    fn name(&self) -> &'static str {
+        match self {
+            Choice::Forced(profile) => profile.as_str(),
+            Choice::PendingThreshold { .. } => "candidate",
+        }
+    }
+
+    fn decide(&self, pending: u32) -> ProfileId {
+        match *self {
+            Choice::Forced(profile) => profile,
+            Choice::PendingThreshold { cut, below, above } => {
+                if f64::from(pending) >= cut {
+                    above
+                } else {
+                    below
+                }
+            }
+        }
+    }
+}
+
 struct Request {
     family: JobFamily,
     scenario: JobScenario,
     seed: u64,
-    profile: ProfileId,
+    choice: Choice,
     spins_per_ms: Option<u64>,
 }
 
@@ -45,12 +86,24 @@ fn calibrate_only() -> bool {
 }
 
 fn request() -> Result<Request, String> {
+    parse(env::args().skip(1))
+}
+
+fn profile_arg(value: &str) -> Result<ProfileId, String> {
+    ProfileId::parse(value).ok_or(format!("unknown profile {value}"))
+}
+
+fn parse(args: impl Iterator<Item = String>) -> Result<Request, String> {
     let mut family = None;
     let mut scenario = None;
     let mut seed = None;
     let mut profile = None;
+    let mut candidate = None;
+    let mut cut = None;
+    let mut below = None;
+    let mut above = None;
     let mut spins_per_ms = None;
-    for arg in env::args().skip(1) {
+    for arg in args {
         if let Some(value) = arg.strip_prefix("--family=") {
             family = Some(jobs::family(value).ok_or(format!("unknown family {value}"))?);
         } else if let Some(value) = arg.strip_prefix("--scenario=") {
@@ -58,7 +111,21 @@ fn request() -> Result<Request, String> {
         } else if let Some(value) = arg.strip_prefix("--seed=") {
             seed = Some(value.parse::<u64>().map_err(|_| format!("bad seed {value}"))?);
         } else if let Some(value) = arg.strip_prefix("--profile=") {
-            profile = Some(ProfileId::parse(value).ok_or(format!("unknown profile {value}"))?);
+            profile = Some(profile_arg(value)?);
+        } else if let Some(value) = arg.strip_prefix("--candidate=") {
+            candidate = Some(value.to_string());
+        } else if let Some(value) = arg.strip_prefix("--cut=") {
+            cut = Some(
+                value
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|cut| cut.is_finite() && *cut >= 0.0)
+                    .ok_or(format!("bad cut {value}"))?,
+            );
+        } else if let Some(value) = arg.strip_prefix("--below=") {
+            below = Some(profile_arg(value)?);
+        } else if let Some(value) = arg.strip_prefix("--above=") {
+            above = Some(profile_arg(value)?);
         } else if let Some(value) = arg.strip_prefix("--spins-per-ms=") {
             spins_per_ms = Some(
                 value
@@ -69,6 +136,17 @@ fn request() -> Result<Request, String> {
             );
         }
     }
+    let choice = match (profile, candidate.as_deref()) {
+        (Some(profile), None) => Choice::Forced(profile),
+        (None, Some("pending-threshold")) => Choice::PendingThreshold {
+            cut: cut.ok_or("--cut is required")?,
+            below: below.ok_or("--below is required")?,
+            above: above.ok_or("--above is required")?,
+        },
+        (None, Some(other)) => return Err(format!("unknown candidate {other}")),
+        (Some(_), Some(_)) => return Err("--profile and --candidate are exclusive".to_string()),
+        (None, None) => return Err("--profile or --candidate is required".to_string()),
+    };
     let family = family.ok_or("--family is required")?;
     let name = scenario.ok_or("--scenario is required")?;
     Ok(Request {
@@ -77,7 +155,7 @@ fn request() -> Result<Request, String> {
             .scenario(&name)
             .ok_or(format!("{} has no scenario {name}", family.id))?,
         seed: seed.ok_or("--seed is required")?,
-        profile: profile.ok_or("--profile is required")?,
+        choice,
         spins_per_ms,
     })
 }
@@ -98,7 +176,7 @@ fn run() -> Result<(), String> {
         request.family.id,
         request.scenario.name,
         request.seed,
-        request.profile.as_str(),
+        request.choice.name(),
         request.spins_per_ms
     ))
 }
@@ -273,7 +351,7 @@ fn run() -> Result<(), String> {
         request.family.id,
         request.scenario.name,
         request.seed,
-        request.profile.as_str(),
+        request.choice.name(),
         trial.arrivals.len(),
         digest,
         spins_per_ms,
@@ -347,14 +425,32 @@ fn run() -> Result<(), String> {
     let window_close = sample(&trial)?;
     let decision_us = now_us().saturating_sub(start);
     let seen = completions(&trial);
-    let forced = catalog.profile(request.profile).weights();
-    let rc = unsafe { sys_policy_set_weights(forced[0], forced[1], forced[2]) };
-    if rc != 0 {
-        return Err(format!("{} weights returned {rc}", request.profile.as_str()));
-    }
-    let state = jobs::prefix_jobs(&trial.arrivals, &seen, decision_us);
-    let delta = |index: usize| window_close[index].saturating_sub(window_open[index]);
-    let obs = jobs::pre_decision(state, [delta(0), delta(1), delta(2), delta(3)], delta(4));
+    let force = |profile: ProfileId| -> Result<(), String> {
+        let weights = catalog.profile(profile).weights();
+        let rc = unsafe { sys_policy_set_weights(weights[0], weights[1], weights[2]) };
+        if rc != 0 {
+            return Err(format!("{} weights returned {rc}", profile.as_str()));
+        }
+        Ok(())
+    };
+    let observe = || {
+        let state = jobs::prefix_jobs(&trial.arrivals, &seen, decision_us);
+        let delta = |index: usize| window_close[index].saturating_sub(window_open[index]);
+        jobs::pre_decision(state, [delta(0), delta(1), delta(2), delta(3)], delta(4))
+    };
+    let (obs, decided) = match request.choice {
+        Choice::Forced(profile) => {
+            force(profile)?;
+            (observe(), None)
+        }
+        choice => {
+            let obs = observe();
+            let profile = choice.decide(obs.groups[0].queue_len);
+            force(profile)?;
+            let applied_us = now_us().saturating_sub(start);
+            (obs, Some((profile, applied_us.saturating_sub(decision_us))))
+        }
+    };
     let [latency, batch, maintenance, system] = obs.groups;
     println!(
         "FERRUM_BRANCH_STATE window_us={} decision_late_us={} latency_queue={} latency_runnable={} latency_service_us={} latency_wait_samples={} latency_max_wait_us={} latency_completions={} batch_queue={} batch_runnable={} batch_service_us={} batch_completions={} maintenance_service_us={} system_service_us={}",
@@ -373,6 +469,17 @@ fn run() -> Result<(), String> {
         maintenance.cpu_service_us,
         system.cpu_service_us
     );
+    if let (Choice::PendingThreshold { cut, below, above }, Some((profile, decide_us))) =
+        (request.choice, decided)
+    {
+        println!(
+            "FERRUM_BRANCH_DECISION controller=pending-threshold cut={cut} below={} above={} pending={} choice={} decide_us={decide_us}",
+            below.as_str(),
+            above.as_str(),
+            latency.queue_len,
+            profile.as_str()
+        );
+    }
 
     sleep_until(start + jobs::PREFIX_US + jobs::HORIZON_US);
     let horizon_close = sample(&trial)?;
@@ -395,7 +502,7 @@ fn run() -> Result<(), String> {
         "FERRUM_BRANCH_OUTCOME scenario={} seed={} profile={} offered={} completed={} completion_bp={} p50_us={} p90_us={} p95_us={} p99_us={} batch_units={} latency_service_us={} batch_service_us={} batch_spins_per_ms={}",
         request.scenario.name,
         request.seed,
-        request.profile.as_str(),
+        request.choice.name(),
         outcome.offered,
         outcome.completed,
         outcome.completion_bp,
@@ -409,4 +516,73 @@ fn run() -> Result<(), String> {
         batch_spins_per_ms
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(line: &str) -> Result<Request, String> {
+        parse(line.split_whitespace().map(str::to_string))
+    }
+
+    const UNIT: &str = "--family=jobs-v2 --scenario=s4-u65 --seed=151";
+
+    #[test]
+    fn a_forced_branch_names_its_profile() {
+        let request = args(&format!("{UNIT} --profile=reclaim")).unwrap();
+        assert_eq!(request.choice, Choice::Forced(ProfileId::Reclaim));
+        assert_eq!(request.choice.name(), "reclaim");
+    }
+
+    #[test]
+    fn a_candidate_branch_reads_the_frozen_threshold() {
+        let request =
+            args(&format!("{UNIT} --candidate=pending-threshold --cut=14.5 --below=latency --above=reclaim"))
+                .unwrap();
+        let expected = Choice::PendingThreshold {
+            cut: 14.5,
+            below: ProfileId::Latency,
+            above: ProfileId::Reclaim,
+        };
+        assert_eq!(request.choice, expected);
+        assert_eq!(request.choice.name(), "candidate");
+    }
+
+    #[test]
+    fn pending_at_or_above_the_cut_selects_the_upper_side() {
+        let choice = Choice::PendingThreshold {
+            cut: 14.0,
+            below: ProfileId::Latency,
+            above: ProfileId::Balanced,
+        };
+        assert_eq!(choice.decide(0), ProfileId::Latency);
+        assert_eq!(choice.decide(13), ProfileId::Latency);
+        assert_eq!(choice.decide(14), ProfileId::Balanced);
+        assert_eq!(choice.decide(287), ProfileId::Balanced);
+        let half = Choice::PendingThreshold {
+            cut: 14.5,
+            below: ProfileId::Latency,
+            above: ProfileId::Reclaim,
+        };
+        assert_eq!(half.decide(14), ProfileId::Latency);
+        assert_eq!(half.decide(15), ProfileId::Reclaim);
+        assert_eq!(Choice::Forced(ProfileId::Throughput).decide(500), ProfileId::Throughput);
+    }
+
+    #[test]
+    fn a_branch_needs_exactly_one_complete_choice() {
+        for line in [
+            UNIT.to_string(),
+            format!("{UNIT} --profile=balanced --candidate=pending-threshold --cut=14 --below=latency --above=balanced"),
+            format!("{UNIT} --candidate=logistic --cut=14 --below=latency --above=balanced"),
+            format!("{UNIT} --candidate=pending-threshold --below=latency --above=balanced"),
+            format!("{UNIT} --candidate=pending-threshold --cut=14 --above=balanced"),
+            format!("{UNIT} --candidate=pending-threshold --cut=-1 --below=latency --above=balanced"),
+            format!("{UNIT} --candidate=pending-threshold --cut=nan --below=latency --above=balanced"),
+            format!("{UNIT} --candidate=pending-threshold --cut=14 --below=fast --above=balanced"),
+        ] {
+            assert!(args(&line).is_err(), "{line}");
+        }
+    }
 }

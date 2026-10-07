@@ -32,6 +32,7 @@ from aik_controller.heuristic import choose, load_thresholds
 LOADER = "artifacts/loader/hermit-loader-x86_64-v0.5.6"
 GUEST = "target/x86_64-unknown-hermit/debug/policy-guest"
 BATCH_UNIT_US = 500
+CANDIDATE_PROFILE = "candidate"
 INF = math.inf
 
 
@@ -82,6 +83,10 @@ def parse_boot(text: str) -> dict:
     for key in ("scenario", "seed", "profile"):
         if outcome.get(key) != begin.get(key):
             raise BranchError(f"outcome {key} does not match the boot request")
+    decided = "FERRUM_BRANCH_DECISION" in lines
+    if decided != (begin["profile"] == CANDIDATE_PROFILE):
+        raise BranchError("a candidate branch carries one decision line and a forced branch none")
+    extra = {"decision": _fields(lines["FERRUM_BRANCH_DECISION"])} if decided else {}
     return {
         "family": begin["family"],
         "scenario": begin["scenario"],
@@ -94,6 +99,7 @@ def parse_boot(text: str) -> dict:
         "state": _fields(lines["FERRUM_BRANCH_STATE"]),
         "outcome": {key: value for key, value in outcome.items() if key not in ("scenario", "seed", "profile")},
         "host": host_fields,
+        **extra,
     }
 
 
@@ -113,12 +119,19 @@ def prefix_drift_bp(record: dict) -> int:
 
 
 def check_record(record: dict, family: dict, objective: dict) -> list[str]:
-    """Flags for one record. A schedule that is not the unit's own is refused."""
+    """Flags for one forced branch. A candidate branch is refused here, so a label never reads one."""
+    if record["profile"] not in objective["candidates"]:
+        raise BranchError("record is outside the candidate set")
+    return comparability_flags(record, family, objective)
+
+
+def comparability_flags(record: dict, family: dict, objective: dict) -> list[str]:
+    """Flags for any branch of a unit. A schedule that is not the unit's own is refused."""
     expected = format(jobs.digest(jobs.schedule(family, record["scenario"], record["seed"])), "#018x")
     if record["schedule_fnv64"] != expected:
         raise BranchError(f"{record['scenario']}/{record['seed']} ran a different schedule")
-    if record["family"] != family["id"] or record["profile"] not in objective["candidates"]:
-        raise BranchError("record is outside the family or the candidate set")
+    if record["family"] != family["id"]:
+        raise BranchError("record is outside the family")
     rule = objective["comparability"]
     flags = []
     if drift_bp(record) > rule["trial_speed_drift_bp"]:
@@ -297,10 +310,13 @@ def _read_records(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def boot(root: Path, family: str, unit: dict, profile: str, timeout_s: int, serial: Path) -> str:
+def boot(
+    root: Path, family: str, unit: dict, profile: str, timeout_s: int, serial: Path, choice: str | None = None
+) -> str:
+    """One fresh guest. `choice` replaces `--profile=` with a candidate's own arguments."""
     append = (
         f"-- --branch --family={family} --scenario={unit['scenario']} "
-        f"--seed={unit['seed']} --profile={profile}"
+        f"--seed={unit['seed']} {choice or f'--profile={profile}'}"
     )
     env = dict(
         os.environ,
