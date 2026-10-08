@@ -1,0 +1,301 @@
+{
+ "attempts": 34,
+ "candidate": "candidate-v0",
+ "candidate_file": "candidate-v0-i7-10750h.json",
+ "candidate_sha256": "5a7a02a3fe0be2f72d57309cd411616e2e8ff708c2e006aa9b252ca42cb67689",
+ "decide_us": {
+  "max": 51,
+  "median": 24.0,
+  "min": 21
+ },
+ "host_cpu": "Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz",
+ "kvm_module": "kvm_intel",
+ "labels": [
+  {
+   "labels": "labels-out_of_distribution-seed401-i7-10750h.json",
+   "labels_sha256": "8beb3712898014eea4c0378265a94a374a52f07020fbc3b33d3b29176854ddb8"
+  },
+  {
+   "labels": "labels-out_of_distribution-seed402-i7-10750h.json",
+   "labels_sha256": "6557ecfa3885555ccb69b5f95dc681d5aff2d67ddc43adc5437e140d9772459f"
+  }
+ ],
+ "offline": {
+  "abstain": 0,
+  "decisions": 72,
+  "hits": 72,
+  "infeasible": 0,
+  "misses": 0
+ },
+ "records": [
+  {
+   "records": "closed-loop-out_of_distribution-seed401-i7-10750h.jsonl",
+   "records_sha256": "145fd2b733726e23e191a5738120cd620bac7c5feee09fe1528d389b438e7453"
+  },
+  {
+   "records": "closed-loop-out_of_distribution-seed402-i7-10750h.jsonl",
+   "records_sha256": "3503f964ef89e09ed09c6ba5db4d4909a0b7c739b201d3b0cc0ad4a38307f50d"
+  }
+ ],
+ "refused": 16,
+ "rows": [
+  {
+   "best": "latency",
+   "choices": {
+    "latency": 3
+   },
+   "choices_in_label": 3,
+   "closed_loop": "hit",
+   "decide_us": [
+    23,
+    23,
+    24
+   ],
+   "label": [
+    "latency"
+   ],
+   "offline_choices": {
+    "latency": 12
+   },
+   "pending": [
+    5,
+    5,
+    5
+   ],
+   "scenario": "s32-u35",
+   "seed": 401,
+   "status": "labelled",
+   "summary": {
+    "batch_retained_bp": 9964,
+    "batch_service_median": 3137897,
+    "batch_units_median": 6230,
+    "completion_max": 10000,
+    "completion_median": 10000,
+    "completion_min": 10000,
+    "feasible": true,
+    "p99_max": 193560.0,
+    "p99_median": 189018.0,
+    "p99_min": 162413.0,
+    "repeats": 3
+   }
+  },
+  {
+   "best": "latency",
+   "choices": {
+    "latency": 3
+   },
+   "choices_in_label": 3,
+   "closed_loop": "hit",
+   "decide_us": [
+    24,
+    21,
+    24
+   ],
+   "label": [
+    "latency"
+   ],
+   "offline_choices": {
+    "latency": 12
+   },
+   "pending": [
+    2,
+    3,
+    3
+   ],
+   "scenario": "s32-u35",
+   "seed": 402,
+   "status": "labelled",
+   "summary": {
+    "batch_retained_bp": 10077,
+    "batch_service_median": 3229519,
+    "batch_units_median": 6366,
+    "completion_max": 10000,
+    "completion_median": 10000,
+    "completion_min": 10000,
+    "feasible": true,
+    "p99_max": 134823.0,
+    "p99_median": 133846.0,
+    "p99_min": 129985.0,
+    "repeats": 3
+   }
+  },
+  {
+   "best": "reclaim",
+   "choices": {
+    "balanced": 3
+   },
+   "choices_in_label": 3,
+   "closed_loop": "miss",
+   "decide_us": [
+    32,
+    21,
+    35
+   ],
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "offline_choices": {
+    "balanced": 12
+   },
+   "pending": [
+    22,
+    22,
+    22
+   ],
+   "scenario": "s32-u65",
+   "seed": 401,
+   "status": "tie",
+   "summary": {
+    "batch_retained_bp": 9989,
+    "batch_service_median": 2494216,
+    "batch_units_median": 4828,
+    "completion_max": 6764,
+    "completion_median": 6666,
+    "completion_min": 6666,
+    "feasible": true,
+    "p99_max": null,
+    "p99_median": null,
+    "p99_min": null,
+    "repeats": 3
+   }
+  },
+  {
+   "best": "balanced",
+   "choices": {
+    "balanced": 3
+   },
+   "choices_in_label": 3,
+   "closed_loop": "hit",
+   "decide_us": [
+    23,
+    23,
+    24
+   ],
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "offline_choices": {
+    "balanced": 12
+   },
+   "pending": [
+    22,
+    23,
+    22
+   ],
+   "scenario": "s32-u65",
+   "seed": 402,
+   "status": "tie",
+   "summary": {
+    "batch_retained_bp": 9995,
+    "batch_service_median": 2496105,
+    "batch_units_median": 4977,
+    "completion_max": 7849,
+    "completion_median": 7634,
+    "completion_min": 7526,
+    "feasible": true,
+    "p99_max": null,
+    "p99_median": null,
+    "p99_min": null,
+    "repeats": 3
+   }
+  },
+  {
+   "best": "balanced",
+   "choices": {
+    "balanced": 3
+   },
+   "choices_in_label": 3,
+   "closed_loop": "hit",
+   "decide_us": [
+    49,
+    49,
+    50
+   ],
+   "label": [
+    "balanced"
+   ],
+   "offline_choices": {
+    "balanced": 12
+   },
+   "pending": [
+    371,
+    384,
+    362
+   ],
+   "scenario": "s4-u95",
+   "seed": 401,
+   "status": "labelled",
+   "summary": {
+    "batch_retained_bp": 9996,
+    "batch_service_median": 2496055,
+    "batch_units_median": 4946,
+    "completion_max": 3231,
+    "completion_median": 3104,
+    "completion_min": 2978,
+    "feasible": true,
+    "p99_max": null,
+    "p99_median": null,
+    "p99_min": null,
+    "repeats": 3
+   }
+  },
+  {
+   "best": "reclaim",
+   "choices": {
+    "balanced": 3
+   },
+   "choices_in_label": 3,
+   "closed_loop": "hit",
+   "decide_us": [
+    49,
+    51,
+    49
+   ],
+   "label": [
+    "balanced",
+    "reclaim"
+   ],
+   "offline_choices": {
+    "balanced": 12
+   },
+   "pending": [
+    348,
+    342,
+    344
+   ],
+   "scenario": "s4-u95",
+   "seed": 402,
+   "status": "tie",
+   "summary": {
+    "batch_retained_bp": 9998,
+    "batch_service_median": 2496276,
+    "batch_units_median": 4964,
+    "completion_max": 3537,
+    "completion_median": 3520,
+    "completion_min": 3353,
+    "feasible": true,
+    "p99_max": null,
+    "p99_median": null,
+    "p99_min": null,
+    "repeats": 3
+   }
+  }
+ ],
+ "selected": "pending-threshold",
+ "split": "out_of_distribution",
+ "units": 6,
+ "units_complete": 6,
+ "units_feasible": 6,
+ "units_feasible_wilson95": [
+  0.6096569663469354,
+  0.9999999999999999
+ ],
+ "units_hit": 5,
+ "units_hit_wilson95": [
+  0.43649056343635395,
+  0.9699474141282697
+ ],
+ "unscored": []
+}
