@@ -7,6 +7,7 @@
 pub mod canonical;
 pub mod catalog;
 pub mod engine;
+pub mod entries;
 pub mod heuristic;
 pub mod resources;
 pub mod sched;

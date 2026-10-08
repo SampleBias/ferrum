@@ -45,6 +45,13 @@ if [[ -n "$serial_path" ]]; then
   serial_arg=(-serial "file:${serial_path}")
 fi
 
+monitor_arg=(-monitor none)
+if [[ -n "${AIK_MONITOR:-}" ]]; then
+  mkdir -p "$(dirname "$AIK_MONITOR")"
+  rm -f "$AIK_MONITOR"
+  monitor_arg=(-monitor "unix:${AIK_MONITOR},server,nowait")
+fi
+
 net_arg=()
 if [[ "${AIK_NET:-0}" == "1" ]]; then
   net_arg=(
@@ -64,7 +71,7 @@ timeout --foreground "$timeout_s" qemu-system-x86_64 \
   -machine pc "${accel_arg[@]}" \
   "${cpu_arg[@]}" \
   -smp 1 -m 512M \
-  -display none "${serial_arg[@]}" -monitor none \
+  -display none "${serial_arg[@]}" "${monitor_arg[@]}" \
   -no-reboot \
   -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
   "${net_arg[@]}" \

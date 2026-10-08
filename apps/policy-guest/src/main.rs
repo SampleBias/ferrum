@@ -61,6 +61,27 @@ fn main() -> ExitCode {
     if env::args().skip(1).any(|arg| arg == "--mixed-v1") {
         return mixed_v1_exit();
     }
+    match soak_limit_us() {
+        Ok(Some(limit_us)) => {
+            let other = env::args().skip(1).any(|arg| {
+                arg.starts_with("--")
+                    && arg != "--soak"
+                    && !arg.starts_with("--soak-s=")
+                    && !arg.starts_with("--controller=")
+                    && !arg.starts_with("--boot-id=")
+            });
+            if other {
+                println!("FERRUM_FAIL soak is a separate session");
+                return ExitCode::from(1);
+            }
+            return soak_exit(limit_us);
+        }
+        Ok(None) => {}
+        Err(err) => {
+            println!("FERRUM_FAIL {err}");
+            return ExitCode::from(1);
+        }
+    }
     match run(emergency, stage_race, stale, late) {
         Ok(()) => {
             println!("FERRUM_COMPLETE");
@@ -2151,20 +2172,51 @@ fn fair_dwell() -> Result<(), String> {
 }
 
 fn mixed_v1_exit() -> ExitCode {
-    match mixed_v1_run() {
+    finish_mixed(mixed_v1_run(None), false)
+}
+
+fn soak_exit(limit_us: u64) -> ExitCode {
+    finish_mixed(mixed_v1_run(Some(limit_us)), true)
+}
+
+fn finish_mixed(result: Result<(), String>, soak: bool) -> ExitCode {
+    match result {
         Ok(()) => {
             println!("FERRUM_COMPLETE");
             ExitCode::SUCCESS
         }
         Err(err) => {
-            println!("FERRUM_MIXED_FAIL {err}");
+            if soak {
+                println!("FERRUM_SOAK_FAIL {err}");
+            } else {
+                println!("FERRUM_MIXED_FAIL {err}");
+            }
             ExitCode::from(1)
         }
     }
 }
 
+/// `--soak` repeats mixed-v1 for one hour. `--soak-s=N` is the same loop for N seconds.
+fn soak_limit_us() -> Result<Option<u64>, String> {
+    let mut limit = None;
+    for arg in env::args().skip(1) {
+        if arg == "--soak" {
+            limit = Some(limit.unwrap_or(3_600_000_000));
+        } else if let Some(value) = arg.strip_prefix("--soak-s=") {
+            let seconds: u64 = value
+                .parse()
+                .map_err(|_| format!("soak seconds '{value}' is not an integer"))?;
+            if seconds == 0 || seconds > 7200 {
+                return Err(format!("soak seconds {seconds} is outside 1..=7200"));
+            }
+            limit = Some(seconds.saturating_mul(1_000_000));
+        }
+    }
+    Ok(limit)
+}
+
 #[cfg(not(target_os = "hermit"))]
-fn mixed_v1_run() -> Result<(), String> {
+fn mixed_v1_run(_until_us: Option<u64>) -> Result<(), String> {
     Err("mixed-v1 runs inside the hermit guest".to_string())
 }
 
@@ -2180,7 +2232,7 @@ fn mixed_v1_run() -> Result<(), String> {
 /// would have expired. The memory phase still waits
 /// [`workloads::memory_catch_up_us`] before that window.
 #[cfg(target_os = "hermit")]
-fn mixed_v1_run() -> Result<(), String> {
+fn mixed_v1_run(until_us: Option<u64>) -> Result<(), String> {
     use std::hint::spin_loop;
     use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
     use std::thread;
@@ -2367,13 +2419,28 @@ fn mixed_v1_run() -> Result<(), String> {
     };
 
     let outcome = (|| {
-        println!("FERRUM_MIXED phases={}", workloads::mixed_v1().len());
+        let started = monotonic_us()?;
+        let deadline = until_us.map(|limit| started.saturating_add(limit));
+        if let Some(limit) = until_us {
+            println!("FERRUM_SOAK limit_us={limit}");
+        } else {
+            println!("FERRUM_MIXED phases={}", workloads::mixed_v1().len());
+        }
         let mut expect_generation = 1u64;
         let mut changed_us = 0u64;
         let mut lease_until_us = 0u64;
         let mut active_profile = 0u8;
         let mut rounds = 0u32;
+        let mut passes = 0u32;
+        loop {
+        let mut finished_early = false;
         for phase in workloads::mixed_v1() {
+            if let Some(end) = deadline {
+                if monotonic_us()? >= end {
+                    finished_early = true;
+                    break;
+                }
+            }
             if changed_us != 0 {
                 wait_until(changed_us.saturating_add(MIN_DWELL_US))?;
             }
@@ -2554,11 +2621,26 @@ fn mixed_v1_run() -> Result<(), String> {
             }
             set_duty(0, 0, 0);
         }
+        passes = passes.saturating_add(1);
+        match deadline {
+            None => break,
+            Some(end) => {
+                println!("FERRUM_SOAK_PASS passes={passes} rounds={rounds}");
+                if finished_early || monotonic_us()? >= end {
+                    break;
+                }
+            }
+        }
+        }
         let mut generation = 0u64;
         if unsafe { sys_policy_generation(&mut generation) } != 0 || generation != expect_generation {
             return Err(format!("generation was {generation}, expected {expect_generation}"));
         }
-        println!("FERRUM_MIXED_OK rounds={rounds}");
+        if deadline.is_some() {
+            println!("FERRUM_SOAK_OK passes={passes} rounds={rounds}");
+        } else {
+            println!("FERRUM_MIXED_OK rounds={rounds}");
+        }
         Ok(())
     })();
     std::mem::forget(stream);
@@ -3142,8 +3224,25 @@ fn actuate(
         fn sys_policy_generation(generation: *mut u64) -> i32;
         fn sys_policy_read_ack(ack: *mut PolicyAck) -> i32;
         fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
+        fn sys_clock_gettime(clock_id: i32, tp: *mut Timespec) -> i32;
         fn sys_usleep(usecs: u64);
     }
+
+    #[repr(C)]
+    struct Timespec {
+        tv_sec: i64,
+        tv_nsec: i32,
+    }
+
+    let clock_us = || -> Result<u64, String> {
+        let mut time = Timespec { tv_sec: 0, tv_nsec: 0 };
+        let rc = unsafe { sys_clock_gettime(4, &mut time) };
+        if rc != 0 {
+            return Err(format!("clock returned {rc}"));
+        }
+        let usec = (time.tv_nsec / 1000) as u64;
+        Ok((time.tv_sec as u64).saturating_mul(1_000_000).saturating_add(usec))
+    };
 
     let profile = ticket.profile.as_str();
     let id = ticket.profile;
@@ -3438,6 +3537,7 @@ fn actuate(
             ticket.base_generation
         ));
     }
+    let staged_us = clock_us()?;
     stage(ACCEPTANCE_DEADLINE_US, ticket.base_generation)?;
     unsafe { sys_usleep(20_000) };
     let generation = generation()?;
@@ -3449,6 +3549,12 @@ fn actuate(
     if ack.lease_until_guest_us <= ack.guest_us {
         return Err("applied acknowledgment has no lease".to_string());
     }
+    let lease_until = ack.lease_until_guest_us;
+    let stage_delay_us = ack.guest_us.saturating_sub(staged_us);
+    println!(
+        "FERRUM_STAGE_DELAY stage_us={staged_us} activate_us={} delay_us={stage_delay_us}",
+        ack.guest_us
+    );
     publish_scheduler(stream, ticket, &ack)?;
     let peer = watch_controller(stream);
 
@@ -3560,6 +3666,11 @@ fn actuate(
     if ack.lease_until_guest_us != 0 {
         return Err("lease expiry acknowledgment still has a lease".to_string());
     }
+    let expiry_delay_us = ack.guest_us.saturating_sub(lease_until);
+    println!(
+        "FERRUM_EXPIRY_DELAY lease_until={lease_until} expired_us={} delay_us={expiry_delay_us}",
+        ack.guest_us
+    );
     let before = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
     unsafe { sys_usleep(1_000_000) };
     let after = (read(LATENCY)?, read(BATCH)?, read(MAINTENANCE)?);
