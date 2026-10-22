@@ -472,11 +472,25 @@ fn run() -> Result<(), String> {
     if let (Choice::PendingThreshold { cut, below, above }, Some((profile, decide_us))) =
         (request.choice, decided)
     {
+        let margin = f64::from(latency.queue_len) - cut;
+        let regime = if f64::from(latency.queue_len) >= cut {
+            "overload_shedding"
+        } else {
+            "under_capacity"
+        };
         println!(
             "FERRUM_BRANCH_DECISION controller=pending-threshold cut={cut} below={} above={} pending={} choice={} decide_us={decide_us}",
             below.as_str(),
             above.as_str(),
             latency.queue_len,
+            profile.as_str()
+        );
+        println!(
+            "FERRUM_EXPLAIN controller=pending-threshold pending={} cut={cut} margin={margin:+.1} regime={regime} max_wait_us={} latency_service_us={} batch_service_us={} choice={}",
+            latency.queue_len,
+            latency.max_wait_us,
+            latency.cpu_service_us,
+            batch.cpu_service_us,
             profile.as_str()
         );
     }

@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="350" viewBox="0 0 760 350" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+  <rect width="760" height="350" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="28" y="34" font-size="17" font-weight="700" fill="#0f172a">Real-Data Unikernel Benchmarks: Live Crypto/JSON RPCs &amp; Sealed KVM Trials</text>
+  <text x="28" y="54" font-size="12.5" fill="#475569">Left: Live HMAC-SHA256 + JSON RPC workload (--real-workload) | Right: 252 sealed KVM branch decisions (jobs-v2)</text>
+
+  <!-- Left Panel: Real-Payload RPC Benchmark -->
+  <rect x="24" y="70" width="346" height="256" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="40" y="96" font-size="13.5" font-weight="700" fill="#0f172a">A. Real-Payload RPC &amp; HMAC Benchmark</text>
+  <text x="40" y="114" font-size="11.5" fill="#64748b">168 open-loop RPCs (HMAC-SHA256 + JSON decode) + 8KiB batch blocks</text>
+
+  <!-- p99 bars -->
+  <text x="40" y="144" font-size="12" font-weight="600" fill="#334155">RPC p99 Latency (lower is better)</text>
+  <text x="108" y="166" text-anchor="end" font-size="11.5" fill="#475569">balanced (1:1:1)</text>
+  <rect x="116" y="153" width="200.1" height="18" rx="3" fill="#64748b"/>
+  <text x="322.1" y="166" font-size="11.5" font-weight="600" fill="#334155">45.5 ms</text>
+
+  <text x="108" y="190" text-anchor="end" font-size="11.5" font-weight="600" fill="#15803d">adaptive (6:2:2)</text>
+  <rect x="116" y="177" width="91.2" height="18" rx="3" fill="#16a34a"/>
+  <text x="213.2" y="190" font-size="11.5" font-weight="700" fill="#15803d">20.7 ms (2.20x faster)</text>
+
+  <!-- p50 / p95 / Batch summary -->
+  <line x1="40" y1="210" x2="354" y2="210" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="40" y="232" font-size="12" font-weight="600" fill="#334155">RPC p50 / p95 &amp; Verified Batch Data (2s window)</text>
+  <text x="40" y="254" font-size="11.5" fill="#475569">• Static balanced: p50 = 18.4 ms, p95 = 39.3 ms, 1029 MiB verified</text>
+  <text x="40" y="274" font-size="11.5" fill="#15803d" font-weight="600">• Adaptive policy: p50 = 8.0 ms, p95 = 14.8 ms, 1034 MiB verified</text>
+  <rect x="40" y="290" width="314" height="24" rx="4" fill="#dcfce7"/>
+  <text x="197" y="306" text-anchor="middle" font-size="11.5" font-weight="700" fill="#15803d">54.5% p99 reduction with ~100% batch HMAC throughput</text>
+
+  <!-- Right Panel: Sealed KVM Dataset Tradeoff -->
+  <rect x="386" y="70" width="350" height="256" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="402" y="96" font-size="13.5" font-weight="700" fill="#0f172a">B. Sealed KVM Dataset Tradeoff (21 Units)</text>
+  <text x="402" y="114" font-size="11.5" fill="#64748b">Under-capacity mean p99 (ms) vs Overload batch CPU retained (%)</text>
+
+  <text x="402" y="142" font-size="11.5" font-weight="600" fill="#334155">Under-Capacity Mean p99 Latency (15%–45% load)</text>
+  <text x="498" y="162" text-anchor="end" font-size="11" font-weight="600" fill="#15803d">pending-threshold</text>
+  <rect x="506" y="150" width="83.9" height="15" rx="3" fill="#16a34a"/>
+  <text x="595.9" y="162" font-size="11" font-weight="700" fill="#15803d">71.9 ms (2.35x faster)</text>
+
+  <text x="498" y="182" text-anchor="end" font-size="11" fill="#1e293b">logistic-v0</text>
+  <rect x="506" y="170" width="104.8" height="15" rx="3" fill="#2563eb"/>
+  <text x="616.8" y="182" font-size="11" fill="#1e293b">89.8 ms</text>
+
+  <text x="498" y="202" text-anchor="end" font-size="11" fill="#475569">Laya / balanced</text>
+  <rect x="506" y="190" width="197.2" height="15" rx="3" fill="#64748b"/>
+  <text x="709.2" y="202" font-size="11" fill="#475569">169.0 ms</text>
+
+  <line x1="402" y1="216" x2="720" y2="216" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="402" y="236" font-size="11.5" font-weight="600" fill="#334155">Overload Batch CPU Retained (65%–95% load, floor = 95%)</text>
+
+  <text x="498" y="256" text-anchor="end" font-size="11" font-weight="600" fill="#15803d">pending-threshold</text>
+  <rect x="506" y="244" width="160" height="15" rx="3" fill="#16a34a"/>
+  <text x="672" y="256" font-size="11" font-weight="700" fill="#15803d">100.0% (PASS)</text>
+
+  <text x="498" y="276" text-anchor="end" font-size="11" fill="#1e293b">Laya / logistic-v0</text>
+  <rect x="506" y="264" width="160" height="15" rx="3" fill="#2563eb"/>
+  <text x="672" y="276" font-size="11" fill="#1e293b">100.0% (PASS)</text>
+
+  <text x="498" y="296" text-anchor="end" font-size="11" font-weight="600" fill="#dc2626">heuristic-v0</text>
+  <rect x="506" y="284" width="81.7" height="15" rx="3" fill="#dc2626"/>
+  <text x="593.7" y="296" font-size="11" font-weight="700" fill="#dc2626">51.1% (INFEASIBLE)</text>
+</svg>

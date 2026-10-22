@@ -58,6 +58,9 @@ fn main() -> ExitCode {
     if env::args().skip(1).any(|arg| arg == "--arenas-demo") {
         return arenas_demo_exit();
     }
+    if env::args().skip(1).any(|arg| arg == "--real-workload") {
+        return real_workload_exit();
+    }
     if env::args().skip(1).any(|arg| arg == "--mixed-v1-fixed") {
         return mixed_v1_fixed_exit();
     }
@@ -2348,6 +2351,431 @@ fn arenas_demo_run() -> Result<(), String> {
         u8::from(engine.status().override_active)
     );
     println!("FERRUM_ARENAS_OK");
+    Ok(())
+}
+
+fn real_workload_exit() -> ExitCode {
+    match real_workload_run() {
+        Ok(()) => {
+            println!("FERRUM_COMPLETE");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            println!("FERRUM_REAL_WORKLOAD_FAIL {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(not(target_os = "hermit"))]
+fn real_workload_run() -> Result<(), String> {
+    Err("real-workload runs inside the hermit guest".to_string())
+}
+
+/// Real-payload unikernel benchmark:
+/// - Latency workers (3 threads) execute open-loop authenticated wire-frame
+///   verification (`policy_wire::seal` + `open` HMAC-SHA256 + `decode_message`
+///   strict JSON parsing) on real protocol vectors and record true RPC latency.
+/// - Batch workers (3 threads) seal and verify 8 KiB data blocks with
+///   HMAC-SHA256 (`policy_wire::seal` + `open`), measuring real throughput in KiB.
+/// Compares a 2.0s static `balanced` (1:1:1) window against a 2.0s adaptive
+/// `latency` (6:2:2) window staged via `sys_policy_stage` with `FERRUM_EXPLAIN`.
+#[cfg(target_os = "hermit")]
+fn real_workload_run() -> Result<(), String> {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+    use std::thread;
+
+    use policy_core::catalog_spec;
+    use policy_core::heuristic::{choose_heuristic, HEURISTIC_V0};
+    use policy_types::{
+        CatalogId, ProfileId, ACCEPTANCE_DEADLINE_US, PROFILE_LEASE_US,
+    };
+    use policy_wire::{decode_message, open, seal, Direction};
+    use workloads::jobs::{self, JOBS_V2};
+
+    const LATENCY: u8 = 1;
+    const BATCH: u8 = 2;
+    const WINDOW_US: u64 = 2_000_000;
+    const DRAIN_US: u64 = 400_000;
+    const BLOCK_BYTES: usize = 8192;
+
+    #[repr(C)]
+    struct PolicyAck {
+        kind: u8,
+        reason: u8,
+        profile: u8,
+        _pad0: u8,
+        _pad1: u32,
+        previous_generation: u64,
+        generation: u64,
+        guest_us: u64,
+        lease_until_guest_us: u64,
+    }
+
+    #[repr(C)]
+    struct Timespec {
+        tv_sec: i64,
+        tv_nsec: i32,
+    }
+
+    unsafe extern "C" {
+        fn sys_policy_register(class: u8) -> i32;
+        fn sys_policy_set_weights(latency: u32, batch: u32, maintenance: u32) -> i32;
+        fn sys_policy_stage(
+            latency: u32,
+            batch: u32,
+            maintenance: u32,
+            accept_us: u64,
+            lease_us: u64,
+            base_generation: u64,
+        ) -> i32;
+        fn sys_policy_generation(generation: *mut u64) -> i32;
+        fn sys_policy_read_ack(ack: *mut PolicyAck) -> i32;
+        fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
+        fn sys_clock_gettime(clock_id: i32, tp: *mut Timespec) -> i32;
+        fn sys_usleep(usecs: u64);
+        fn sys_block_current_task_with_timeout(timeout_ms: u64);
+        fn sys_yield();
+    }
+
+    fn now_us() -> u64 {
+        let mut time = Timespec { tv_sec: 0, tv_nsec: 0 };
+        if unsafe { sys_clock_gettime(4, &mut time) } != 0 {
+            return 0;
+        }
+        (time.tv_sec as u64)
+            .saturating_mul(1_000_000)
+            .saturating_add((time.tv_nsec / 1000) as u64)
+    }
+
+    fn sleep_until(target: u64) {
+        loop {
+            let now = now_us();
+            if now >= target {
+                return;
+            }
+            let rest = target - now;
+            if rest >= 10_000 {
+                unsafe { sys_usleep(rest) };
+            } else {
+                unsafe {
+                    sys_block_current_task_with_timeout(rest.div_ceil(1_000));
+                    sys_yield();
+                }
+            }
+        }
+    }
+
+    fn read_service(class: u8) -> Result<u64, String> {
+        let mut service_us = 0u64;
+        let rc = unsafe { sys_policy_read(class, &mut service_us) };
+        if rc == 0 {
+            Ok(service_us)
+        } else {
+            Err(format!("read class {class} returned {rc}"))
+        }
+    }
+
+    let raw_proposal = include_bytes!("../../../tests/protocol-vectors/proposal.json");
+    let end = raw_proposal
+        .iter()
+        .rposition(|byte| *byte != b'\n')
+        .ok_or("empty proposal vector")?
+        + 1;
+    let proposal_bytes: Vec<u8> = raw_proposal[..end].to_vec();
+
+    // Calibrate how many real HMAC-SHA256 + strict JSON parse iterations equal ~4,000 us (4 ms) of solo CPU work.
+    let cal_start = now_us();
+    let mut cal_iters = 0u64;
+    while now_us().saturating_sub(cal_start) < 80_000 {
+        let frame = seal(Direction::ControllerToGuest, &policy_guest::LAB_KEY, &proposal_bytes)
+            .map_err(|e| format!("seal: {e:?}"))?;
+        let opened = open(Direction::ControllerToGuest, &policy_guest::LAB_KEY, &frame)
+            .map_err(|e| format!("open: {e:?}"))?;
+        let _ = decode_message(&opened).map_err(|e| format!("decode: {e:?}"))?;
+        cal_iters += 1;
+    }
+    let cal_elapsed = now_us().saturating_sub(cal_start).max(1);
+    let rpc_passes = (cal_iters.saturating_mul(4_000) / cal_elapsed).max(4);
+
+    let scenario = JOBS_V2.scenario("s4-u35").ok_or("missing s4-u35")?;
+    let all_arrivals: Vec<u64> = scenario
+        .schedule(151)
+        .into_iter()
+        .filter(|&t| t < WINDOW_US + DRAIN_US)
+        .collect();
+
+    struct RealState {
+        arrivals: Vec<u64>,
+        done_bal: Vec<AtomicU64>,
+        done_adp: Vec<AtomicU64>,
+        next_idx: AtomicUsize,
+        phase: AtomicU8, // 0=wait, 1=balanced, 2=adaptive, 3=stop
+        phase_start_us: AtomicU64,
+        batch_blocks: AtomicU64,
+        rpc_passes: u64,
+        proposal_bytes: Vec<u8>,
+    }
+
+    let state = Arc::new(RealState {
+        done_bal: all_arrivals.iter().map(|_| AtomicU64::new(0)).collect(),
+        done_adp: all_arrivals.iter().map(|_| AtomicU64::new(0)).collect(),
+        arrivals: all_arrivals,
+        next_idx: AtomicUsize::new(0),
+        phase: AtomicU8::new(0),
+        phase_start_us: AtomicU64::new(0),
+        batch_blocks: AtomicU64::new(0),
+        rpc_passes,
+        proposal_bytes,
+    });
+
+    static READY: AtomicU8 = AtomicU8::new(0);
+    static FAILED: AtomicBool = AtomicBool::new(false);
+
+    for _ in 0..workloads::LATENCY_WORKERS {
+        let st = Arc::clone(&state);
+        thread::spawn(move || {
+            if unsafe { sys_policy_register(LATENCY) } != 0 {
+                FAILED.store(true, Ordering::Release);
+                return;
+            }
+            READY.fetch_add(1, Ordering::Release);
+            loop {
+                let ph = st.phase.load(Ordering::Acquire);
+                if ph == 3 {
+                    return;
+                }
+                if ph == 0 {
+                    unsafe { sys_usleep(10_000) };
+                    continue;
+                }
+                let start = st.phase_start_us.load(Ordering::Acquire);
+                let idx = st.next_idx.fetch_add(1, Ordering::AcqRel);
+                let Some(&arrival) = st.arrivals.get(idx) else {
+                    unsafe { sys_usleep(10_000) };
+                    continue;
+                };
+                sleep_until(start + arrival);
+                if st.phase.load(Ordering::Acquire) != ph {
+                    continue;
+                }
+                for _ in 0..st.rpc_passes {
+                    if let Ok(frame) = seal(
+                        Direction::ControllerToGuest,
+                        &policy_guest::LAB_KEY,
+                        &st.proposal_bytes,
+                    ) {
+                        if let Ok(opened) = open(
+                            Direction::ControllerToGuest,
+                            &policy_guest::LAB_KEY,
+                            &frame,
+                        ) {
+                            let _ = decode_message(&opened);
+                        }
+                    }
+                }
+                let fin = now_us().saturating_sub(start).max(1);
+                if ph == 1 {
+                    st.done_bal[idx].store(fin, Ordering::Release);
+                } else if ph == 2 {
+                    st.done_adp[idx].store(fin, Ordering::Release);
+                }
+            }
+        });
+    }
+
+    for worker_id in 0..workloads::BATCH_WORKERS {
+        let st = Arc::clone(&state);
+        thread::spawn(move || {
+            if unsafe { sys_policy_register(BATCH) } != 0 {
+                FAILED.store(true, Ordering::Release);
+                return;
+            }
+            READY.fetch_add(1, Ordering::Release);
+            let payload = vec![0x5au8.wrapping_add(worker_id); BLOCK_BYTES];
+            loop {
+                let ph = st.phase.load(Ordering::Acquire);
+                if ph == 3 {
+                    return;
+                }
+                if ph == 0 {
+                    unsafe { sys_usleep(10_000) };
+                    continue;
+                }
+                if let Ok(frame) =
+                    seal(Direction::GuestToController, &policy_guest::LAB_KEY, &payload)
+                {
+                    if open(Direction::GuestToController, &policy_guest::LAB_KEY, &frame).is_ok() {
+                        st.batch_blocks.fetch_add(1, Ordering::AcqRel);
+                    }
+                }
+            }
+        });
+    }
+
+    let expected = workloads::LATENCY_WORKERS + workloads::BATCH_WORKERS;
+    for _ in 0..80 {
+        if READY.load(Ordering::Acquire) == expected || FAILED.load(Ordering::Acquire) {
+            break;
+        }
+        unsafe { sys_usleep(20_000) };
+    }
+    if FAILED.load(Ordering::Acquire) || READY.load(Ordering::Acquire) != expected {
+        return Err("real-workload workers did not register".to_string());
+    }
+
+    let catalog = catalog_spec(CatalogId::CpuV1);
+    let bal_w = catalog.profile(ProfileId::Balanced).weights();
+    if unsafe { sys_policy_set_weights(bal_w[0], bal_w[1], bal_w[2]) } != 0 {
+        return Err("failed to set balanced weights".to_string());
+    }
+
+    // Phase 1: Static balanced (1:1:1)
+    state.next_idx.store(0, Ordering::Release);
+    state.batch_blocks.store(0, Ordering::Release);
+    let bal_start = now_us() + 20_000;
+    state.phase_start_us.store(bal_start, Ordering::Release);
+    state.phase.store(1, Ordering::Release);
+    sleep_until(bal_start);
+    let bal_srv_before = (read_service(LATENCY)?, read_service(BATCH)?);
+    sleep_until(bal_start + WINDOW_US);
+    let bal_blocks = state.batch_blocks.load(Ordering::Acquire);
+    let bal_srv_after = (read_service(LATENCY)?, read_service(BATCH)?);
+    let done_snap_1s: Vec<u64> = state
+        .done_bal
+        .iter()
+        .map(|d| d.load(Ordering::Acquire))
+        .collect();
+    sleep_until(bal_start + WINDOW_US + DRAIN_US);
+    state.phase.store(0, Ordering::Release);
+    unsafe { sys_usleep(30_000) };
+
+    let finished_bal: Vec<u64> = state
+        .done_bal
+        .iter()
+        .map(|d| d.load(Ordering::Acquire))
+        .collect();
+    let out_bal = jobs::outcome(&state.arrivals, &finished_bal, 0, WINDOW_US, WINDOW_US + DRAIN_US);
+    let bal_lat_srv = bal_srv_after.0.saturating_sub(bal_srv_before.0);
+    let bal_bat_srv = bal_srv_after.1.saturating_sub(bal_srv_before.1);
+    let bal_kib = bal_blocks.saturating_mul((BLOCK_BYTES / 1024) as u64);
+    println!(
+        "FERRUM_REAL_WORKLOAD mode=balanced profile=balanced rpc_passes={rpc_passes} offered={} completed={} completion_bp={} p50_us={} p95_us={} p99_us={} batch_blocks={bal_blocks} batch_kib={bal_kib} latency_service_us={bal_lat_srv} batch_service_us={bal_bat_srv}",
+        out_bal.offered,
+        out_bal.completed,
+        out_bal.completion_bp,
+        out_bal.p50_us.unwrap_or(0),
+        out_bal.p95_us.unwrap_or(0),
+        out_bal.p99_us.unwrap_or(0)
+    );
+
+    // Explainable decision from the live pre-decision state at end of balanced window
+    let prefix_state = jobs::prefix_jobs(&state.arrivals, &done_snap_1s, WINDOW_US);
+    let obs = jobs::pre_decision(
+        prefix_state,
+        [bal_lat_srv / 2, bal_bat_srv / 2, 0, 0],
+        bal_blocks,
+    );
+    let heuristic_choice = choose_heuristic(&obs, &HEURISTIC_V0);
+    let cut = 14.5f64;
+    let pending = obs.groups[0].queue_len;
+    let max_wait_us = obs.groups[0].max_wait_us;
+    let threshold_choice = if f64::from(pending) >= cut {
+        ProfileId::Reclaim
+    } else {
+        ProfileId::Latency
+    };
+    let margin = f64::from(pending) - cut;
+    let mut base_gen = 0u64;
+    if unsafe { sys_policy_generation(&mut base_gen) } != 0 {
+        return Err("generation read failed".to_string());
+    }
+    let target_w = catalog.profile(threshold_choice).weights();
+    let stage_us = now_us();
+    if unsafe {
+        sys_policy_stage(
+            target_w[0],
+            target_w[1],
+            target_w[2],
+            ACCEPTANCE_DEADLINE_US,
+            PROFILE_LEASE_US,
+            base_gen,
+        )
+    } != 0
+    {
+        return Err("stage failed".to_string());
+    }
+    unsafe { sys_usleep(10_000) };
+    let mut ack = PolicyAck {
+        kind: 0,
+        reason: 0,
+        profile: 0,
+        _pad0: 0,
+        _pad1: 0,
+        previous_generation: 0,
+        generation: 0,
+        guest_us: 0,
+        lease_until_guest_us: 0,
+    };
+    if unsafe { sys_policy_read_ack(&mut ack) } != 0 || ack.kind != 1 {
+        return Err("scheduler did not acknowledge staged profile".to_string());
+    }
+    println!(
+        "FERRUM_EXPLAIN mode=real-workload pending={pending} cut={cut} margin={margin:+.1} regime=under_capacity max_wait_us={max_wait_us} heuristic={} threshold={} stage_delay_us={} generation={}",
+        heuristic_choice.as_str(),
+        threshold_choice.as_str(),
+        ack.guest_us.saturating_sub(stage_us),
+        ack.generation
+    );
+
+    // Phase 2: Adaptive policy (`latency` 6:2:2) on the identical open-loop RPC schedule
+    state.next_idx.store(0, Ordering::Release);
+    state.batch_blocks.store(0, Ordering::Release);
+    let adp_start = now_us() + 20_000;
+    state.phase_start_us.store(adp_start, Ordering::Release);
+    state.phase.store(2, Ordering::Release);
+    sleep_until(adp_start);
+    let adp_srv_before = (read_service(LATENCY)?, read_service(BATCH)?);
+    sleep_until(adp_start + WINDOW_US);
+    let adp_blocks = state.batch_blocks.load(Ordering::Acquire);
+    let adp_srv_after = (read_service(LATENCY)?, read_service(BATCH)?);
+    sleep_until(adp_start + WINDOW_US + DRAIN_US);
+    state.phase.store(3, Ordering::Release);
+
+    let finished_adp: Vec<u64> = state
+        .done_adp
+        .iter()
+        .map(|d| d.load(Ordering::Acquire))
+        .collect();
+    let out_adp = jobs::outcome(&state.arrivals, &finished_adp, 0, WINDOW_US, WINDOW_US + DRAIN_US);
+    let adp_lat_srv = adp_srv_after.0.saturating_sub(adp_srv_before.0);
+    let adp_bat_srv = adp_srv_after.1.saturating_sub(adp_srv_before.1);
+    let adp_kib = adp_blocks.saturating_mul((BLOCK_BYTES / 1024) as u64);
+    println!(
+        "FERRUM_REAL_WORKLOAD mode=adaptive profile={} rpc_passes={rpc_passes} offered={} completed={} completion_bp={} p50_us={} p95_us={} p99_us={} batch_blocks={adp_blocks} batch_kib={adp_kib} latency_service_us={adp_lat_srv} batch_service_us={adp_bat_srv}",
+        threshold_choice.as_str(),
+        out_adp.offered,
+        out_adp.completed,
+        out_adp.completion_bp,
+        out_adp.p50_us.unwrap_or(0),
+        out_adp.p95_us.unwrap_or(0),
+        out_adp.p99_us.unwrap_or(0)
+    );
+
+    let bal_p99 = out_bal.p99_us.ok_or("balanced p99 was censored")?;
+    let adp_p99 = out_adp.p99_us.ok_or("adaptive p99 was censored")?;
+    if adp_p99 >= bal_p99 {
+        return Err(format!(
+            "adaptive p99 ({adp_p99} us) did not improve over balanced ({bal_p99} us)"
+        ));
+    }
+    let batch_retained_bp = adp_blocks.saturating_mul(10_000) / bal_blocks.max(1);
+    let p99_reduction_bp = (bal_p99 - adp_p99).saturating_mul(10_000) / bal_p99.max(1);
+    println!(
+        "FERRUM_REAL_WORKLOAD_SUMMARY balanced_p99_us={bal_p99} adaptive_p99_us={adp_p99} p99_reduction_bp={p99_reduction_bp} batch_retained_bp={batch_retained_bp}"
+    );
+    println!("FERRUM_REAL_WORKLOAD_OK");
     Ok(())
 }
 

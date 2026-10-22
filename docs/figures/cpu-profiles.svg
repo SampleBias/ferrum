@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="365" viewBox="0 0 760 365" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+  <rect width="760" height="365" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="28" y="36" font-size="17" font-weight="700" fill="#0f172a">Measured Unikernel CPU Service by Catalog Profile (--fair-demo, KVM 1s Window)</text>
+  <text x="28" y="58" font-size="12.5" fill="#475569">Three non-yielding Hermit threads (one per workload class) scheduled by vendor/hermit-rs ai-policy</text>
+  <g transform="translate(190, 68)">
+    <rect x="0" y="0" width="12" height="12" rx="2" fill="#2563eb"/>
+    <text x="18" y="10" font-size="12" font-weight="600" fill="#334155">Latency class</text>
+    <rect x="130" y="0" width="12" height="12" rx="2" fill="#0d9488"/>
+    <text x="148" y="10" font-size="12" font-weight="600" fill="#334155">Batch class</text>
+    <rect x="245" y="0" width="12" height="12" rx="2" fill="#d97706"/>
+    <text x="263" y="10" font-size="12" font-weight="600" fill="#334155">Maintenance class</text>
+  </g>
+  
+    <text x="176" y="117" text-anchor="end" font-size="13" font-weight="600" fill="#1e293b">balanced (1:1:1)</text>
+    <rect x="190" y="95" width="172.9" height="34" rx="4" fill="#2563eb"/>
+    <rect x="362.9" y="95" width="173.1" height="34" fill="#0d9488"/>
+    <rect x="536.0" y="95" width="174.0" height="34" rx="4" fill="#d97706"/>
+    <text x="276.45" y="117" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">332.6 ms (33%)</text>
+    <text x="449.45" y="117" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">332.9 ms (33%)</text>
+    <text x="623.0" y="117" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">334.5 ms (33%)</text>
+    
+    <text x="176" y="179" text-anchor="end" font-size="13" font-weight="600" fill="#1e293b">latency (6:2:2)</text>
+    <rect x="190" y="157" width="312.7" height="34" rx="4" fill="#2563eb"/>
+    <rect x="502.7" y="157" width="104.2" height="34" fill="#0d9488"/>
+    <rect x="606.9" y="157" width="103.1" height="34" rx="4" fill="#d97706"/>
+    <text x="346.35" y="179" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">601.3 ms (60%)</text>
+    <text x="554.8" y="179" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">200.3 ms (20%)</text>
+    <text x="658.4499999999999" y="179" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">198.3 ms (20%)</text>
+    
+    <text x="176" y="241" text-anchor="end" font-size="13" font-weight="600" fill="#1e293b">throughput (2:6:2)</text>
+    <rect x="190" y="219" width="104.2" height="34" rx="4" fill="#2563eb"/>
+    <rect x="294.2" y="219" width="311.6" height="34" fill="#0d9488"/>
+    <rect x="605.8" y="219" width="104.2" height="34" rx="4" fill="#d97706"/>
+    <text x="242.1" y="241" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">200.3 ms (20%)</text>
+    <text x="450.0" y="241" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">599.3 ms (60%)</text>
+    <text x="657.9" y="241" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">200.4 ms (20%)</text>
+    
+    <text x="176" y="303" text-anchor="end" font-size="13" font-weight="600" fill="#1e293b">reclaim (2:2:6)</text>
+    <rect x="190" y="281" width="104.4" height="34" rx="4" fill="#2563eb"/>
+    <rect x="294.4" y="281" width="105.2" height="34" fill="#0d9488"/>
+    <rect x="399.59999999999997" y="281" width="310.4" height="34" rx="4" fill="#d97706"/>
+    <text x="242.2" y="303" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">200.8 ms (20%)</text>
+    <text x="347.0" y="303" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">202.3 ms (20%)</text>
+    <text x="554.8" y="303" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">596.9 ms (60%)</text>
+    
+</svg>

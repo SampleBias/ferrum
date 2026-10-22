@@ -71,14 +71,45 @@ AIK_GUEST=target/x86_64-unknown-hermit/release/policy-guest \
 ./tools/run-qemu.sh
 ```
 
+### 4. Run the Full Verification Suite, Real-Data Benchmark & Explainability CLI
+
+To execute all four test tiers (Rust workspace tests, Python controller tests, standalone QEMU mechanism boots, connected protocol/fault boots, real-payload RPC/HMAC benchmark, closed-loop branch, and live soak) and refresh [docs/15-test-results.md](docs/15-test-results.md) and its figures in `docs/figures/`:
+
+```bash
+./tools/run-test-report.sh
+```
+
+To inspect per-decision feature attributions, boundary margins, and counterfactual outcomes on the sealed KVM dataset:
+
+```bash
+PYTHONPATH=controller/src python3 -m aik_controller.explain --host r5-1600
+PYTHONPATH=controller/src python3 -m aik_controller.explain --host i7-10750h
+```
+
 Note: Hermit exits QEMU via `isa-debug-exit`, where raw exit status `3` indicates success (`0` in the guest).
 
-## Status Summary
+## Performance, Benchmarks & Explainability
 
-- **Engineering (S3 CPU + G5 deterministic ledgers):** Complete and verified under TCG and KVM (`kvm_intel` and `kvm_amd`). Stage-to-activation and lease-expiry delays meet the 10 ms target while the vCPU runs, invalid/late/stale proposals are rejected, controller loss falls back cleanly to `balanced`, and the 1-hour renewal soak completes without missed renewals (26 passes, 2,314 rounds).
-- **Research (`jobs-v2` sealed evaluation):** A single pre-decision feature (pending jobs) separates under-capacity from overload states. The frozen pending-jobs threshold hits 100% of final-test and out-of-distribution decisions on Ryzen (`14/15` and `6/6` units in closed loop) and `168/180` final-test plus `72/72` out-of-distribution decisions on Intel (`15/15` and `5/6` units in closed loop), outperforming both `heuristic-v0` and zero-shot/adapted Laya.
+### 1. Kernel Enforcement Timings & Soak Qualification
 
-Full acceptance measurements and gate verdicts are recorded in [docs/14-s3-acceptance.md](docs/14-s3-acceptance.md).
+![Kernel Enforcement Timings and Soak Qualification](docs/figures/timing-and-soak.png)
+
+- **Engineering (S3 CPU + G5 deterministic ledgers):** Verified under TCG and KVM (`kvm_intel` and `kvm_amd`). Stage-to-activation (`3 µs`) and lease-expiry (`5 µs`) meet the `10,000 µs` (`10 ms`) target with `>1000x` margin while the vCPU runs. Invalid/late/stale proposals are rejected, controller loss falls back cleanly to `balanced`, and the 1-hour renewal soak completes without missed renewals (`26` passes, `2,314` rounds).
+
+### 2. Real-Data Unikernel Benchmarks (`--real-workload` & Sealed KVM Dataset)
+
+![Real-Data Unikernel Benchmarks](docs/figures/real-data-benchmark.png)
+
+- **Live Real-Payload RPC & HMAC Benchmark (`--real-workload`):** Runs `168` open-loop RPC requests (`HMAC-SHA256` signing + verification + strict JSON schema decoding) alongside continuous `8 KiB` `HMAC-SHA256` batch workers inside the Hermit unikernel. Adaptive policy actuation (`balanced 1:1:1` $\to$ `latency 6:2:2`) cuts RPC **p99 latency from `45.5 ms` to `20.7 ms` (`2.20x` faster, `-54.5%`)** while retaining **`100.5%` batch throughput** (`1,034 MiB` vs `1,029 MiB` verified per `2 s` window).
+- **Sealed KVM Evaluation (`jobs-v2`, `252` decisions across `21` units):** The frozen `pending-threshold` candidate hits **`100%` of final-test (`180/180`) and out-of-distribution (`72/72`) decisions** on Ryzen (`168/180` and `72/72` on Intel), achieving **`71.9 ms` mean under-capacity p99** (`2.35x` faster than `balanced`/Laya at `169.0 ms`) and **`100.0%` overload batch CPU retention** (whereas `heuristic-v0` drops batch CPU to `51.1%`, violating the `95%` floor).
+
+### 3. Policy Explainability & Counterfactual Attribution
+
+![Policy Explainability and Feature Attribution](docs/figures/explainability-attribution.png)
+
+- Every controller decision emits an explicit attribution record (`FERRUM_EXPLAIN` in the guest and `EXPLAIN seq=...` in `aik_controller.server`) reporting the triggered rule, signed queue margin (`pending - cut`), standardized feature log-odds ($\beta z$), and measured counterfactual regret.
+
+Full acceptance measurements, visual charts, and captured kernel traces are recorded in [docs/14-s3-acceptance.md](docs/14-s3-acceptance.md) and [docs/15-test-results.md](docs/15-test-results.md).
 
 ## Documentation
 
@@ -99,3 +130,4 @@ Full acceptance measurements and gate verdicts are recorded in [docs/14-s3-accep
 | [12 — Demo and review](docs/12-demo-and-review.md) | Demonstration sequence and review checklists |
 | [13 — In-guest evolution](docs/13-in-guest-evolution.md) | Requirements for self-contained in-guest inference |
 | [14 — S3 acceptance record](docs/14-s3-acceptance.md) | Recorded S3 gates, sealed evaluations, pause behavior, and soak |
+| [15 — Test guide & verification results](docs/15-test-results.md) | Automated test runner guide, visual charts, scorecard, and captured kernel traces |

@@ -22,6 +22,7 @@ from aik_controller.framing import (
     seal,
     snapshot_hash,
 )
+from aik_controller.explain import explain_line
 from aik_controller.features import FeatureError, FeatureHistory, feature_line, laya_status, load_edges
 from aik_controller.heuristic import choose, load_thresholds
 from aik_controller.laya_offline import model_state
@@ -243,6 +244,7 @@ def exchange_round(
             )
 
         note = send_heuristic_then_shadow(write_proposal, shadow, state, profile)
+        print(explain_line(body, thresholds), flush=True)
         if note is not None:
             print(shadow_line(note), flush=True)
             if notes is not None:
