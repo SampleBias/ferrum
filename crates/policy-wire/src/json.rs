@@ -177,7 +177,7 @@ impl Parser<'_> {
     }
 
     fn unicode_escape(&mut self) -> Result<char, WireError> {
-        let mut unit = self.hex4()?;
+        let unit = self.hex4()?;
         if (0xD800..=0xDBFF).contains(&unit) {
             if self.bump()? != b'\\' || self.bump()? != b'u' {
                 return Err(WireError::Structure);

@@ -55,6 +55,9 @@ fn main() -> ExitCode {
     if env::args().skip(1).any(|arg| arg == "--fair-dwell") {
         return fair_dwell_exit();
     }
+    if env::args().skip(1).any(|arg| arg == "--arenas-demo") {
+        return arenas_demo_exit();
+    }
     if env::args().skip(1).any(|arg| arg == "--mixed-v1-fixed") {
         return mixed_v1_fixed_exit();
     }
@@ -2171,6 +2174,183 @@ fn fair_dwell() -> Result<(), String> {
     Ok(())
 }
 
+fn arenas_demo_exit() -> ExitCode {
+    match arenas_demo_run() {
+        Ok(()) => {
+            println!("FERRUM_COMPLETE");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            println!("FERRUM_ARENAS_FAIL {err}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// Deterministic G5 actuator check: `EntryTable`, `ArenaLedger`,
+/// `AdmissionLedger`, and `PressureMonitor` driven by `CatalogId::JointV1`.
+fn arenas_demo_run() -> Result<(), String> {
+    use policy_core::entries::EntryTable;
+    use policy_core::resources::{AdmissionLedger, ArenaLedger, InflightLimits, Pool, PressureMonitor, Submit, WorkClass};
+    use policy_core::{catalog_spec, EngineConfig, PolicyEngine};
+    use policy_types::{
+        CatalogId, Hash32, ObjectiveId, ProfileId, RunMode, CLEAR_HEADROOM_BYTES, CLEAR_HOLD_US,
+        MIN_DWELL_US,
+    };
+
+    const MIB: u64 = 1024 * 1024;
+    let boot = BootId::from_hex("00112233445566778899aabbccddeeff").expect("boot id");
+    let mut engine = PolicyEngine::boot(EngineConfig {
+        catalog: CatalogId::JointV1,
+        boot_id: boot,
+        objective: ObjectiveId::MixedLatencyV1,
+        approved_model: Hash32::repeat(0xcc),
+        approved_calibration: Hash32::repeat(0xdd),
+        run_mode: RunMode::Heuristic,
+        manual_rearm: false,
+    });
+    let joint = catalog_spec(CatalogId::JointV1);
+    let balanced = joint.profile(ProfileId::Balanced);
+    let mut arenas = ArenaLedger::new(balanced.cache_soft_target_bytes);
+    let mut entries = EntryTable::empty();
+    let mut admission = AdmissionLedger::new(InflightLimits {
+        latency: balanced.inflight_latency,
+        batch: balanced.inflight_batch,
+    });
+
+    // Charge one live latency buffer and ten 8 MiB cache entries (80 MiB total).
+    let latency_buf = entries
+        .insert(&mut arenas, Pool::Latency, 4 * MIB, true)
+        .map_err(|err| format!("latency insert: {err:?}"))?;
+    let mut cache_ids = Vec::with_capacity(10);
+    for index in 0..10 {
+        let id = entries
+            .insert(&mut arenas, Pool::Cache, 8 * MIB, true)
+            .map_err(|err| format!("cache insert {index}: {err:?}"))?;
+        // Keep the newest cache entry live; release the first nine for eviction.
+        if index < 9 {
+            entries
+                .set_live(id, false)
+                .map_err(|err| format!("set_live {index}: {err:?}"))?;
+        }
+        cache_ids.push(id);
+    }
+    engine.report_cache_used(arenas.cache_used);
+
+    // Admit 8 latency jobs under balanced (16/8), then switch to reclaim (32 MiB cache, 4/2 inflight).
+    for _ in 0..8 {
+        if admission
+            .submit(WorkClass::Latency, 128 * 1024)
+            .map_err(|err| format!("submit: {err:?}"))?
+            != Submit::Admitted
+        {
+            return Err("balanced admission refused an in-limit latency job".to_string());
+        }
+    }
+    let ack = engine
+        .apply_local(MIN_DWELL_US, ProfileId::Reclaim)
+        .map_err(|err| format!("apply reclaim: {err:?}"))?;
+    if ack.desired_matches_actual {
+        return Err("reclaim reported converged before cache eviction".to_string());
+    }
+    let status = engine.status();
+    arenas.set_cache_target(status.desired_cache_bytes);
+    admission.set_limits(InflightLimits {
+        latency: status.desired_inflight_latency,
+        batch: status.desired_inflight_batch,
+    });
+    if admission.inflight(WorkClass::Latency) != 8 {
+        return Err("lowering admission limit dropped active in-flight work".to_string());
+    }
+    if admission
+        .submit(WorkClass::Latency, 128 * 1024)
+        .map_err(|err| format!("submit over reduced limit: {err:?}"))?
+        != Submit::Queued
+    {
+        return Err("submission above reduced limit was not queued".to_string());
+    }
+
+    // Evict in 16 MiB batches until the 32 MiB soft target is met.
+    let mut batches = 0u32;
+    while arenas.eviction_backlog() > 0 {
+        let freed = entries
+            .evict(&mut arenas, 16 * MIB)
+            .map_err(|err| format!("evict: {err:?}"))?;
+        if freed == 0 || freed > 16 * MIB {
+            return Err(format!("unexpected eviction batch {freed}"));
+        }
+        batches += 1;
+    }
+    // A further eviction step with zero backlog must not evict remaining cache entries.
+    let extra = entries
+        .evict(&mut arenas, 16 * MIB)
+        .map_err(|err| format!("extra evict: {err:?}"))?;
+    if extra != 0 || arenas.cache_used != 32 * MIB || entries.charged(Pool::Latency) != 4 * MIB {
+        return Err(format!(
+            "cache did not stop at soft target (used={} extra={extra})",
+            arenas.cache_used
+        ));
+    }
+    engine.report_cache_used(arenas.cache_used);
+    let converged_ack = engine
+        .apply_local(MIN_DWELL_US + 500_000, ProfileId::Reclaim)
+        .map_err(|err| format!("renew reclaim: {err:?}"))?;
+    if !converged_ack.desired_matches_actual {
+        return Err("reclaim did not report converged after reaching 32 MiB target".to_string());
+    }
+
+    // Drain in-flight latency jobs so the queued job is promoted once inflight drops below 4.
+    for _ in 0..5 {
+        admission
+            .complete(WorkClass::Latency)
+            .map_err(|err| format!("complete: {err:?}"))?;
+    }
+    if admission.inflight(WorkClass::Latency) != 4 || admission.queued(WorkClass::Latency) != 0 {
+        return Err("queued latency job was not promoted after draining to limit".to_string());
+    }
+
+    // Trigger emergency headroom pressure and verify 3-second continuous hysteresis before clear.
+    let mut monitor = PressureMonitor::default();
+    if !PressureMonitor::emergency_triggered(&arenas, 48 * MIB) {
+        return Err("low headroom did not trigger emergency".to_string());
+    }
+    engine.install_emergency(MIN_DWELL_US + 1_000_000);
+    if !engine.status().override_active {
+        return Err("engine did not enter emergency override".to_string());
+    }
+    let healthy_headroom = CLEAR_HEADROOM_BYTES + 8 * MIB;
+    if !PressureMonitor::clear_condition(&arenas, healthy_headroom) {
+        return Err("healthy arenas did not satisfy clear condition".to_string());
+    }
+    let t0 = MIN_DWELL_US + 2_000_000;
+    if monitor.observe(t0, true) || monitor.observe(t0 + CLEAR_HOLD_US - 1, true) {
+        return Err("pressure monitor cleared before hold window elapsed".to_string());
+    }
+    if !monitor.observe(t0 + CLEAR_HOLD_US, true) {
+        return Err("pressure monitor did not clear after continuous hold window".to_string());
+    }
+    engine
+        .clear_emergency(t0 + CLEAR_HOLD_US)
+        .map_err(|err| format!("clear emergency: {err:?}"))?;
+    entries
+        .release(&mut arenas, latency_buf)
+        .map_err(|err| format!("release latency: {err:?}"))?;
+    let live_cache = *cache_ids.last().expect("live cache entry");
+    entries
+        .release(&mut arenas, live_cache)
+        .map_err(|err| format!("release live cache: {err:?}"))?;
+
+    println!(
+        "FERRUM_ARENAS batches={batches} cache_used={} latency_inflight={} queued={} override={}",
+        arenas.cache_used,
+        admission.inflight(WorkClass::Latency),
+        admission.queued(WorkClass::Latency),
+        u8::from(engine.status().override_active)
+    );
+    println!("FERRUM_ARENAS_OK");
+    Ok(())
+}
+
 fn mixed_v1_exit() -> ExitCode {
     finish_mixed(mixed_v1_run(None), false)
 }
@@ -2387,8 +2567,16 @@ fn mixed_v1_run(until_us: Option<u64>) -> Result<(), String> {
         Err("scheduler wrote no acknowledgment".to_string())
     };
 
-    let mut stream = connect_controller(&default_controller())?;
-    let boot = BootId::from_hex("00112233445566778899aabbccddeeff").expect("boot id");
+    let mut controller = default_controller();
+    let mut boot = BootId::from_hex("00112233445566778899aabbccddeeff").expect("boot id");
+    for arg in env::args().skip(1) {
+        if let Some(value) = arg.strip_prefix("--controller=") {
+            controller = value.to_string();
+        } else if let Some(value) = arg.strip_prefix("--boot-id=") {
+            boot = BootId::from_hex(value).map_err(|_| "bad boot id".to_string())?;
+        }
+    }
+    let mut stream = connect_controller(&controller)?;
     let mut session = policy_guest::LiveSession::open(&mut stream, boot).map_err(|err| err.to_string())?;
     // The engine treats time zero as a profile change. The kernel does not arm
     // dwell until the first staged profile, so this wait only satisfies the engine.
@@ -2404,8 +2592,8 @@ fn mixed_v1_run(until_us: Option<u64>) -> Result<(), String> {
     const MEASURE_US: u64 = 100_000 + workloads::SAMPLE_US;
     const LEASE_MARGIN_US: u64 = 200_000;
     /// Start a renewal when this much of the lease is left. The parked sample
-    /// is 400 ms, and the rest is the round trip back to the scheduler.
-    const RENEW_SLACK_US: u64 = 1_000_000;
+    /// is 400 ms, leaving about 1.4 s for the round trip back to the scheduler.
+    const RENEW_SLACK_US: u64 = 1_800_000;
     let sample_window = |settle_us: u64| -> Result<[u64; 3], String> {
         unsafe { sys_usleep(settle_us) };
         let before = snapshot()?;
@@ -2541,8 +2729,11 @@ fn mixed_v1_run(until_us: Option<u64>) -> Result<(), String> {
                 let now = monotonic_us()?;
                 let renew_at = lease_until_us.saturating_sub(RENEW_SLACK_US);
                 if now < renew_at {
-                    wait_until(renew_at.min(hold_until))?;
-                    continue;
+                    if hold_until <= renew_at {
+                        wait_until(hold_until)?;
+                        break;
+                    }
+                    wait_until(renew_at)?;
                 }
                 let parked = sample_window(0)?;
                 let previous_lease = lease_until_us;
@@ -2620,6 +2811,16 @@ fn mixed_v1_run(until_us: Option<u64>) -> Result<(), String> {
                 return Err(format!("{}: {fault}", phase.name));
             }
             set_duty(0, 0, 0);
+            if catch_up > 0 {
+                let parked = sample_window(0)?;
+                let previous_lease = lease_until_us;
+                let ack = install(workloads::measured(*phase, workloads::SAMPLE_US, parked))?;
+                if ack.profile != active_profile || ack.lease_until_guest_us <= previous_lease {
+                    return Err(format!("{} post-sample renewal did not extend the lease", phase.name));
+                }
+                lease_until_us = ack.lease_until_guest_us;
+                rounds += 1;
+            }
         }
         passes = passes.saturating_add(1);
         match deadline {
@@ -3715,5 +3916,15 @@ fn default_controller() -> String {
         "10.0.2.2:7777".to_string()
     } else {
         "127.0.0.1:7777".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arenas_demo_converges_and_clears_emergency() {
+        arenas_demo_run().unwrap();
     }
 }

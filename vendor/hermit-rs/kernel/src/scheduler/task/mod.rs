@@ -595,6 +595,8 @@ impl BlockedTaskQueue {
 			(Some(a), Some(b)) => Some(a.min(b)),
 			(a, b) => a.or(b),
 		};
+		#[cfg(feature = "ai-policy")]
+		let time = crate::policy::timer_deadline(time);
 
 		arch::set_oneshot_timer(time);
 	}
@@ -677,7 +679,7 @@ impl BlockedTaskQueue {
 				// next task's wakeup time (if any).
 				#[cfg(feature = "net")]
 				if first_task {
-					arch::set_oneshot_timer(cursor.current().map_or_else(
+					let next_timer = cursor.current().map_or_else(
 						|| self.network_wakeup_time,
 						|node| match node.wakeup_time {
 							Some(wt) => {
@@ -689,15 +691,19 @@ impl BlockedTaskQueue {
 							}
 							None => self.network_wakeup_time,
 						},
-					));
+					);
+					#[cfg(feature = "ai-policy")]
+					let next_timer = crate::policy::timer_deadline(next_timer);
+					arch::set_oneshot_timer(next_timer);
 				}
 				#[cfg(not(feature = "net"))]
 				if first_task {
-					arch::set_oneshot_timer(
-						cursor
-							.current()
-							.map_or_else(|| None, |node| node.wakeup_time),
-					);
+					let next_timer = cursor
+						.current()
+						.map_or_else(|| None, |node| node.wakeup_time);
+					#[cfg(feature = "ai-policy")]
+					let next_timer = crate::policy::timer_deadline(next_timer);
+					arch::set_oneshot_timer(next_timer);
 				}
 
 				// Wake it up.

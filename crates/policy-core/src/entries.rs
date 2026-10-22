@@ -77,7 +77,7 @@ impl EntryTable {
             pool,
             bytes,
             live: true,
-            evictable,
+            evictable: evictable && matches!(pool, Pool::Cache),
         };
         Ok(EntryId(id))
     }
@@ -100,22 +100,28 @@ impl EntryTable {
         Ok(())
     }
 
-    /// Free evictable cache entries that are not live, oldest slot first,
-    /// until `max_bytes` have been released or no such entry remains.
-    /// Latency and batch entries are left in place.
+    /// Free evictable cache entries that are not live, oldest entry first,
+    /// until the cache soft target is met, `max_bytes` have been released,
+    /// or no fitting entry remains. Latency and batch entries are left in place.
     pub fn evict(&mut self, ledger: &mut ArenaLedger, max_bytes: u64) -> Result<u64, EntryError> {
         let mut freed = 0u64;
-        for index in 0..ENTRY_SLOTS {
-            if freed >= max_bytes {
+        while freed < max_bytes && ledger.eviction_backlog() > 0 {
+            let mut oldest: Option<(usize, u32)> = None;
+            for (index, slot) in self.slots.iter().enumerate() {
+                if !slot.occupied || slot.live || !slot.evictable || slot.pool != Pool::Cache {
+                    continue;
+                }
+                if freed.saturating_add(slot.bytes) > max_bytes {
+                    continue;
+                }
+                if oldest.is_none_or(|(_, best_id)| slot.id < best_id) {
+                    oldest = Some((index, slot.id));
+                }
+            }
+            let Some((index, _)) = oldest else {
                 break;
-            }
+            };
             let slot = self.slots[index];
-            if !slot.occupied || slot.live || !slot.evictable || slot.pool != Pool::Cache {
-                continue;
-            }
-            if freed.saturating_add(slot.bytes) > max_bytes {
-                continue;
-            }
             ledger
                 .free(slot.pool, slot.bytes)
                 .map_err(EntryError::Resource)?;
@@ -223,5 +229,36 @@ mod tests {
         ));
         assert_eq!(entries.charged(Pool::Latency), 0);
         assert_eq!(arenas.latency_used, 0);
+    }
+
+    #[test]
+    fn eviction_stops_at_cache_soft_target_and_orders_by_entry_age() {
+        let mut entries = EntryTable::empty();
+        let mut arenas = ArenaLedger::new(4 * 1024);
+        let first = entries
+            .insert(&mut arenas, Pool::Cache, 4 * 1024, true)
+            .unwrap();
+        let older = entries
+            .insert(&mut arenas, Pool::Cache, 4 * 1024, true)
+            .unwrap();
+        // Free slot 0 and reuse it for a newer cache entry.
+        entries.release(&mut arenas, first).unwrap();
+        let newer = entries
+            .insert(&mut arenas, Pool::Cache, 4 * 1024, true)
+            .unwrap();
+        entries.set_live(older, false).unwrap();
+        entries.set_live(newer, false).unwrap();
+        assert_eq!(arenas.cache_used, 8 * 1024);
+        assert_eq!(arenas.eviction_backlog(), 4 * 1024);
+
+        // Even with a 16 KiB batch limit, eviction stops once the 4 KiB soft target is reached,
+        // and evicts `older` (slot 1) before `newer` (reused slot 0).
+        let freed = entries.evict(&mut arenas, 16 * 1024).unwrap();
+        assert_eq!(freed, 4 * 1024);
+        assert_eq!(arenas.cache_used, 4 * 1024);
+        assert_eq!(arenas.eviction_backlog(), 0);
+        assert_eq!(entries.release(&mut arenas, older), Err(EntryError::Unknown));
+        entries.release(&mut arenas, newer).unwrap();
+        assert_eq!(arenas.cache_used, 0);
     }
 }

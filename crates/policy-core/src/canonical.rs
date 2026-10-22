@@ -2,7 +2,7 @@
 //! of a received frame. Field order is the schema order in the protocol document.
 
 use policy_types::{
-    encode_hex, CatalogId, GroupId, GroupSample, Pressure, ProfileId, Snapshot,
+    encode_hex, GroupSample, Pressure, Snapshot,
     GROUP_ORDER, PROTOCOL_VERSION,
 };
 use sha2::{Digest, Sha256};
@@ -169,7 +169,8 @@ pub fn hash_snapshot(snap: &Snapshot) -> Result<policy_types::Hash32, CanonicalE
 mod tests {
     use super::*;
     use policy_types::{
-        BootId, GroupSample, Hash32, ObjectiveId, Pressure, SessionId, Snapshot, TELEMETRY_VERSION,
+        BootId, CatalogId, GroupId, GroupSample, Hash32, ObjectiveId, Pressure, ProfileId,
+        SessionId, Snapshot, TELEMETRY_VERSION,
     };
 
     fn fixture_snapshot() -> Snapshot {

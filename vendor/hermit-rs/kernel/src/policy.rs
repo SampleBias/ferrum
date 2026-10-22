@@ -18,6 +18,9 @@ pub const CLASS_SYSTEM: u8 = 4;
 
 const SCALE: u128 = 1_048_576;
 const QUANTUM_US: u64 = 2_000;
+/// A slice longer than the 10 ms expiry target includes time the vCPU was
+/// stopped or descheduled after its 2 ms preemption timer had already elapsed.
+const MAX_SLICE_US: u64 = 10_000;
 const INTERVAL_US: u64 = 100_000;
 const SYSTEM_BUDGET_US: u64 = 5_000;
 /// Minimum time between two different profiles. A renewal does not restart it.
@@ -101,6 +104,8 @@ struct State {
 	/// Absolute guest time at which the active weights fall back to balanced.
 	/// Zero means no lease is armed.
 	lease_until: u64,
+	/// Next scheduler or lease wakeup armed by `decide`. Zero means none.
+	next_timer_us: u64,
 	lease_expired: bool,
 	/// Local override. While set, expiry records the lease as expired and
 	/// leaves the reclaim weights in place.
@@ -139,6 +144,7 @@ static STATE: hermit_sync::InterruptTicketMutex<State> = hermit_sync::InterruptT
 		was_runnable: [false; 3],
 		active: false,
 		lease_until: 0,
+		next_timer_us: 0,
 		lease_expired: false,
 		emergency: false,
 		generation: 1,
@@ -343,7 +349,9 @@ pub fn decide(
 	if !state.active {
 		enforce_lease(&mut state, now);
 		activate_staged(&mut state, now);
-		return (Choice::Fallback, lease_wakeup(now, &state));
+		let wakeup = lease_wakeup(now, &state);
+		state.next_timer_us = wakeup.unwrap_or(0);
+		return (Choice::Fallback, wakeup);
 	}
 	account(
 		&mut state,
@@ -370,7 +378,9 @@ pub fn decide(
 		}
 	}
 	if n == 0 {
-		return (Choice::Fallback, soonest(blocked_deadline, lease_wakeup(now, &state)));
+		let wakeup = soonest(blocked_deadline, lease_wakeup(now, &state));
+		state.next_timer_us = wakeup.unwrap_or(0);
+		return (Choice::Fallback, wakeup);
 	}
 
 	let mut workload_runnable = [false; 3];
@@ -388,7 +398,9 @@ pub fn decide(
 		pick_workload(&state, runnable)
 	};
 	let Some((id, class)) = chosen else {
-		return (Choice::Fallback, soonest(blocked_deadline, lease_wakeup(now, &state)));
+		let wakeup = soonest(blocked_deadline, lease_wakeup(now, &state));
+		state.next_timer_us = wakeup.unwrap_or(0);
+		return (Choice::Fallback, wakeup);
 	};
 	if let Some(index) = rr_index(class) {
 		if let Some(ticket) = ticket_of(&state, id) {
@@ -401,7 +413,17 @@ pub fn decide(
 		Choice::Switch(id)
 	};
 	let preempt_at = preempt_at(now, blocked_deadline, &state, class);
+	state.next_timer_us = preempt_at;
 	(choice, Some(preempt_at))
+}
+
+/// Preserve the active preemption or lease deadline when another subsystem
+/// re-arms the APIC oneshot timer between scheduler entries.
+pub fn timer_deadline(wakeup: Option<u64>) -> Option<u64> {
+	let state = STATE.lock();
+	let next = (state.next_timer_us > 0).then_some(state.next_timer_us);
+	let lease = (state.lease_until > 0).then_some(state.lease_until);
+	soonest(wakeup, soonest(next, lease))
 }
 
 fn preempt_at(now: u64, blocked_deadline: Option<u64>, state: &State, class: u8) -> u64 {
@@ -576,11 +598,16 @@ fn account(state: &mut State, now: u64, current_id: TaskId, current_class: u8, b
 		state.last_account_us = now;
 		return;
 	}
-	let delta = now.saturating_sub(state.last_account_us);
+	let raw_delta = now.saturating_sub(state.last_account_us);
 	state.last_account_us = now;
-	if delta == 0 || !bill_current {
+	if raw_delta == 0 || !bill_current {
 		return;
 	}
+	let delta = if raw_delta > MAX_SLICE_US {
+		QUANTUM_US
+	} else {
+		raw_delta
+	};
 	if current_class == 0 {
 		state.system_charged = state.system_charged.saturating_add(delta);
 		return;

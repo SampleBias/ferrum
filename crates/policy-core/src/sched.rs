@@ -252,6 +252,32 @@ impl FairScheduler {
         Ok(())
     }
 
+    /// Model a hypervisor stop/resume or severe host deschedule of `duration_us`
+    /// while the guest clock (`rdtsc`) keeps advancing. At most the active
+    /// slice's remaining quantum is billed to the interrupted thread.
+    pub fn pause(&mut self, duration_us: u64) {
+        if duration_us == 0 {
+            return;
+        }
+        if let Some(id) = self.running {
+            let allowed = self.allowed_slice(id);
+            let elapsed = self.now.saturating_sub(self.slice_start);
+            let billable = allowed.saturating_sub(elapsed).min(duration_us);
+            self.account(id, billable);
+            self.now = self.now.saturating_add(duration_us);
+            self.realign_interval();
+            self.finish_slice(id);
+            for thread in &mut self.threads {
+                if thread.state == State::Runnable {
+                    thread.last_cpu_end = self.now;
+                }
+            }
+        } else {
+            self.now = self.now.saturating_add(duration_us);
+            self.realign_interval();
+        }
+    }
+
     fn seek(&mut self, at_us: u64) -> Result<(), SchedError> {
         if at_us < self.now {
             return Err(SchedError::TimeReversal);
@@ -590,5 +616,28 @@ mod tests {
         sched.charge(0, 2_000);
         assert!(sched.group_vruntime(GroupId::Latency) >= sched.group_vruntime(GroupId::Batch));
         assert!(sched.vr.iter().all(|value| *value <= u128::from(u64::MAX)));
+    }
+
+    #[test]
+    fn vm_pause_does_not_bill_stopped_wall_time_or_starve_interrupted_group() {
+        let mut sched = FairScheduler::new();
+        let latency = sched.spawn(GroupId::Latency).unwrap();
+        let batch = sched.spawn(GroupId::Batch).unwrap();
+        let maint = sched.spawn(GroupId::Maintenance).unwrap();
+        // Start a slice on latency, then pause the VM for 5.05 seconds.
+        sched.advance_to(500);
+        sched.pause(5_050_000);
+        assert_eq!(sched.service_us(latency).unwrap(), QUANTUM_US);
+        let before = (
+            sched.service_us(latency).unwrap(),
+            sched.service_us(batch).unwrap(),
+            sched.service_us(maint).unwrap(),
+        );
+        let resumed_at = sched.now_us();
+        sched.advance_to(resumed_at + 300_000);
+        let d_lat = sched.service_us(latency).unwrap() - before.0;
+        let d_bat = sched.service_us(batch).unwrap() - before.1;
+        let d_mnt = sched.service_us(maint).unwrap() - before.2;
+        assert!(d_lat >= 95_000 && d_bat >= 95_000 && d_mnt >= 95_000);
     }
 }
