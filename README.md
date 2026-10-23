@@ -137,10 +137,12 @@ Note: Hermit exits QEMU via `isa-debug-exit`, where raw exit status `3` indicate
 
 ### 3. Scheduler Wake Mode (`sys_policy_set_wake`, KVM A/B)
 
+![Scheduler Wake Mode A/B](docs/figures/wake-mode-ab.png)
+
 - **What it changes:** Mode `3` combines bounded wake credit (a waking group reclaims at most four of its competitor's slices that it missed while idle) with in-class FIFO turns of `4 ms` (a woken thread queues behind its class-mates instead of preempting one mid-slice). Mode `0` is the default and is the scheduler that every label, frozen cut, and sealed result above was measured under.
 - **Real-payload RPC benchmark (`--real-workload`, 6 boots per mode, Ryzen 5 1600 `kvm_amd`):** Under the `latency` profile, RPC **p99 drops from `18.5 ms` to `12.1 ms` (`-35%`)** and p50 from `8.0 ms` to `4.1 ms`, close to one RPC's `~4 ms` solo cost. Under `balanced`, p99 drops from `46.5 ms` to `39.6 ms` and p50 from `16.7 ms` to `6.4 ms`. Batch HMAC throughput stays within `0.7%`.
 - **`jobs-v2` branch sweep (5 under-capacity scenarios × 2 seeds, 2 clean repeats per cell):** p99 falls `25%` on average under `latency` (range `-46%` to `-4%`) and `15%` under `balanced`; p50 falls `39%` under both, and batch CPU is unchanged (`0.998x`). The `balanced`/`latency` p99 gap widens from `2.09x` to `2.43x`, so profile choice still matters. In overload (`s4-u65`) p99 is unchanged, but `latency`-profile p50 rises `7–19%` and batch CPU falls `3–4%`.
-- **Using it:** Pass `--wake=3` to the guest's `--branch` or `--real-workload` modes, or to `aik_controller.branches collect`. Labelling, fitting, and closed-loop scoring refuse records from mixed modes, so a controller on mode `3` needs its own labels and re-validated cuts.
+- **Using it:** Pass `--wake=3` to the guest's `--branch` or `--real-workload` modes, or to `aik_controller.branches collect`. Labelling, fitting, and closed-loop scoring refuse records from mixed modes, so a controller on mode `3` needs its own labels and re-validated cuts. The A/B records are in `data/wake-ab/`, and `python3 tools/plot-wake-ab.py` redraws the figure from them.
 
 ### 4. Policy Explainability & Counterfactual Attribution
 

@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="420" viewBox="0 0 760 420" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+  <rect width="760" height="420" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="28" y="34" font-size="17" font-weight="700" fill="#0f172a">Scheduler Wake Mode A/B: Bounded Wake Credit + In-Class FIFO (KVM)</text>
+  <text x="28" y="54" font-size="12.5" fill="#475569">Same guest binary on AMD Ryzen 5 1600 (kvm_amd). wake=0 is the default scheduler behind every label and sealed result.</text>
+  <g transform="translate(470, 66)">
+    <rect x="0" y="0" width="12" height="12" rx="2" fill="#64748b"/>
+    <text x="18" y="10" font-size="12" font-weight="600" fill="#334155">wake=0 (default)</text>
+    <rect x="130" y="0" width="12" height="12" rx="2" fill="#16a34a"/>
+    <text x="148" y="10" font-size="12" font-weight="600" fill="#334155">wake=3</text>
+  </g>
+
+  <rect x="24" y="86" width="346" height="310" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="40" y="110" font-size="13.5" font-weight="700" fill="#0f172a">A. Real-Payload RPC Benchmark</text>
+  <text x="40" y="128" font-size="11.5" fill="#64748b">HMAC/JSON RPCs, median of 6 boots per mode</text>
+  
+    <text x="120" y="152" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">latency p50</text>
+    <rect x="128" y="140" width="25.8" height="14" rx="3" fill="#64748b"/>
+    <text x="159.8" y="151" font-size="11" fill="#475569">8.0 ms</text>
+    <rect x="128" y="157" width="13.2" height="14" rx="3" fill="#16a34a"/>
+    <text x="147.2" y="168" font-size="11" font-weight="700" fill="#15803d">4.1 ms (-49%)</text>
+    <text x="120" y="196" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">latency p99</text>
+    <rect x="128" y="184" width="59.6" height="14" rx="3" fill="#64748b"/>
+    <text x="193.6" y="195" font-size="11" fill="#475569">18.5 ms</text>
+    <rect x="128" y="201" width="38.9" height="14" rx="3" fill="#16a34a"/>
+    <text x="172.9" y="212" font-size="11" font-weight="700" fill="#15803d">12.1 ms (-35%)</text>
+    <text x="120" y="240" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">balanced p50</text>
+    <rect x="128" y="228" width="53.9" height="14" rx="3" fill="#64748b"/>
+    <text x="187.9" y="239" font-size="11" fill="#475569">16.7 ms</text>
+    <rect x="128" y="245" width="20.7" height="14" rx="3" fill="#16a34a"/>
+    <text x="154.7" y="256" font-size="11" font-weight="700" fill="#15803d">6.4 ms (-62%)</text>
+    <text x="120" y="284" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">balanced p99</text>
+    <rect x="128" y="272" width="150.0" height="14" rx="3" fill="#64748b"/>
+    <text x="284.0" y="283" font-size="11" fill="#475569">46.5 ms</text>
+    <rect x="128" y="289" width="127.9" height="14" rx="3" fill="#16a34a"/>
+    <text x="261.9" y="300" font-size="11" font-weight="700" fill="#15803d">39.6 ms (-15%)</text>
+  <rect x="40" y="322" width="314" height="24" rx="4" fill="#dcfce7"/>
+  <text x="197" y="338" text-anchor="middle" font-size="11.5" font-weight="700" fill="#15803d">A 4 ms RPC now finishes at its ~4 ms solo cost (p50)</text>
+  <text x="40" y="372" font-size="11.5" fill="#475569">Batch HMAC throughput: 1,038 → 1,031 MiB per 2 s (-0.7%)</text>
+
+  <rect x="386" y="86" width="350" height="310" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="402" y="110" font-size="13.5" font-weight="700" fill="#0f172a">B. jobs-v2 Branch Sweep (latency profile p99)</text>
+  <text x="402" y="128" font-size="11.5" fill="#64748b">Geo-mean of seeds 151 and 301, two clean repeats per cell</text>
+  
+    <text x="456" y="152" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">s4-u15</text>
+    <rect x="464" y="140" width="27.5" height="14" rx="3" fill="#64748b"/>
+    <text x="497.5" y="151" font-size="11" fill="#475569">15.4 ms</text>
+    <rect x="464" y="157" width="17.5" height="14" rx="3" fill="#16a34a"/>
+    <text x="487.5" y="168" font-size="11" font-weight="700" fill="#15803d">9.8 ms (-36%)</text>
+    <text x="456" y="188" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">s4-u35</text>
+    <rect x="464" y="176" width="48.2" height="14" rx="3" fill="#64748b"/>
+    <text x="518.2" y="187" font-size="11" fill="#475569">27.0 ms</text>
+    <rect x="464" y="193" width="37.7" height="14" rx="3" fill="#16a34a"/>
+    <text x="507.7" y="204" font-size="11" font-weight="700" fill="#15803d">21.1 ms (-22%)</text>
+    <text x="456" y="224" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">s4-u45</text>
+    <rect x="464" y="212" width="103.5" height="14" rx="3" fill="#64748b"/>
+    <text x="573.5" y="223" font-size="11" fill="#475569">58.0 ms</text>
+    <rect x="464" y="229" width="91.2" height="14" rx="3" fill="#16a34a"/>
+    <text x="561.2" y="240" font-size="11" font-weight="700" fill="#15803d">51.1 ms (-12%)</text>
+    <text x="456" y="260" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">s12-u15</text>
+    <rect x="464" y="248" width="72.6" height="14" rx="3" fill="#64748b"/>
+    <text x="542.6" y="259" font-size="11" fill="#475569">40.6 ms</text>
+    <rect x="464" y="265" width="58.0" height="14" rx="3" fill="#16a34a"/>
+    <text x="528.0" y="276" font-size="11" font-weight="700" fill="#15803d">32.5 ms (-20%)</text>
+    <text x="456" y="296" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">s12-u35</text>
+    <rect x="464" y="284" width="150.0" height="14" rx="3" fill="#64748b"/>
+    <text x="620.0" y="295" font-size="11" fill="#475569">84.0 ms</text>
+    <rect x="464" y="301" width="99.6" height="14" rx="3" fill="#16a34a"/>
+    <text x="569.6" y="312" font-size="11" font-weight="700" fill="#15803d">55.8 ms (-34%)</text>
+  <line x1="402" y1="324" x2="720" y2="324" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="402" y="342" font-size="11.5" font-weight="600" fill="#15803d">Under capacity: p99 -25% latency, -15% balanced; p50 -39%</text>
+  <text x="402" y="360" font-size="11.5" fill="#475569">Batch CPU under capacity: 0.998x of wake=0</text>
+  <text x="402" y="378" font-size="11.5" fill="#b45309">Overload s4-u65: p99 +1–3%, p50 +7–19%, batch −3–4%</text>
+  <text x="402" y="392" font-size="10" fill="#94a3b8">(latency profile, both seeds; not a win when latency work saturates)</text>
+</svg>
