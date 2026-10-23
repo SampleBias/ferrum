@@ -8,12 +8,7 @@
 
 #![forbid(unsafe_code)]
 
-pub mod biosensor;
 pub mod jobs;
-
-pub use biosensor::{
-    biosensor_observation, biosensor_v1, BiosensorMetrics, BiosensorPhaseSpec, BIOSENSOR_V1,
-};
 
 use policy_types::{Observation, MANAGED_ARENA_BYTES};
 

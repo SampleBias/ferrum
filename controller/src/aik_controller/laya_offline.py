@@ -58,20 +58,20 @@ def resource_question() -> dict:
 
 
 def joint_resource_question() -> dict:
-    """Regime-aware joint question for S4 CPU, memory, admission, and biosensor control."""
+    """Regime-aware joint question for S4 CPU, memory, and admission control."""
     return {
         QUESTION_ID: {
             "type": "choice",
             "instructions": (
                 "Select the joint kernel resource profile (CPU weights, cache soft target, and "
-                "admission limits) for the next interval. Maximize capture sensitivity on under-capacity "
-                "plume bursts (queue 1..14), preserve >=95% confirmation specificity under overload "
+                "admission limits) for the next interval. Cut tail latency on under-capacity "
+                "bursts (queue 1..14), preserve >=95% batch CPU and completion under overload "
                 "(queue >=15) or sustained batch demand, and reclaim cache under memory pressure."
             ),
             "criteria": {
-                "balanced": "Clean-air patrol or quiet mixed load (1:1:1 CPU, 64 MiB cache, 16/8 admission, tickless sleep).",
-                "latency": "Under-capacity burst (queue_regime=elevated or light with elevated wait, queue < 15); favor capture sensitivity (6:2:2 CPU, 16/4 admission).",
-                "throughput": "Sustained confirmation/batch backlog with quiet latency queue; favor deep confirmation specificity (2:6:2 CPU, 96 MiB cache, 8/16 admission).",
+                "balanced": "Idle or quiet mixed load (1:1:1 CPU, 64 MiB cache, 16/8 admission, tickless sleep).",
+                "latency": "Under-capacity burst (queue_regime=elevated or light with elevated wait, queue < 15); favor latency service (6:2:2 CPU, 16/4 admission).",
+                "throughput": "Sustained batch backlog with quiet latency queue; favor batch throughput (2:6:2 CPU, 96 MiB cache, 8/16 admission).",
                 "reclaim": "Memory pressure, evictable cache backlog, low headroom, or saturated latency overload (queue >= 15); shed and reclaim (2:2:6 CPU, 32 MiB cache, 4/2 admission).",
             },
         }

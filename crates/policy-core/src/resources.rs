@@ -44,7 +44,7 @@ pub struct InflightLimits {
 }
 
 /// Memory budget envelope that scales `joint-v1` arenas and headroom triggers
-/// from the 512 MiB lab VM down to small embedded biosensor devices (e.g. 64 MiB).
+/// from the 512 MiB lab VM down to constrained embedded devices (e.g. 64 MiB or 32 MiB).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SmallDeviceEnvelope {
     pub total_guest_bytes: u64,
@@ -58,8 +58,8 @@ pub struct SmallDeviceEnvelope {
 
 impl SmallDeviceEnvelope {
     pub const LAB_512M: Self = Self::from_total_guest_bytes(512 * 1024 * 1024);
-    pub const BIOSENSOR_64M: Self = Self::from_total_guest_bytes(64 * 1024 * 1024);
-    pub const BIOSENSOR_32M: Self = Self::from_total_guest_bytes(32 * 1024 * 1024);
+    pub const EMBEDDED_64M: Self = Self::from_total_guest_bytes(64 * 1024 * 1024);
+    pub const EMBEDDED_32M: Self = Self::from_total_guest_bytes(32 * 1024 * 1024);
 
     pub const fn from_total_guest_bytes(total: u64) -> Self {
         let managed = total / 2;
@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn small_device_envelope_scales_biosensor_arenas_proportionally() {
+    fn small_device_envelope_scales_embedded_arenas_proportionally() {
         let lab = SmallDeviceEnvelope::LAB_512M;
         assert_eq!(lab.managed_arena_bytes, 256 * 1024 * 1024);
         assert_eq!(lab.latency_cap_bytes, LATENCY_ARENA_CAP_BYTES);
@@ -395,14 +395,14 @@ mod tests {
         assert_eq!(lab.emergency_headroom_bytes, EMERGENCY_HEADROOM_BYTES);
         assert_eq!(lab.clear_headroom_bytes, CLEAR_HEADROOM_BYTES);
 
-        let bio64 = SmallDeviceEnvelope::BIOSENSOR_64M;
-        assert_eq!(bio64.total_guest_bytes, 64 * 1024 * 1024);
-        assert_eq!(bio64.managed_arena_bytes, 32 * 1024 * 1024);
-        assert_eq!(bio64.latency_cap_bytes, 8 * 1024 * 1024);
-        assert_eq!(bio64.batch_cap_bytes, 8 * 1024 * 1024);
-        assert_eq!(bio64.cache_cap_bytes, 16 * 1024 * 1024);
-        assert_eq!(bio64.scale_cache_target(64 * 1024 * 1024), 8 * 1024 * 1024);
-        assert_eq!(bio64.scale_cache_target(96 * 1024 * 1024), 12 * 1024 * 1024);
-        assert_eq!(bio64.scale_cache_target(32 * 1024 * 1024), 4 * 1024 * 1024);
+        let emb64 = SmallDeviceEnvelope::EMBEDDED_64M;
+        assert_eq!(emb64.total_guest_bytes, 64 * 1024 * 1024);
+        assert_eq!(emb64.managed_arena_bytes, 32 * 1024 * 1024);
+        assert_eq!(emb64.latency_cap_bytes, 8 * 1024 * 1024);
+        assert_eq!(emb64.batch_cap_bytes, 8 * 1024 * 1024);
+        assert_eq!(emb64.cache_cap_bytes, 16 * 1024 * 1024);
+        assert_eq!(emb64.scale_cache_target(64 * 1024 * 1024), 8 * 1024 * 1024);
+        assert_eq!(emb64.scale_cache_target(96 * 1024 * 1024), 12 * 1024 * 1024);
+        assert_eq!(emb64.scale_cache_target(32 * 1024 * 1024), 4 * 1024 * 1024);
     }
 }

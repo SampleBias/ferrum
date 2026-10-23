@@ -8,6 +8,7 @@ members = [
     "crates/workloads",
     "apps/policy-guest",
     "apps/policy-controller",
+    "deployments/air-biosensor",
 ]
 exclude = ["bootstrap", "vendor"]
 

@@ -154,31 +154,31 @@ def explain_distilled(snapshot: dict, cut: float = 14.5) -> dict:
         conf_bp = min(7_800 + excess_x2 * 150, 9_800)
         rationale = (
             f"pending={q_len} >= cut={cut} (margin={margin:+.1f} jobs) "
-            f"-> reclaim (protects >=95% batch confirmation specificity under overload)"
+            f"-> reclaim (protects >=95% batch CPU and completion floor under overload)"
         )
     elif q_len >= 4 or (wait_samples > 0 and wait_us >= 5_000) or (q_len > 0 and maint["runnable"] == 0 and b_len == 0):
         choice = "latency"
-        regime = "plume_trigger_capture"
+        regime = "under_capacity_burst"
         slack_x2 = int(round((cut - q_len) * 2))
         conf_bp = min(7_600 + slack_x2 * 75, 9_700)
         rationale = (
             f"pending={q_len} < cut={cut} (wait={wait_us/1000:.1f}ms) "
-            f"-> latency (6:2:2, 16/4 admission; maximizes plume capture sensitivity)"
+            f"-> latency (6:2:2, 16/4 admission; cuts tail latency on under-capacity burst)"
         )
     elif b_len >= 4 and q_len == 0:
         choice = "throughput"
-        regime = "deep_confirmation"
+        regime = "sustained_batch"
         conf_bp = min(8_200 + b_len * 120, 9_600)
         rationale = (
             f"batch_queue={b_len}>=4 with latency_queue=0 "
-            f"-> throughput (2:6:2, 96MiB cache, 8/16 admission; accelerates confirmation)"
+            f"-> throughput (2:6:2, 96MiB cache, 8/16 admission; accelerates batch throughput)"
         )
     else:
         choice = "balanced"
-        regime = "clean_air_patrol"
+        regime = "idle_coalesced"
         conf_bp = 9_100
         rationale = (
-            f"quiet patrol (lat_q={q_len}, bat_q={b_len}) "
+            f"quiet load (lat_q={q_len}, bat_q={b_len}) "
             f"-> balanced (1:1:1, 64MiB cache, tickless sleep coalescing)"
         )
 

@@ -153,7 +153,7 @@ pub struct AbiStageJointIn {
 }
 
 /// Authoritative kernel-side joint policy and power-residency status read back
-/// by the guest bridge or a freestanding biosensor application.
+/// by the guest bridge or a freestanding application.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AbiJointStatus {

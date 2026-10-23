@@ -579,33 +579,31 @@ record(
 )
 
 el, rc, flines = run_guest_standalone(
-    "biosensor-joint",
-    "-- --biosensor",
-    "FERRUM_BIOSENSOR_OK",
+    "joint-abi",
+    "-- --joint-abi",
+    "FERRUM_JOINT_ABI_OK",
     timeout_s=40,
 )
-bio_summary = "S4 JointV1 ABI & Air Biological Sampling Sensor benchmark passed"
+joint_summary = "S4 JointV1 ABI & tickless idle coalescing passed across all 5 mixed-v1 phases"
 for l in flines:
-    if l.startswith("FERRUM_BIOSENSOR_SUMMARY"):
-        m_bio = re.search(
-            r"static_p99_us=(\d+) adaptive_p99_us=(\d+) static_sensitivity_bp=(\d+) adaptive_sensitivity_bp=(\d+) .* adaptive_specificity_bp=(\d+) .* patrol_wakeups=(\d+) patrol_coalesced=(\d+)",
+    if l.startswith("FERRUM_TICKLESS"):
+        m_tk = re.search(
+            r"idle_residency_us=(\d+) timer_wakeups=(\d+) coalesced_wakeups=(\d+)",
             l,
         )
-        if m_bio:
-            bio_summary = (
-                f"Plume p99 {int(m_bio.group(1))/1000:.1f}ms->{int(m_bio.group(2))/1000:.1f}ms, "
-                f"sensitivity {int(m_bio.group(3))/100:.1f}%->{int(m_bio.group(4))/100:.1f}%, "
-                f"specificity {int(m_bio.group(5))/100:.1f}%, "
-                f"patrol wakeups {m_bio.group(6)} ({m_bio.group(7)} coalesced)"
+        if m_tk:
+            joint_summary = (
+                f"All 5 mixed-v1 phases actuated via AbiStageJointIn; "
+                f"tickless idle={int(m_tk.group(1))/1000:.1f}ms, wakeups={m_tk.group(2)} ({m_tk.group(3)} coalesced)"
             )
 record(
-    "Tier 4 — Real-Data & Soak",
-    "S4 Joint ABI & Air Biosensor benchmark (--biosensor)",
-    'AIK_ACCEL=kvm AIK_APPEND="-- --biosensor" ./tools/run-qemu.sh',
-    rc == 3 and any("FERRUM_BIOSENSOR_OK" in l for l in flines),
+    "Tier 2 — Unikernel Mechanisms",
+    "S4 Joint ABI & tickless coalescing (--joint-abi)",
+    'AIK_ACCEL=kvm AIK_APPEND="-- --joint-abi" ./tools/run-qemu.sh',
+    rc == 3 and any("FERRUM_JOINT_ABI_OK" in l for l in flines),
     el,
     f"raw_exit={rc}",
-    bio_summary,
+    joint_summary,
     flines,
 )
 

@@ -34,5 +34,5 @@
   "temperature": 0.5,
   "min_confidence_bp": 6500,
   "candidate": "configs/candidate-v0-r5-1600.json",
-  "note": "Multi-regime adaptation declaration using features-v1 (schema 2) and joint-v1 criteria so Laya separates elevated under-capacity plume bursts (4..14) from saturated overload (>=15)."
+  "note": "Multi-regime adaptation declaration using features-v1 (schema 2) and joint-v1 criteria so Laya separates elevated under-capacity bursts (4..14) from saturated overload (>=15)."
 }

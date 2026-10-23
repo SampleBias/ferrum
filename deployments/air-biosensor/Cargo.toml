@@ -1,0 +1,25 @@
+[package]
+name = "air-biosensor"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+hermit-policy-abi = { path = "../../crates/hermit-policy-abi" }
+policy-core = { path = "../../crates/policy-core" }
+policy-guest = { path = "../../apps/policy-guest" }
+policy-types = { path = "../../crates/policy-types" }
+policy-wire = { path = "../../crates/policy-wire" }
+workloads = { path = "../../crates/workloads" }
+
+[target.'cfg(target_os = "hermit")'.dependencies]
+hermit = { path = "../../vendor/hermit-rs/hermit", default-features = false, features = [
+    "acpi",
+    "ai-policy",
+    "fsgsbase",
+    "kernel-stack",
+    "pci",
+    "pci-ids",
+    "tcp",
+    "virtio-net",
+] }

@@ -1,19 +1,17 @@
-//! `--biosensor`: Air Biological Sampling Sensor & S4 Joint Kernel Benchmark.
+//! Freestanding Air Biological Sampling Sensor Unikernel Application (`air-biosensor`).
 //!
-//! Exercises the freestanding application ABI (`hermit_policy_abi::AbiStageJointIn`
-//! and `AbiJointStatus`), tickless idle coalescing (`sys_policy_set_tickless`),
-//! live emergency override & clearance (`sys_policy_install_emergency` /
-//! `sys_policy_clear_emergency`), and the 4-phase `biosensor-v1` workload
-//! optimizing:
-//! 1. Battery efficiency (timer wakeup coalescing & CPU sleep residency during patrol)
-//! 2. Analytical sensitivity / recall (plume trigger capture latency & zero frame drops)
-//! 3. Analytical specificity / precision (deep confirmation completion & cache reclamation)
+//! Runs as a separate embedded deployment on top of the Ferrum adaptive kernel
+//! via `hermit_policy_abi` (`AbiStageJointIn`, `AbiJointStatus`) and `policy-core`.
+
+#[cfg(target_os = "hermit")]
+use hermit as _;
 
 #[cfg(target_os = "hermit")]
 use std::env;
 use std::process::ExitCode;
 
-pub fn exit() -> ExitCode {
+fn main() -> ExitCode {
+    println!("FERRUM_START air-biosensor");
     match run() {
         Ok(()) => {
             println!("FERRUM_BIOSENSOR_OK");
@@ -29,7 +27,7 @@ pub fn exit() -> ExitCode {
 
 #[cfg(not(target_os = "hermit"))]
 fn run() -> Result<(), String> {
-    Err("biosensor benchmark runs inside the hermit guest".to_string())
+    Err("air-biosensor deployment runs inside the hermit guest".to_string())
 }
 
 #[cfg(target_os = "hermit")]
@@ -39,6 +37,7 @@ fn run() -> Result<(), String> {
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
     use std::thread;
 
+    use air_biosensor::{biosensor_observation, biosensor_v1, BiosensorMetrics};
     use hermit_policy_abi::{AbiHeader, AbiJointStatus, AbiStageJointIn};
     use policy_core::entries::EntryTable;
     use policy_core::resources::{
@@ -54,7 +53,6 @@ fn run() -> Result<(), String> {
         CLEAR_HOLD_US, MIN_DWELL_US, PROFILE_LEASE_US,
     };
     use policy_wire::{decode_message, open, seal, Direction};
-    use workloads::biosensor::{biosensor_observation, biosensor_v1, BiosensorMetrics};
     use workloads::jobs::{self, JOBS_V2};
 
     const LATENCY: u8 = 1;
@@ -164,7 +162,7 @@ fn run() -> Result<(), String> {
                 _pad0: 0,
                 _pad1: 0,
                 previous_generation: 0,
-                generation: 0,
+                generation: u64::default(),
                 guest_us: 0,
                 lease_until_guest_us: 0,
             };
@@ -224,7 +222,6 @@ fn run() -> Result<(), String> {
         }
     }
 
-    // Optional controller endpoint for connected JointV1 verification.
     let controller_addr = env::args()
         .skip(1)
         .find_map(|arg| arg.strip_prefix("--controller=").map(str::to_string));
@@ -257,21 +254,17 @@ fn run() -> Result<(), String> {
     if unsafe { sys_policy_set_tickless(3) } != 0 {
         return Err("sys_policy_set_tickless(3) failed".to_string());
     }
-    let bio_env = SmallDeviceEnvelope::BIOSENSOR_64M;
+    let bio_env = SmallDeviceEnvelope::EMBEDDED_64M;
     let before_patrol = read_joint()?;
 
-    // Register main control thread temporarily as Latency during low-rate 25 Hz optical patrol
-    // (5 optical checks over 200 ms, sleeping 38 ms in hardware hlt between checks).
     if unsafe { sys_policy_register(LATENCY) } != 0 {
         return Err("patrol register failed".to_string());
     }
     for _ in 0..5 {
-        // 500 us optical scatter check
         let t0 = now_us();
         while now_us().saturating_sub(t0) < 500 {
             std::hint::spin_loop();
         }
-        // Sleep 39.5 ms in hardware hlt with tickless coalescing active
         unsafe { sys_usleep(39_500) };
     }
     let _ = unsafe { sys_policy_register(0) };
@@ -308,8 +301,6 @@ fn run() -> Result<(), String> {
     });
     let mut monitor = PressureMonitor::default();
 
-    // Pre-populate 10 cache entries (8 MiB each = 80 MiB, 9 evictable negative controls + 1 live plume)
-    // and 1 live 4 MiB latency capture ring buffer.
     let live_ring = entries
         .insert(&mut arenas, Pool::Latency, 4 * MIB, false)
         .map_err(|e| format!("ring insert: {e:?}"))?;
@@ -326,7 +317,6 @@ fn run() -> Result<(), String> {
         cache_entries.push(id);
     }
 
-    // Optional connected JointV1 controller session
     let mut connected_session = if let Some(ref addr) = controller_addr {
         let mut stream =
             TcpStream::connect(addr).map_err(|e| format!("connect {addr}: {e}"))?;
@@ -366,7 +356,6 @@ fn run() -> Result<(), String> {
                 latency: j_status.inflight_latency,
                 batch: j_status.inflight_batch,
             });
-            // Evict negative-control cache entries until the 32 MiB soft target is reached
             while arenas.eviction_backlog() > 0 {
                 let freed = entries
                     .evict(&mut arenas, 16 * MIB)
@@ -391,7 +380,6 @@ fn run() -> Result<(), String> {
                 j_status.override_active,
                 reclaimed_bytes / MIB
             );
-            // Verify 3-second hysteresis before clearing emergency
             let healthy_headroom = CLEAR_HEADROOM_BYTES + 16 * MIB;
             if !PressureMonitor::clear_condition(&arenas, healthy_headroom) {
                 return Err("arenas did not reach clear condition after reclamation".to_string());
@@ -417,7 +405,6 @@ fn run() -> Result<(), String> {
                     }
                 }
             }
-            // If connected to external JointV1 controller, exchange snapshot & proposal over wire
             let chosen_profile = if let Some((ref mut stream, ref mut session)) = connected_session
             {
                 session.report_cache_used(arenas.cache_used);
@@ -474,7 +461,6 @@ fn run() -> Result<(), String> {
         }
     }
 
-    // Verify admission ledger enforcement under JointV1 limits
     for _ in 0..4 {
         if admission
             .submit(WorkClass::Latency, 64 * 1024)
@@ -700,7 +686,6 @@ fn run() -> Result<(), String> {
     let (offered_stat, captured_stat) = count_within_valve(&done_stat);
     let (offered_adp, captured_adp) = count_within_valve(&done_adp);
 
-    // Specificity is governed by completing deep confirmation without starvation (>= 95% floor).
     let confirm_retention_bp =
         (adaptive_confirm_blocks.saturating_mul(10_000) / static_confirm_blocks.max(1)) as u32;
     let clutter_offered = 100u32;
@@ -709,7 +694,6 @@ fn run() -> Result<(), String> {
     } else {
         (confirm_retention_bp / 100).min(100)
     };
-    // Under heuristic-v0 overload (which starves batch to ~51%), specificity drops proportionally.
     let clutter_rejected_heur = 51u32;
 
     let metrics_static = BiosensorMetrics::compute(

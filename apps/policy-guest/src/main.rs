@@ -11,13 +11,13 @@ use std::process::ExitCode;
 use policy_guest::exchange;
 use policy_types::BootId;
 
-mod biosensor;
 mod branch;
+mod joint_abi;
 
 fn main() -> ExitCode {
     println!("FERRUM_START policy-guest");
-    if env::args().skip(1).any(|arg| arg == "--biosensor") {
-        return biosensor::exit();
+    if env::args().skip(1).any(|arg| arg == "--joint-abi") {
+        return joint_abi::exit();
     }
     if env::args().skip(1).any(|arg| arg == "--branch") {
         return branch::exit();

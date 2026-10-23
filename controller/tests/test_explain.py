@@ -75,7 +75,7 @@ class ExplainTests(unittest.TestCase):
 
         d_exp = explain_distilled(unit["snapshot"])
         self.assertEqual(d_exp["choice"], "latency")
-        self.assertEqual(d_exp["regime"], "plume_trigger_capture")
+        self.assertEqual(d_exp["regime"], "under_capacity_burst")
         self.assertGreaterEqual(d_exp["confidence_bp"], 6_500)
 
         line = explain_line(unit["snapshot"], self.thresholds, self.cand_r5, self.log_r5)

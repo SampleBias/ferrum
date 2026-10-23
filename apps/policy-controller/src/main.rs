@@ -409,7 +409,7 @@ fn wire(err: WireError) -> String {
 mod tests {
     use super::*;
     use policy_types::{
-        BootId, GroupSample, Hello, ObjectiveId, Pressure, RunMode, PROTOCOL_VERSION,
+        BootId, GroupSample, Hello, ObjectiveId, Pressure, ProfileId, RunMode, PROTOCOL_VERSION,
     };
     use policy_wire::{encode_applied, encode_hello, encode_snapshot, AppliedReport};
     use std::thread;

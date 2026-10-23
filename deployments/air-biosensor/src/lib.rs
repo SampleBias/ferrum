@@ -1,7 +1,10 @@
-//! `biosensor-v1`: Air Biological Sampling Sensor workload and evaluation model.
+//! Embedded Deployment: Air Biological Sampling Sensor (`deployments/air-biosensor`).
 //!
-//! Models a freestanding air biological sampling application running on top of
-//! the Ferrum adaptive unikernel across four operational phases:
+//! This crate is an isolated embedded application deployment built on top of the
+//! generic Ferrum adaptive unikernel (`hermit-policy-abi` and `policy-core`).
+//! The base kernel and core crates remain completely domain-agnostic.
+//!
+//! Models an air biological sampling application across four operational phases:
 //! 1. `clean_air_patrol`: Low-rate optical particle counter polling (battery-critical).
 //! 2. `plume_trigger`: Bio-aerosol fluorescence burst requiring immediate capture
 //!    before the impinger valve deadline (analytical sensitivity / recall critical).
@@ -9,6 +12,8 @@
 //!    pathogens from pollen/dust interferents (analytical specificity / precision critical).
 //! 4. `ring_reclaim`: High dust/saturation memory pressure requiring safe cache
 //!    eviction of negative controls and emergency hysteresis recovery.
+
+#![forbid(unsafe_code)]
 
 use policy_types::{GroupId, Observation, ProfileId, MANAGED_ARENA_BYTES};
 
@@ -165,6 +170,7 @@ pub struct BiosensorMetrics {
 }
 
 impl BiosensorMetrics {
+    #[allow(clippy::too_many_arguments)]
     pub fn compute(
         plumes_offered: u32,
         plumes_captured: u32,
@@ -205,6 +211,8 @@ impl BiosensorMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use policy_core::resources::SmallDeviceEnvelope;
+    use policy_core::{evaluate_distilled, DISTILLED_JOINT_V1};
 
     #[test]
     fn biosensor_v1_phases_cover_all_four_joint_profiles() {
@@ -221,11 +229,17 @@ mod tests {
             assert_eq!(obs.groups[0].queue_len, phase.latency_queue);
             assert_eq!(obs.groups[1].queue_len, phase.batch_queue);
             assert_eq!(obs.pressure.emergency, phase.emergency);
+            let decision = evaluate_distilled(&obs, &DISTILLED_JOINT_V1);
+            assert_eq!(decision.profile, phase.expected_profile, "{}", phase.name);
+            assert!(!decision.abstain_low_confidence, "{}", phase.name);
         }
     }
 
     #[test]
-    fn metrics_compute_sensitivity_and_specificity_in_basis_points() {
+    fn metrics_and_64m_envelope_fit_air_biosensor_budget() {
+        let env = SmallDeviceEnvelope::EMBEDDED_64M;
+        assert_eq!(env.total_guest_bytes, 64 * 1024 * 1024);
+        assert_eq!(env.cache_cap_bytes, 16 * 1024 * 1024);
         let m = BiosensorMetrics::compute(20, 20, 24, 24, 14, 236, 485_000, 48 * 1024 * 1024);
         assert_eq!(m.sensitivity_bp, 10_000);
         assert_eq!(m.specificity_bp, 10_000);

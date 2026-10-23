@@ -15,5 +15,5 @@
   "evictable_backlog_bytes": 33554432,
   "min_headroom_bytes": 67108864,
   "trend_alpha_bp": 5000,
-  "note": "Multi-regime telemetry schema separating under-capacity plume bursts (4..14) from overload saturation (>=15) and exposing numeric wait, completion, and headroom signals for Laya."
+  "note": "Multi-regime telemetry schema separating under-capacity bursts (4..14) from overload saturation (>=15) and exposing numeric wait, completion, and headroom signals for Laya."
 }

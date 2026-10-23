@@ -12,12 +12,12 @@ use policy_types::{GroupId, Observation, ProfileId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DistilledRegime {
-    /// Low ambient load; coalesce timer wakeups and hold balanced 1:1:1 patrol.
-    CleanAirPatrol,
-    /// Under-capacity plume/RPC burst (`pending < cut`); boost latency capture (`6:2:2`).
-    PlumeTriggerCapture,
-    /// Sustained batch/confirmation backlog with latency slack; boost confirmation (`2:6:2`, 96 MiB cache).
-    DeepConfirmation,
+    /// Low ambient load; coalesce timer wakeups and hold balanced 1:1:1 baseline.
+    IdleCoalesced,
+    /// Under-capacity burst (`pending < cut`); boost latency class (`6:2:2`).
+    UnderCapacityBurst,
+    /// Sustained batch backlog with latency slack; boost batch class (`2:6:2`, 96 MiB cache).
+    SustainedBatch,
     /// Memory pressure, cache backlog, or latency queue overload (`pending >= cut`); shed/reclaim (`2:2:6`).
     OverloadOrReclaim,
 }
@@ -25,9 +25,9 @@ pub enum DistilledRegime {
 impl DistilledRegime {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::CleanAirPatrol => "clean_air_patrol",
-            Self::PlumeTriggerCapture => "plume_trigger_capture",
-            Self::DeepConfirmation => "deep_confirmation",
+            Self::IdleCoalesced => "idle_coalesced",
+            Self::UnderCapacityBurst => "under_capacity_burst",
+            Self::SustainedBatch => "sustained_batch",
             Self::OverloadOrReclaim => "overload_or_reclaim",
         }
     }
@@ -37,11 +37,11 @@ impl DistilledRegime {
 pub struct DistilledJointModel {
     /// Twice the overload queue cut (`29` = `14.5` pending jobs).
     pub overload_cut_times_two: u32,
-    /// Minimum latency queue depth to trigger capture boost without wait samples.
+    /// Minimum latency queue depth to trigger latency boost without wait samples.
     pub latency_queue_elevated: u32,
-    /// Minimum latency wait (microseconds) to trigger capture boost under capacity.
+    /// Minimum latency wait (microseconds) to trigger latency boost under capacity.
     pub latency_wait_elevated_us: u64,
-    /// Minimum batch queue depth to trigger deep confirmation (`throughput`).
+    /// Minimum batch queue depth to trigger batch throughput (`throughput`).
     pub batch_queue_high: u32,
     /// Managed arena usage ratio (basis points) that triggers reclamation.
     pub memory_pressure_bp: u16,
@@ -110,7 +110,7 @@ pub fn evaluate_distilled(obs: &Observation, model: &DistilledJointModel) -> Dis
     }
 
     // Overload regime: latency queue at or above the 14.5 cut sheds latency priority
-    // to protect >= 95% batch confirmation specificity and completion floor.
+    // to protect the >= 95% batch CPU and completion floor.
     if u64::from(pending_x2) >= u64::from(model.overload_cut_times_two) {
         let excess = pending_x2.saturating_sub(model.overload_cut_times_two);
         let conf = (7_800u32 + excess.saturating_mul(150)).min(9_800) as u16;
@@ -123,8 +123,8 @@ pub fn evaluate_distilled(obs: &Observation, model: &DistilledJointModel) -> Dis
         };
     }
 
-    // Under-capacity plume/RPC burst regime: elevate latency capture when queue
-    // is elevated, wait exceeds threshold, or solo arrival is pending.
+    // Under-capacity burst regime: elevate latency class when queue is elevated,
+    // wait exceeds threshold, or solo arrival is pending.
     let wait_elevated =
         latency.wait_samples > 0 && latency.max_wait_us >= model.latency_wait_elevated_us;
     let solo_pending =
@@ -134,30 +134,30 @@ pub fn evaluate_distilled(obs: &Observation, model: &DistilledJointModel) -> Dis
         let conf = (7_600u32 + slack.saturating_mul(75)).min(9_700) as u16;
         return DistilledDecision {
             profile: ProfileId::Latency,
-            regime: DistilledRegime::PlumeTriggerCapture,
+            regime: DistilledRegime::UnderCapacityBurst,
             confidence_bp: conf,
             abstain_low_confidence: conf < model.min_confidence_bp,
             margin_jobs_times_two: margin_x2,
         };
     }
 
-    // Deep confirmation regime: sustained batch demand with quiet latency queue.
+    // Sustained batch regime: sustained batch demand with quiet latency queue.
     if batch.queue_len >= model.batch_queue_high && latency.queue_len == 0 {
         let conf = (8_200u32 + batch.queue_len.saturating_mul(120)).min(9_600) as u16;
         return DistilledDecision {
             profile: ProfileId::Throughput,
-            regime: DistilledRegime::DeepConfirmation,
+            regime: DistilledRegime::SustainedBatch,
             confidence_bp: conf,
             abstain_low_confidence: conf < model.min_confidence_bp,
             margin_jobs_times_two: margin_x2,
         };
     }
 
-    // Clean-air patrol / balanced baseline.
+    // Idle coalesced / balanced baseline.
     let conf = 9_100u16;
     DistilledDecision {
         profile: ProfileId::Balanced,
-        regime: DistilledRegime::CleanAirPatrol,
+        regime: DistilledRegime::IdleCoalesced,
         confidence_bp: conf,
         abstain_low_confidence: conf < model.min_confidence_bp,
         margin_jobs_times_two: margin_x2,
@@ -183,11 +183,11 @@ mod tests {
     #[test]
     fn distilled_joint_policy_matches_all_mixed_v1_phases() {
         let expected = [
-            ("burst", ProfileId::Latency, DistilledRegime::PlumeTriggerCapture),
-            ("steady", ProfileId::Throughput, DistilledRegime::DeepConfirmation),
-            ("idle", ProfileId::Balanced, DistilledRegime::CleanAirPatrol),
+            ("burst", ProfileId::Latency, DistilledRegime::UnderCapacityBurst),
+            ("steady", ProfileId::Throughput, DistilledRegime::SustainedBatch),
+            ("idle", ProfileId::Balanced, DistilledRegime::IdleCoalesced),
             ("memory", ProfileId::Reclaim, DistilledRegime::OverloadOrReclaim),
-            ("recovery", ProfileId::Balanced, DistilledRegime::CleanAirPatrol),
+            ("recovery", ProfileId::Balanced, DistilledRegime::IdleCoalesced),
         ];
         for (phase, (name, profile, regime)) in workloads::mixed_v1().iter().zip(expected) {
             assert_eq!(phase.name, name);
@@ -222,16 +222,6 @@ mod tests {
                 expected,
                 "pending={pending}"
             );
-        }
-    }
-
-    #[test]
-    fn distilled_joint_policy_matches_all_biosensor_v1_phases() {
-        for phase in workloads::biosensor_v1() {
-            let obs = workloads::biosensor_observation(*phase, [100_000, 100_000, 50_000]);
-            let decision = evaluate_distilled(&obs, &DISTILLED_JOINT_V1);
-            assert_eq!(decision.profile, phase.expected_profile, "{}", phase.name);
-            assert!(!decision.abstain_low_confidence, "{}", phase.name);
         }
     }
 }

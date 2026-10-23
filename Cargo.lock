@@ -3,6 +3,19 @@
 version = 4
 
 [[package]]
+name = "air-biosensor"
+version = "0.1.0"
+dependencies = [
+ "hermit",
+ "hermit-policy-abi",
+ "policy-core",
+ "policy-guest",
+ "policy-types",
+ "policy-wire",
+ "workloads",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

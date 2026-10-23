@@ -12,35 +12,35 @@
   </g>
   
     <text x="176" y="117" text-anchor="end" font-size="13" font-weight="600" fill="#1e293b">balanced (1:1:1)</text>
-    <rect x="190" y="95" width="173.1" height="34" rx="4" fill="#2563eb"/>
-    <rect x="363.1" y="95" width="172.9" height="34" fill="#0d9488"/>
-    <rect x="536.0" y="95" width="174.0" height="34" rx="4" fill="#d97706"/>
-    <text x="276.55" y="117" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">332.8 ms (33%)</text>
-    <text x="449.55" y="117" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">332.6 ms (33%)</text>
-    <text x="623.0" y="117" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">334.6 ms (33%)</text>
+    <rect x="190" y="95" width="173.0" height="34" rx="4" fill="#2563eb"/>
+    <rect x="363.0" y="95" width="174.0" height="34" fill="#0d9488"/>
+    <rect x="537.0" y="95" width="173.0" height="34" rx="4" fill="#d97706"/>
+    <text x="276.5" y="117" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">332.7 ms (33%)</text>
+    <text x="450.0" y="117" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">334.7 ms (33%)</text>
+    <text x="623.5" y="117" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">332.7 ms (33%)</text>
     
     <text x="176" y="179" text-anchor="end" font-size="13" font-weight="600" fill="#1e293b">latency (6:2:2)</text>
-    <rect x="190" y="157" width="312.5" height="34" rx="4" fill="#2563eb"/>
-    <rect x="502.5" y="157" width="104.3" height="34" fill="#0d9488"/>
-    <rect x="606.8" y="157" width="103.2" height="34" rx="4" fill="#d97706"/>
-    <text x="346.25" y="179" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">601.0 ms (60%)</text>
-    <text x="554.65" y="179" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">200.6 ms (20%)</text>
-    <text x="658.4" y="179" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">198.4 ms (20%)</text>
+    <rect x="190" y="157" width="312.6" height="34" rx="4" fill="#2563eb"/>
+    <rect x="502.6" y="157" width="103.2" height="34" fill="#0d9488"/>
+    <rect x="605.8000000000001" y="157" width="104.2" height="34" rx="4" fill="#d97706"/>
+    <text x="346.3" y="179" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">601.2 ms (60%)</text>
+    <text x="554.2" y="179" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">198.4 ms (20%)</text>
+    <text x="657.9000000000001" y="179" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">200.4 ms (20%)</text>
     
     <text x="176" y="241" text-anchor="end" font-size="13" font-weight="600" fill="#1e293b">throughput (2:6:2)</text>
-    <rect x="190" y="219" width="104.2" height="34" rx="4" fill="#2563eb"/>
-    <rect x="294.2" y="219" width="312.6" height="34" fill="#0d9488"/>
-    <rect x="606.8" y="219" width="103.2" height="34" rx="4" fill="#d97706"/>
-    <text x="242.1" y="241" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">200.4 ms (20%)</text>
-    <text x="450.5" y="241" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">601.1 ms (60%)</text>
-    <text x="658.4" y="241" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">198.6 ms (20%)</text>
+    <rect x="190" y="219" width="105.2" height="34" rx="4" fill="#2563eb"/>
+    <rect x="295.2" y="219" width="310.5" height="34" fill="#0d9488"/>
+    <rect x="605.7" y="219" width="104.3" height="34" rx="4" fill="#d97706"/>
+    <text x="242.6" y="241" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">202.4 ms (20%)</text>
+    <text x="450.45" y="241" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">597.1 ms (60%)</text>
+    <text x="657.85" y="241" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">200.5 ms (20%)</text>
     
     <text x="176" y="303" text-anchor="end" font-size="13" font-weight="600" fill="#1e293b">reclaim (2:2:6)</text>
-    <rect x="190" y="281" width="104.2" height="34" rx="4" fill="#2563eb"/>
-    <rect x="294.2" y="281" width="104.2" height="34" fill="#0d9488"/>
-    <rect x="398.4" y="281" width="311.6" height="34" rx="4" fill="#d97706"/>
-    <text x="242.1" y="303" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">200.4 ms (20%)</text>
-    <text x="346.3" y="303" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">200.3 ms (20%)</text>
-    <text x="554.2" y="303" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">599.3 ms (60%)</text>
+    <rect x="190" y="281" width="103.3" height="34" rx="4" fill="#2563eb"/>
+    <rect x="293.3" y="281" width="104.2" height="34" fill="#0d9488"/>
+    <rect x="397.5" y="281" width="312.5" height="34" rx="4" fill="#d97706"/>
+    <text x="241.65" y="303" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">198.7 ms (20%)</text>
+    <text x="345.40000000000003" y="303" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">200.3 ms (20%)</text>
+    <text x="553.75" y="303" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">601.0 ms (60%)</text>
     
 </svg>
