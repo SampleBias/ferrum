@@ -66,17 +66,45 @@ class ExplainTests(unittest.TestCase):
         self.assertTrue(cf["feasible"])
         self.assertGreater(cf["p99_speedup_vs_balanced"], 2.0)
 
-        summary = summarize_real_data_benchmarks(ROOT, "r5-1600")
-        self.assertEqual(summary["controllers"]["pending-threshold"]["hits"], 21)
-        self.assertEqual(summary["controllers"]["pending-threshold"]["units"], 21)
-        self.assertEqual(summary["controllers"]["distilled-joint"]["hits"], 21)
-        self.assertEqual(summary["controllers"]["distilled-joint"]["feasible_units"], 21)
-        self.assertEqual(len(summary["case_studies"]), 4)
+        summary_r5 = summarize_real_data_benchmarks(ROOT, "r5-1600")
+        self.assertEqual(summary_r5["controllers"]["pending-threshold"]["hits"], 21)
+        self.assertEqual(summary_r5["controllers"]["pending-threshold"]["units"], 21)
+        self.assertEqual(summary_r5["controllers"]["distilled-joint"]["hits"], 21)
+        self.assertEqual(summary_r5["controllers"]["distilled-joint"]["feasible_units"], 21)
+        self.assertEqual(len(summary_r5["case_studies"]), 4)
+
+        summary_i7 = summarize_real_data_benchmarks(ROOT, "i7-10750h")
+        self.assertEqual(summary_i7["controllers"]["distilled-joint"]["hits"], 21)
+        self.assertEqual(summary_i7["controllers"]["distilled-joint"]["feasible_units"], 21)
+        self.assertEqual(summary_i7["controllers"]["pending-threshold"]["hits"], 20)
 
         d_exp = explain_distilled(unit["snapshot"])
         self.assertEqual(d_exp["choice"], "latency")
         self.assertEqual(d_exp["regime"], "under_capacity_burst")
         self.assertGreaterEqual(d_exp["confidence_bp"], 6_500)
+        self.assertFalse(d_exp["transient_spike_absorbed"])
+
+        # Transient spike (pending = 15..18 with low max_wait_us < 350 ms) is absorbed as latency
+        spike_snap = json.loads(json.dumps(unit["snapshot"]))
+        spike_snap["groups"][0]["queue_len"] = 17
+        spike_snap["groups"][0]["wait_samples"] = 12
+        spike_snap["groups"][0]["max_wait_us"] = 254_000
+        d_spike = explain_distilled(spike_snap)
+        self.assertEqual(d_spike["choice"], "latency")
+        self.assertEqual(d_spike["regime"], "under_capacity_burst")
+        self.assertTrue(d_spike["transient_spike_absorbed"])
+        self.assertLess(d_spike["wait_margin_ms"], 0.0)
+
+        # True sustained overload at pending = 17 with max_wait_us >= 350 ms selects reclaim
+        over_snap = json.loads(json.dumps(unit["snapshot"]))
+        over_snap["groups"][0]["queue_len"] = 17
+        over_snap["groups"][0]["wait_samples"] = 12
+        over_snap["groups"][0]["max_wait_us"] = 486_900
+        d_over = explain_distilled(over_snap)
+        self.assertEqual(d_over["choice"], "reclaim")
+        self.assertEqual(d_over["regime"], "overload_or_reclaim")
+        self.assertFalse(d_over["transient_spike_absorbed"])
+        self.assertGreater(d_over["wait_margin_ms"], 0.0)
 
         line = explain_line(unit["snapshot"], self.thresholds, self.cand_r5, self.log_r5)
         self.assertTrue(line.startswith("EXPLAIN seq="))

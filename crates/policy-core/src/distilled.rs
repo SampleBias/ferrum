@@ -1,9 +1,15 @@
-//! Distilled `no_std` multi-regime joint policy (`DISTILLED_JOINT_V1`).
+//! Distilled `no_std` work-aware multi-regime joint policy (`DISTILLED_JOINT_V1`).
 //!
-//! Combines the multi-regime `features-v1` boundary cuts (`pending < 15` vs
-//! `>= 15` overload shedding) with full 4-profile joint actuation (`balanced`,
-//! `latency`, `throughput`, `reclaim`) across CPU weights, cache soft target,
-//! and per-class admission limits.
+//! Combines `queue_len` (`pending`) and `max_wait_us` to separate:
+//! - Under-capacity bursts (`pending < 14.5`, or transient queue spikes
+//!   `pending in 15..=18` where `max_wait_us < 350_000` µs proves the queue is
+//!   actively draining rather than stalled) -> `ProfileId::Latency` (`6:2:2`).
+//! - Sustained batch demand (`batch_queue >= 4` with `latency_queue == 0`) ->
+//!   `ProfileId::Throughput` (`2:6:2`, 96 MiB cache).
+//! - True sustained overload (`pending >= 15` with `max_wait_us >= 350_000` µs,
+//!   or `pending > 18`) and memory pressure -> `ProfileId::Reclaim` (`2:2:6`,
+//!   32 MiB cache) or `ProfileId::Balanced` under extreme (`> 300` pending)
+//!   CPU-only arrival saturation.
 //!
 //! Executes in `< 5 µs` using deterministic integer/basis-point arithmetic with
 //! calibrated confidence output and selective abstention support.
@@ -14,11 +20,11 @@ use policy_types::{GroupId, Observation, ProfileId};
 pub enum DistilledRegime {
     /// Low ambient load; coalesce timer wakeups and hold balanced 1:1:1 baseline.
     IdleCoalesced,
-    /// Under-capacity burst (`pending < cut`); boost latency class (`6:2:2`).
+    /// Under-capacity burst (`pending < cut`, or transient `15..=18` spike with `max_wait_us < 350 ms`); boost latency class (`6:2:2`).
     UnderCapacityBurst,
     /// Sustained batch backlog with latency slack; boost batch class (`2:6:2`, 96 MiB cache).
     SustainedBatch,
-    /// Memory pressure, cache backlog, or latency queue overload (`pending >= cut`); shed/reclaim (`2:2:6`).
+    /// Memory pressure, cache backlog, or sustained latency overload (`pending >= cut` with `max_wait_us >= 350 ms`); shed/reclaim.
     OverloadOrReclaim,
 }
 
@@ -37,6 +43,15 @@ impl DistilledRegime {
 pub struct DistilledJointModel {
     /// Twice the overload queue cut (`29` = `14.5` pending jobs).
     pub overload_cut_times_two: u32,
+    /// Maximum pending jobs (`18`) eligible for transient-spike absorption when
+    /// `max_wait_us < overload_wait_floor_us`.
+    pub transient_spike_max_jobs: u32,
+    /// Minimum `max_wait_us` (`350_000` µs = `350 ms`) required to classify a
+    /// `15..=18` job queue as true sustained overload rather than a draining burst.
+    pub overload_wait_floor_us: u64,
+    /// Pending jobs threshold (`300`) above which extreme CPU-only saturation
+    /// selects `Balanced` (`1:1:1`) to avoid `Reclaim` admission/eviction overhead.
+    pub extreme_saturation_jobs: u32,
     /// Minimum latency queue depth to trigger latency boost without wait samples.
     pub latency_queue_elevated: u32,
     /// Minimum latency wait (microseconds) to trigger latency boost under capacity.
@@ -56,6 +71,9 @@ pub struct DistilledJointModel {
 
 pub const DISTILLED_JOINT_V1: DistilledJointModel = DistilledJointModel {
     overload_cut_times_two: 29,
+    transient_spike_max_jobs: 18,
+    overload_wait_floor_us: 350_000,
+    extreme_saturation_jobs: 300,
     latency_queue_elevated: 4,
     latency_wait_elevated_us: 5_000,
     batch_queue_high: 4,
@@ -72,6 +90,8 @@ pub struct DistilledDecision {
     pub confidence_bp: u16,
     pub abstain_low_confidence: bool,
     pub margin_jobs_times_two: i32,
+    pub wait_margin_us: i64,
+    pub transient_spike_absorbed: bool,
 }
 
 pub fn evaluate_distilled(obs: &Observation, model: &DistilledJointModel) -> DistilledDecision {
@@ -97,6 +117,7 @@ pub fn evaluate_distilled(obs: &Observation, model: &DistilledJointModel) -> Dis
     let pending_x2 = latency.queue_len.saturating_mul(2);
     let margin_x2 = (pending_x2 as i64 - i64::from(model.overload_cut_times_two))
         .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+    let wait_margin_us = latency.max_wait_us as i64 - model.overload_wait_floor_us as i64;
 
     if memory_hot {
         let conf = if obs.pressure.emergency { 9_900 } else { 9_400 };
@@ -106,38 +127,67 @@ pub fn evaluate_distilled(obs: &Observation, model: &DistilledJointModel) -> Dis
             confidence_bp: conf,
             abstain_low_confidence: conf < model.min_confidence_bp,
             margin_jobs_times_two: margin_x2,
+            wait_margin_us,
+            transient_spike_absorbed: false,
         };
     }
 
-    // Overload regime: latency queue at or above the 14.5 cut sheds latency priority
-    // to protect the >= 95% batch CPU and completion floor.
-    if u64::from(pending_x2) >= u64::from(model.overload_cut_times_two) {
+    // Work-aware overload check:
+    // If `pending` is in the transient spike band (`15..=18`) AND wait telemetry
+    // is present (`wait_samples > 0`) with `max_wait_us < 350_000` µs (350 ms),
+    // the queue is actively draining under capacity rather than stalled in overload.
+    let above_queue_cut = u64::from(pending_x2) >= u64::from(model.overload_cut_times_two);
+    let transient_spike = above_queue_cut
+        && latency.queue_len <= model.transient_spike_max_jobs
+        && latency.wait_samples > 0
+        && latency.max_wait_us < model.overload_wait_floor_us;
+
+    if above_queue_cut && !transient_spike {
         let excess = pending_x2.saturating_sub(model.overload_cut_times_two);
         let conf = (7_800u32 + excess.saturating_mul(150)).min(9_800) as u16;
+        let profile = if latency.queue_len > model.extreme_saturation_jobs {
+            ProfileId::Balanced
+        } else {
+            ProfileId::Reclaim
+        };
         return DistilledDecision {
-            profile: ProfileId::Reclaim,
+            profile,
             regime: DistilledRegime::OverloadOrReclaim,
             confidence_bp: conf,
             abstain_low_confidence: conf < model.min_confidence_bp,
             margin_jobs_times_two: margin_x2,
+            wait_margin_us,
+            transient_spike_absorbed: false,
         };
     }
 
     // Under-capacity burst regime: elevate latency class when queue is elevated,
-    // wait exceeds threshold, or solo arrival is pending.
+    // wait exceeds threshold, a transient spike was absorbed, or solo arrival is pending.
     let wait_elevated =
         latency.wait_samples > 0 && latency.max_wait_us >= model.latency_wait_elevated_us;
     let solo_pending =
         latency.queue_len > 0 && maintenance.runnable == 0 && batch.queue_len == 0;
-    if latency.queue_len >= model.latency_queue_elevated || wait_elevated || solo_pending {
-        let slack = model.overload_cut_times_two.saturating_sub(pending_x2);
-        let conf = (7_600u32 + slack.saturating_mul(75)).min(9_700) as u16;
+    if transient_spike
+        || latency.queue_len >= model.latency_queue_elevated
+        || wait_elevated
+        || solo_pending
+    {
+        let conf = if transient_spike {
+            let wait_slack_ms =
+                (model.overload_wait_floor_us.saturating_sub(latency.max_wait_us) / 1_000) as u32;
+            (7_400u32 + wait_slack_ms.saturating_mul(8)).min(9_200) as u16
+        } else {
+            let slack = model.overload_cut_times_two.saturating_sub(pending_x2);
+            (7_600u32 + slack.saturating_mul(75)).min(9_700) as u16
+        };
         return DistilledDecision {
             profile: ProfileId::Latency,
             regime: DistilledRegime::UnderCapacityBurst,
             confidence_bp: conf,
             abstain_low_confidence: conf < model.min_confidence_bp,
             margin_jobs_times_two: margin_x2,
+            wait_margin_us,
+            transient_spike_absorbed: transient_spike,
         };
     }
 
@@ -150,6 +200,8 @@ pub fn evaluate_distilled(obs: &Observation, model: &DistilledJointModel) -> Dis
             confidence_bp: conf,
             abstain_low_confidence: conf < model.min_confidence_bp,
             margin_jobs_times_two: margin_x2,
+            wait_margin_us,
+            transient_spike_absorbed: false,
         };
     }
 
@@ -161,6 +213,8 @@ pub fn evaluate_distilled(obs: &Observation, model: &DistilledJointModel) -> Dis
         confidence_bp: conf,
         abstain_low_confidence: conf < model.min_confidence_bp,
         margin_jobs_times_two: margin_x2,
+        wait_margin_us,
+        transient_spike_absorbed: false,
     }
 }
 
@@ -223,5 +277,34 @@ mod tests {
                 "pending={pending}"
             );
         }
+    }
+
+    #[test]
+    fn transient_queue_spike_with_low_wait_is_not_misclassified_as_overload() {
+        // Transient spike: pending = 15..=18 with max_wait_us = 240 ms (< 350 ms floor)
+        for pending in 15..=18 {
+            let mut spike = Observation::quiet(1_000_000);
+            spike.groups[0].queue_len = pending;
+            spike.groups[0].wait_samples = 12;
+            spike.groups[0].max_wait_us = 240_000;
+            spike.groups[1].queue_len = 3;
+            let decision = evaluate_distilled(&spike, &DISTILLED_JOINT_V1);
+            assert_eq!(decision.profile, ProfileId::Latency, "pending={pending}");
+            assert_eq!(decision.regime, DistilledRegime::UnderCapacityBurst);
+            assert!(decision.transient_spike_absorbed);
+            assert!(decision.wait_margin_us < 0);
+        }
+
+        // True sustained overload at the same queue depth: pending = 17 with max_wait_us = 486.9 ms (>= 350 ms floor)
+        let mut overload = Observation::quiet(1_000_000);
+        overload.groups[0].queue_len = 17;
+        overload.groups[0].wait_samples = 12;
+        overload.groups[0].max_wait_us = 486_900;
+        overload.groups[1].queue_len = 3;
+        let over_dec = evaluate_distilled(&overload, &DISTILLED_JOINT_V1);
+        assert_eq!(over_dec.profile, ProfileId::Reclaim);
+        assert_eq!(over_dec.regime, DistilledRegime::OverloadOrReclaim);
+        assert!(!over_dec.transient_spike_absorbed);
+        assert!(over_dec.wait_margin_us > 0);
     }
 }

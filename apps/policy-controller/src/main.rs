@@ -232,12 +232,14 @@ fn serve(stream: &mut TcpStream, lab: &Lab, rounds: u32) -> Result<(), String> {
             ControllerPolicy::DistilledJoint => {
                 let d = evaluate_distilled(&obs, &DISTILLED_JOINT_V1);
                 println!(
-                    "EXPLAIN seq={} controller=distilled-joint choice={} regime={} confidence_bp={} margin_jobs={:+.1}",
+                    "EXPLAIN seq={} controller=distilled-joint choice={} regime={} confidence_bp={} margin_jobs={:+.1} wait_margin_ms={:+.1} transient_spike={}",
                     snapshot.request_seq,
                     d.profile.as_str(),
                     d.regime.as_str(),
                     d.confidence_bp,
-                    f64::from(d.margin_jobs_times_two) / 2.0
+                    f64::from(d.margin_jobs_times_two) / 2.0,
+                    d.wait_margin_us as f64 / 1000.0,
+                    d.transient_spike_absorbed
                 );
                 (
                     d.profile,

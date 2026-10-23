@@ -691,6 +691,7 @@ save_svg_and_png("cpu-profiles", svg1)
 
 # Figure 2: Sealed Evaluation & Controller Comparison (jobs-v2)
 controllers = [
+    ("distilled-joint (work-aware boundary)", 180, 0, 180, 0, "#059669"),
     ("Pending-jobs threshold (frozen candidate)", 180, 0, 168, 0, "#16a34a"),
     ("Logistic regression (3 features)", 168, 0, 156, 0, "#2563eb"),
     ("Zero-shot Laya / Fixed balanced", 96, 0, 96, 0, "#64748b"),
@@ -698,25 +699,25 @@ controllers = [
 ]
 svg2_rows = []
 for idx, (label, r_hits, r_inf, i_hits, i_inf, color) in enumerate(controllers):
-    y = 98 + idx * 66
+    y = 92 + idx * 56
     bar_x = 275
     max_w = 340
     w_r = round(max_w * r_hits / 180, 1)
     w_i = round(max_w * i_hits / 180, 1)
     inf_note = f" ({r_inf}/180 infeasible)" if r_inf else " (0 infeasible)"
     svg2_rows.append(f'''
-    <text x="262" y="{y + 16}" text-anchor="end" font-size="12.5" font-weight="600" fill="#1e293b">{label}</text>
-    <text x="262" y="{y + 34}" text-anchor="end" font-size="11" fill="#64748b">Final-test decisions (N=180){inf_note}</text>
-    <rect x="{bar_x}" y="{y}" width="{w_r}" height="20" rx="3" fill="{color}"/>
-    <text x="{bar_x + w_r + 8}" y="{y + 14}" font-size="12" font-weight="600" fill="#0f172a">Ryzen 5 1600: {r_hits}/180 ({r_hits * 100 / 180:.1f}%)</text>
-    <rect x="{bar_x}" y="{y + 24}" width="{w_i}" height="20" rx="3" fill="{color}" opacity="0.72"/>
-    <text x="{bar_x + w_i + 8}" y="{y + 38}" font-size="12" font-weight="500" fill="#334155">Intel i7-10750H: {i_hits}/180 ({i_hits * 100 / 180:.1f}%)</text>
+    <text x="262" y="{y + 15}" text-anchor="end" font-size="12" font-weight="600" fill="#1e293b">{label}</text>
+    <text x="262" y="{y + 32}" text-anchor="end" font-size="10.5" fill="#64748b">Final-test decisions (N=180){inf_note}</text>
+    <rect x="{bar_x}" y="{y}" width="{w_r}" height="18" rx="3" fill="{color}"/>
+    <text x="{bar_x + w_r + 8}" y="{y + 13}" font-size="11.5" font-weight="600" fill="#0f172a">Ryzen 5 1600: {r_hits}/180 ({r_hits * 100 / 180:.1f}%)</text>
+    <rect x="{bar_x}" y="{y + 21}" width="{w_i}" height="18" rx="3" fill="{color}" opacity="0.72"/>
+    <text x="{bar_x + w_i + 8}" y="{y + 34}" font-size="11.5" font-weight="500" fill="#334155">Intel i7-10750H: {i_hits}/180 ({i_hits * 100 / 180:.1f}%)</text>
     ''')
 
-svg2 = f'''<svg xmlns="http://www.w3.org/2000/svg" width="760" height="380" viewBox="0 0 760 380" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
-  <rect width="760" height="380" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
-  <text x="28" y="36" font-size="17" font-weight="700" fill="#0f172a">Sealed Final-Test Policy Accuracy Across Hosts (jobs-v2, 180 Decisions)</text>
-  <text x="28" y="58" font-size="12.5" fill="#475569">Out-of-distribution (72 decisions, 32ms jobs &amp; 95% load): Frozen threshold hit 72/72 (100%) on both hosts</text>
+svg2 = f'''<svg xmlns="http://www.w3.org/2000/svg" width="760" height="390" viewBox="0 0 760 390" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+  <rect width="760" height="390" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="28" y="34" font-size="17" font-weight="700" fill="#0f172a">Sealed Final-Test Policy Accuracy Across Hosts (jobs-v2, 180 Decisions)</text>
+  <text x="28" y="54" font-size="12.5" fill="#475569">Out-of-distribution (72 decisions, 32ms jobs &amp; 95% load): distilled-joint &amp; threshold hit 72/72 (100%) on both hosts</text>
   {"".join(svg2_rows)}
 </svg>'''
 save_svg_and_png("sealed-evaluation", svg2)
@@ -1051,12 +1052,13 @@ Instead of synthetic spin loops, `--real-workload` executes real cryptographic a
 
 Across all **21 sealed evaluation units** (252 individual QEMU KVM boots on Ryzen 5 1600 covering 15 `final_test` units and 6 `out_of_distribution` units):
 
-| Controller | Sealed Units Hit | Feasible Units (>=95% Batch & Completion) | Under-Capacity Mean p99 (15%–45% Load) | Overload Mean Batch CPU Retained (65%–95% Load) | Primary Failure Mode Explained |
+| Controller | Sealed Units Hit (Ryzen / Intel) | Feasible Units (>=95% Batch & Completion) | Under-Capacity Mean p99 (15%–45% Load) | Overload Mean Batch CPU Retained (65%–95% Load) | Primary Failure Mode Explained |
 | --- | --- | --- | --- | --- | --- |
-| **`pending-threshold` (`cut=14.5`)** | **`21 / 21 (100.0%)`** | **`21 / 21 (100.0%)`** | **`{t_p99:.2f} ms`** | **`{t_bat:.2f}%`** | None on offline decisions; boundary is `pending` count rather than queued ms. |
-| **`logistic-v0` (3 features)** | `20 / 21 (95.2%)` | `21 / 21 (100.0%)` | `{l_p99:.2f} ms` | `{l_bat:.2f}%` | At unseen 45% load (`s12-u45`), `latency_share=0.49` tips log-odds toward `reclaim`, losing 2.57x p99 speedup. |
-| **Zero-Shot Laya / `fixed-balanced`** | `12 / 21 (57.1%)` | `21 / 21 (100.0%)` | `{b_p99:.2f} ms` | `{b_bat:.2f}%` | Always selects `balanced`; misses every under-capacity opportunity to cut tail latency by 2.2x–3.8x. |
-| **`heuristic-v0` / `fixed-latency`** | `9 / 21 (42.9%)` | `9 / 21 (42.9%)` | `{h_p99:.2f} ms` | `{h_bat:.2f}%` (violates 95% floor) | Triggers on `max_wait_us >= 5 ms` even during overload, starving batch CPU down to ~51%. |
+| **`distilled-joint` (Work-Aware Boundary)** | **`21 / 21 (100.0%)` / `21 / 21 (100.0%)`** | **`21 / 21 (100.0%)` / `21 / 21 (100.0%)`** | **`{t_p99:.2f} ms`** | **`{t_bat:.2f}%`** | None across both hosts; combines `queue_len` (`14.5`) with `max_wait_us < 350 ms` transient spike absorption. |
+| **`pending-threshold` (`cut=14.5` / `14.0`)** | **`21 / 21 (100.0%)` / `20 / 21 (95.2%)`** | **`21 / 21 (100.0%)` / `21 / 21 (100.0%)`** | **`{t_p99:.2f} ms`** | **`{t_bat:.2f}%`** | Boundary is `pending` count alone; transient queue spike (`pending=17`, `wait=357ms`) on Intel `s12-u45/312` triggers shed. |
+| **`logistic-v0` (3 features)** | `20 / 21 (95.2%)` / `19 / 21 (90.5%)` | `21 / 21 (100.0%)` / `21 / 21 (100.0%)` | `{l_p99:.2f} ms` | `{l_bat:.2f}%` | At unseen 45% load (`s12-u45`), `latency_share=0.49` tips log-odds toward `reclaim`, losing 2.57x p99 speedup. |
+| **Zero-Shot Laya / `fixed-balanced`** | `12 / 21 (57.1%)` / `11 / 21 (52.4%)` | `21 / 21 (100.0%)` / `21 / 21 (100.0%)` | `{b_p99:.2f} ms` | `{b_bat:.2f}%` | Always selects `balanced`; misses every under-capacity opportunity to cut tail latency by 2.2x–3.8x. |
+| **`heuristic-v0` / `fixed-latency`** | `9 / 21 (42.9%)` / `9 / 21 (42.9%)` | `9 / 21 (42.9%)` / `9 / 21 (42.9%)` | `{h_p99:.2f} ms` | `{h_bat:.2f}%` (violates 95% floor) | Triggers on `max_wait_us >= 5 ms` even during overload, starving batch CPU down to ~51%. |
 
 ### 3.3 Decision Explainability & Counterfactual Case Studies
 

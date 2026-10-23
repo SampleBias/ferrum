@@ -22,7 +22,8 @@
 use std::env;
 use std::process::ExitCode;
 
-use policy_types::ProfileId;
+use policy_core::{evaluate_distilled, DISTILLED_JOINT_V1};
+use policy_types::{Observation, ProfileId};
 use workloads::jobs::{self, JobFamily, JobScenario};
 
 pub fn exit() -> ExitCode {
@@ -48,6 +49,8 @@ enum Choice {
         below: ProfileId,
         above: ProfileId,
     },
+    /// Work-aware distilled joint policy (`DISTILLED_JOINT_V1`).
+    DistilledJoint,
 }
 
 impl Choice {
@@ -55,7 +58,7 @@ impl Choice {
     fn name(&self) -> &'static str {
         match self {
             Choice::Forced(profile) => profile.as_str(),
-            Choice::PendingThreshold { .. } => "candidate",
+            Choice::PendingThreshold { .. } | Choice::DistilledJoint => "candidate",
         }
     }
 
@@ -69,6 +72,18 @@ impl Choice {
                     below
                 }
             }
+            Choice::DistilledJoint => {
+                let mut obs = Observation::quiet(1_000_000);
+                obs.groups[0].queue_len = pending;
+                evaluate_distilled(&obs, &DISTILLED_JOINT_V1).profile
+            }
+        }
+    }
+
+    fn decide_observation(&self, obs: &Observation) -> ProfileId {
+        match *self {
+            Choice::DistilledJoint => evaluate_distilled(obs, &DISTILLED_JOINT_V1).profile,
+            _ => self.decide(obs.groups[0].queue_len),
         }
     }
 }
@@ -143,6 +158,7 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Request, String> {
             below: below.ok_or("--below is required")?,
             above: above.ok_or("--above is required")?,
         },
+        (None, Some("distilled-joint")) => Choice::DistilledJoint,
         (None, Some(other)) => return Err(format!("unknown candidate {other}")),
         (Some(_), Some(_)) => return Err("--profile and --candidate are exclusive".to_string()),
         (None, None) => return Err("--profile or --candidate is required".to_string()),
@@ -445,7 +461,7 @@ fn run() -> Result<(), String> {
         }
         choice => {
             let obs = observe();
-            let profile = choice.decide(obs.groups[0].queue_len);
+            let profile = choice.decide_observation(&obs);
             force(profile)?;
             let applied_us = now_us().saturating_sub(start);
             (obs, Some((profile, applied_us.saturating_sub(decision_us))))
@@ -491,6 +507,27 @@ fn run() -> Result<(), String> {
             latency.max_wait_us,
             latency.cpu_service_us,
             batch.cpu_service_us,
+            profile.as_str()
+        );
+    } else if let (Choice::DistilledJoint, Some((profile, decide_us))) = (request.choice, decided) {
+        let d = evaluate_distilled(&obs, &DISTILLED_JOINT_V1);
+        let margin = f64::from(d.margin_jobs_times_two) / 2.0;
+        let wait_margin_ms = d.wait_margin_us as f64 / 1000.0;
+        println!(
+            "FERRUM_BRANCH_DECISION controller=distilled-joint cut=14.5 wait_floor_us={} pending={} max_wait_us={} transient_spike={} choice={} decide_us={decide_us}",
+            DISTILLED_JOINT_V1.overload_wait_floor_us,
+            latency.queue_len,
+            latency.max_wait_us,
+            d.transient_spike_absorbed,
+            profile.as_str()
+        );
+        println!(
+            "FERRUM_EXPLAIN controller=distilled-joint pending={} cut=14.5 margin={margin:+.1} max_wait_us={} wait_margin_ms={wait_margin_ms:+.1} transient_spike={} regime={} confidence_bp={} choice={}",
+            latency.queue_len,
+            latency.max_wait_us,
+            d.transient_spike_absorbed,
+            d.regime.as_str(),
+            d.confidence_bp,
             profile.as_str()
         );
     }
@@ -582,6 +619,27 @@ mod tests {
         assert_eq!(half.decide(14), ProfileId::Latency);
         assert_eq!(half.decide(15), ProfileId::Reclaim);
         assert_eq!(Choice::Forced(ProfileId::Throughput).decide(500), ProfileId::Throughput);
+    }
+
+    #[test]
+    fn distilled_joint_candidate_absorbs_transient_spike_and_sheds_true_overload() {
+        let request = args(&format!("{UNIT} --candidate=distilled-joint")).unwrap();
+        assert_eq!(request.choice, Choice::DistilledJoint);
+        assert_eq!(request.choice.name(), "candidate");
+
+        let mut spike = Observation::quiet(1_000_000);
+        spike.groups[0].queue_len = 17;
+        spike.groups[0].wait_samples = 12;
+        spike.groups[0].max_wait_us = 250_000;
+        spike.groups[1].queue_len = 3;
+        assert_eq!(request.choice.decide_observation(&spike), ProfileId::Latency);
+
+        let mut overload = Observation::quiet(1_000_000);
+        overload.groups[0].queue_len = 17;
+        overload.groups[0].wait_samples = 12;
+        overload.groups[0].max_wait_us = 486_900;
+        overload.groups[1].queue_len = 3;
+        assert_eq!(request.choice.decide_observation(&overload), ProfileId::Reclaim);
     }
 
     #[test]

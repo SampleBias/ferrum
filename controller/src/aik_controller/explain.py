@@ -120,8 +120,19 @@ def explain_threshold(snapshot: dict, params: dict) -> dict:
     }
 
 
-def explain_distilled(snapshot: dict, cut: float = 14.5) -> dict:
-    """Explain a `distilled-joint` (`DISTILLED_JOINT_V1`) multi-regime decision."""
+def explain_distilled(
+    snapshot: dict,
+    cut: float = 14.5,
+    transient_spike_max_jobs: int = 18,
+    overload_wait_floor_us: int = 350_000,
+    extreme_saturation_jobs: int = 300,
+) -> dict:
+    """Explain a `distilled-joint` (`DISTILLED_JOINT_V1`) work-aware multi-regime decision.
+
+    Combines `queue_len` (`pending`) and `max_wait_us` so transient queue spikes
+    (`pending = 15..=18` with `max_wait_us < 350_000` us) are absorbed as
+    under-capacity bursts rather than misclassified as overload.
+    """
     latency = _group(snapshot, "latency")
     batch = _group(snapshot, "batch")
     maint = _group(snapshot, "maintenance")
@@ -138,6 +149,15 @@ def explain_distilled(snapshot: dict, cut: float = 14.5) -> dict:
     wait_us = int(latency["max_wait_us"])
     wait_samples = int(latency["wait_samples"])
     margin = q_len - cut
+    wait_margin_ms = round((wait_us - overload_wait_floor_us) / 1000.0, 2)
+
+    above_queue_cut = q_len >= cut
+    transient_spike = (
+        above_queue_cut
+        and q_len <= transient_spike_max_jobs
+        and wait_samples > 0
+        and wait_us < overload_wait_floor_us
+    )
 
     if emergency or pressure_bp >= 8_000 or backlog >= 33_554_432 or (cap > 0 and headroom < 67_108_864):
         choice = "reclaim"
@@ -147,24 +167,37 @@ def explain_distilled(snapshot: dict, cut: float = 14.5) -> dict:
             f"memory_pressure={pressure_bp}bp, backlog={backlog // (1024*1024)}MiB, emergency={emergency} "
             f"-> reclaim (2:2:6, 32MiB cache, 4/2 admission)"
         )
-    elif q_len >= cut:
-        choice = "reclaim"
+    elif above_queue_cut and not transient_spike:
+        choice = "balanced" if q_len > extreme_saturation_jobs else "reclaim"
         regime = "overload_or_reclaim"
         excess_x2 = int(round((q_len - cut) * 2))
         conf_bp = min(7_800 + excess_x2 * 150, 9_800)
         rationale = (
-            f"pending={q_len} >= cut={cut} (margin={margin:+.1f} jobs) "
-            f"-> reclaim (protects >=95% batch CPU and completion floor under overload)"
+            f"pending={q_len} >= cut={cut} (margin={margin:+.1f} jobs, wait={wait_us/1000:.1f}ms >= {overload_wait_floor_us/1000:.0f}ms floor) "
+            f"-> {choice} (protects >=95% batch CPU and completion floor under sustained overload)"
         )
-    elif q_len >= 4 or (wait_samples > 0 and wait_us >= 5_000) or (q_len > 0 and maint["runnable"] == 0 and b_len == 0):
+    elif (
+        transient_spike
+        or q_len >= 4
+        or (wait_samples > 0 and wait_us >= 5_000)
+        or (q_len > 0 and maint["runnable"] == 0 and b_len == 0)
+    ):
         choice = "latency"
         regime = "under_capacity_burst"
-        slack_x2 = int(round((cut - q_len) * 2))
-        conf_bp = min(7_600 + slack_x2 * 75, 9_700)
-        rationale = (
-            f"pending={q_len} < cut={cut} (wait={wait_us/1000:.1f}ms) "
-            f"-> latency (6:2:2, 16/4 admission; cuts tail latency on under-capacity burst)"
-        )
+        if transient_spike:
+            wait_slack_ms = max(0, (overload_wait_floor_us - wait_us) // 1_000)
+            conf_bp = min(7_400 + int(wait_slack_ms) * 8, 9_200)
+            rationale = (
+                f"transient spike absorbed: pending={q_len} in 15..{transient_spike_max_jobs} with wait={wait_us/1000:.1f}ms < {overload_wait_floor_us/1000:.0f}ms floor "
+                f"-> latency (6:2:2; avoids false overload shedding)"
+            )
+        else:
+            slack_x2 = int(round((cut - q_len) * 2))
+            conf_bp = min(7_600 + slack_x2 * 75, 9_700)
+            rationale = (
+                f"pending={q_len} < cut={cut} (wait={wait_us/1000:.1f}ms, wait_margin={wait_margin_ms:+.1f}ms) "
+                f"-> latency (6:2:2, 16/4 admission; cuts tail latency on under-capacity burst)"
+            )
     elif b_len >= 4 and q_len == 0:
         choice = "throughput"
         regime = "sustained_batch"
@@ -190,6 +223,10 @@ def explain_distilled(snapshot: dict, cut: float = 14.5) -> dict:
         "pending": q_len,
         "cut": cut,
         "margin_jobs": round(margin, 2),
+        "max_wait_us": wait_us,
+        "overload_wait_floor_us": overload_wait_floor_us,
+        "wait_margin_ms": wait_margin_ms,
+        "transient_spike_absorbed": transient_spike,
         "rationale": rationale,
     }
 
@@ -367,6 +404,7 @@ def summarize_real_data_benchmarks(root: Path, host_tag: str = "r5-1600") -> dic
                 st["overload_batch_retained_pct"].append(cf["batch_retained_bp"] / 100.0)
                 st["overload_completion_pct"].append(cf["completion_median_bp"] / 100.0)
 
+        cf_dist = explain_counterfactual(unit, d_exp["choice"])
         cf_cand = explain_counterfactual(unit, t_exp["choice"])
         cf_bal = explain_counterfactual(unit, "balanced")
         cf_heur = explain_counterfactual(unit, h_exp["choice"])
@@ -377,11 +415,13 @@ def summarize_real_data_benchmarks(root: Path, host_tag: str = "r5-1600") -> dic
             "pending": t_exp["pending"],
             "max_wait_ms": round(t_exp["max_wait_us"] / 1000.0, 2),
             "latency_share": t_exp["latency_share"],
+            "distilled_choice": d_exp["choice"],
             "threshold_choice": t_exp["choice"],
             "logistic_choice": l_exp["choice"],
             "logistic_prob": l_exp["probability"],
             "heuristic_choice": h_exp["choice"],
             "label": unit["label"],
+            "distilled_p99_ms": None if cf_dist["p99_median_us"] is None else round(cf_dist["p99_median_us"] / 1000.0, 2),
             "candidate_p99_ms": None if cf_cand["p99_median_us"] is None else round(cf_cand["p99_median_us"] / 1000.0, 2),
             "balanced_p99_ms": None if cf_bal["p99_median_us"] is None else round(cf_bal["p99_median_us"] / 1000.0, 2),
             "candidate_batch_pct": round(cf_cand["batch_retained_bp"] / 100.0, 2),
@@ -403,10 +443,11 @@ def summarize_real_data_benchmarks(root: Path, host_tag: str = "r5-1600") -> dic
                 "split": split_name,
                 "scenario": unit["scenario"],
                 "seed": unit["seed"],
+                "distilled": d_exp,
                 "threshold": t_exp,
                 "logistic": l_exp,
                 "heuristic": h_exp,
-                "counterfactual": cf_cand,
+                "counterfactual": cf_dist,
             })
 
     summary_controllers = {}
@@ -456,10 +497,12 @@ def main(argv: list[str] | None = None) -> int:
         )
     print("\n=== Representative Explainability Case Studies ===")
     for cs in report["case_studies"]:
+        d = cs["distilled"]
         t = cs["threshold"]
         lg = cs["logistic"]
         cf = cs["counterfactual"]
         print(f"* {cs['scenario']}/{cs['seed']} ({cs['split']}): label={cf['label']}")
+        print(f"    Distilled : {d['rationale']}")
         print(f"    Threshold : {t['rationale']}")
         print(
             f"    Logistic  : choice={lg['choice']} (P={lg['probability']:.3f}, dominant={lg['dominant_feature']}) "

@@ -91,21 +91,22 @@ Instead of synthetic spin loops, `--real-workload` executes real cryptographic a
 
 | Mode | Active Profile | Offered / Completed RPCs | RPC p50 | RPC p95 | RPC p99 | Verified Batch Data (2 s) | Batch Retention |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **Static Baseline** | `balanced (1:1:1)` | `168 / 168 (100%)` | `19.95 ms` | `37.46 ms` | **`49.36 ms`** | `1039 MiB` (`132993` blocks) | `100.0%` |
-| **Adaptive Policy** | `latency (6:2:2)` | `168 / 168 (100%)` | `8.10 ms` | `16.25 ms` | **`23.68 ms`** | `1027 MiB` (`131511` blocks) | **`98.9%`** |
+| **Static Baseline** | `balanced (1:1:1)` | `168 / 168 (100%)` | `16.68 ms` | `39.92 ms` | **`46.92 ms`** | `1022 MiB` (`130820` blocks) | `100.0%` |
+| **Adaptive Policy** | `latency (6:2:2)` | `168 / 168 (100%)` | `7.97 ms` | `15.59 ms` | **`18.18 ms`** | `1036 MiB` (`132683` blocks) | **`101.4%`** |
 
-**Why it works (`FERRUM_EXPLAIN`):** Because offered RPC work is ~34% of one vCPU (`~670 ms` out of `2,000 ms`), `pending` stays below the `14.5` overload cut (`margin = -14.5 jobs`, `regime = under_capacity`). Switching from `1:1:1` to `6:2:2` gives arriving RPC threads 75% share while active so they finish in fewer 2 ms quanta (**cutting p99 latency by 52.0%, or 2.08x faster**), and because the fair scheduler is work-conserving, batch threads immediately reclaim all unused slices (`~1,320 ms` of the 2,000 ms window).
+**Why it works (`FERRUM_EXPLAIN`):** Because offered RPC work is ~34% of one vCPU (`~670 ms` out of `2,000 ms`), `pending` stays below the `14.5` overload cut (`margin = -14.5 jobs`, `regime = under_capacity`). Switching from `1:1:1` to `6:2:2` gives arriving RPC threads 75% share while active so they finish in fewer 2 ms quanta (**cutting p99 latency by 61.3%, or 2.58x faster**), and because the fair scheduler is work-conserving, batch threads immediately reclaim all unused slices (`~1,320 ms` of the 2,000 ms window).
 
 ### 3.2 Sealed Real-Data KVM Benchmark Across Controllers (`jobs-v2`)
 
 Across all **21 sealed evaluation units** (252 individual QEMU KVM boots on Ryzen 5 1600 covering 15 `final_test` units and 6 `out_of_distribution` units):
 
-| Controller | Sealed Units Hit | Feasible Units (>=95% Batch & Completion) | Under-Capacity Mean p99 (15%–45% Load) | Overload Mean Batch CPU Retained (65%–95% Load) | Primary Failure Mode Explained |
+| Controller | Sealed Units Hit (Ryzen / Intel) | Feasible Units (>=95% Batch & Completion) | Under-Capacity Mean p99 (15%–45% Load) | Overload Mean Batch CPU Retained (65%–95% Load) | Primary Failure Mode Explained |
 | --- | --- | --- | --- | --- | --- |
-| **`pending-threshold` (`cut=14.5`)** | **`21 / 21 (100.0%)`** | **`21 / 21 (100.0%)`** | **`71.88 ms`** | **`100.00%`** | None on offline decisions; boundary is `pending` count rather than queued ms. |
-| **`logistic-v0` (3 features)** | `20 / 21 (95.2%)` | `21 / 21 (100.0%)` | `89.83 ms` | `100.00%` | At unseen 45% load (`s12-u45`), `latency_share=0.49` tips log-odds toward `reclaim`, losing 2.57x p99 speedup. |
-| **Zero-Shot Laya / `fixed-balanced`** | `12 / 21 (57.1%)` | `21 / 21 (100.0%)` | `169.01 ms` | `100.00%` | Always selects `balanced`; misses every under-capacity opportunity to cut tail latency by 2.2x–3.8x. |
-| **`heuristic-v0` / `fixed-latency`** | `9 / 21 (42.9%)` | `9 / 21 (42.9%)` | `71.88 ms` | `51.07%` (violates 95% floor) | Triggers on `max_wait_us >= 5 ms` even during overload, starving batch CPU down to ~51%. |
+| **`distilled-joint` (Work-Aware Boundary)** | **`21 / 21 (100.0%)` / `21 / 21 (100.0%)`** | **`21 / 21 (100.0%)` / `21 / 21 (100.0%)`** | **`71.88 ms`** | **`100.00%`** | None across both hosts; combines `queue_len` (`14.5`) with `max_wait_us < 350 ms` transient spike absorption. |
+| **`pending-threshold` (`cut=14.5` / `14.0`)** | **`21 / 21 (100.0%)` / `20 / 21 (95.2%)`** | **`21 / 21 (100.0%)` / `21 / 21 (100.0%)`** | **`71.88 ms`** | **`100.00%`** | Boundary is `pending` count alone; transient queue spike (`pending=17`, `wait=357ms`) on Intel `s12-u45/312` triggers shed. |
+| **`logistic-v0` (3 features)** | `20 / 21 (95.2%)` / `19 / 21 (90.5%)` | `21 / 21 (100.0%)` / `21 / 21 (100.0%)` | `89.83 ms` | `100.00%` | At unseen 45% load (`s12-u45`), `latency_share=0.49` tips log-odds toward `reclaim`, losing 2.57x p99 speedup. |
+| **Zero-Shot Laya / `fixed-balanced`** | `12 / 21 (57.1%)` / `11 / 21 (52.4%)` | `21 / 21 (100.0%)` / `21 / 21 (100.0%)` | `169.01 ms` | `100.00%` | Always selects `balanced`; misses every under-capacity opportunity to cut tail latency by 2.2x–3.8x. |
+| **`heuristic-v0` / `fixed-latency`** | `9 / 21 (42.9%)` / `9 / 21 (42.9%)` | `9 / 21 (42.9%)` / `9 / 21 (42.9%)` | `71.88 ms` | `51.07%` (violates 95% floor) | Triggers on `max_wait_us >= 5 ms` even during overload, starving batch CPU down to ~51%. |
 
 ### 3.3 Decision Explainability & Counterfactual Case Studies
 
@@ -122,16 +123,16 @@ Across all **21 sealed evaluation units** (252 individual QEMU KVM boots on Ryze
 
 | Property | Value |
 | --- | --- |
-| **Recorded At** | `2026-10-23 18:27:47 UTC` |
-| **Git Commit** | `ff554dd` |
+| **Recorded At** | `2026-10-23 18:47:22 UTC` |
+| **Git Commit** | `70b4484` |
 | **Host CPU** | `AMD Ryzen 5 1600 Six-Core Processor` |
 | **KVM Module** | `kvm_amd` |
 | **QEMU Version** | `QEMU emulator version 11.1.2` |
 | **Rust Toolchain** | `rustc 1.94.0 (4a4ef493e 2026-03-02)` |
 | **Python Version** | `Python 3.14.8` |
 | **Loader Artifact** | `artifacts/loader/hermit-loader-x86_64-v0.5.6` (`sha256:185f7ec843a18484…`) |
-| **Guest Artifact** | `target/x86_64-unknown-hermit/release/policy-guest` (`sha256:8af4dde132553373…`) |
-| **Suite Runtime** | `161.35s` (plus recorded 1-hour soak below) |
+| **Guest Artifact** | `target/x86_64-unknown-hermit/release/policy-guest` (`sha256:100c791ccaa7aa66…`) |
+| **Suite Runtime** | `160.54s` (plus recorded 1-hour soak below) |
 
 ---
 
@@ -139,28 +140,28 @@ Across all **21 sealed evaluation units** (252 individual QEMU KVM boots on Ryze
 
 | # | Tier | Test Case | Status | Exit Code | Duration | Measured Outcome |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Tier 1 — Host Suites | **Rust workspace unit & integration tests** | `PASS` | `exit 0` | 3.93s | 85 passed, 0 failed across 6 crates |
-| 2 | Tier 1 — Host Suites | **Python controller, explainability & evaluation suite** | `PASS` | `exit 0` | 21.80s | 131 passed, 0 failed |
+| 1 | Tier 1 — Host Suites | **Rust workspace unit & integration tests** | `PASS` | `exit 0` | 2.90s | 87 passed, 0 failed across 6 crates |
+| 2 | Tier 1 — Host Suites | **Python controller, explainability & evaluation suite** | `PASS` | `exit 0` | 21.85s | 131 passed, 0 failed |
 | 3 | Tier 2 — Unikernel Mechanisms | **CPU fair-share profiles (--fair-demo)** | `PASS` | `raw_exit=3` | 4.54s | All 4 cpu-v1 tuples enforced (latency=601ms, throughput=597ms, reclaim=601ms) |
-| 4 | Tier 2 — Unikernel Mechanisms | **Sleep credit clamp & yield accounting (--fair-credit)** | `PASS` | `raw_exit=3` | 1.51s | Sleeping thread clamped to min vruntime; early yield billed accurately |
+| 4 | Tier 2 — Unikernel Mechanisms | **Sleep credit clamp & yield accounting (--fair-credit)** | `PASS` | `raw_exit=3` | 1.52s | Sleeping thread clamped to min vruntime; early yield billed accurately |
 | 5 | Tier 2 — Unikernel Mechanisms | **Queue transitions across stage (--fair-queue)** | `PASS` | `raw_exit=3` | 3.13s | Thread exit and block/wakeup preserve queue invariants across profile stage |
 | 6 | Tier 2 — Unikernel Mechanisms | **Minimum dwell & renewal (--fair-dwell)** | `PASS` | `raw_exit=3` | 2.95s | 2s dwell rejects early switch; same-profile renewal extends lease without resetting dwell |
 | 7 | Tier 2 — Unikernel Mechanisms | **8-thread 500ms progress bound (--fair-progress)** | `PASS` | `raw_exit=3` | 0.99s | All 8 runnable workload threads (3 latency, 3 batch, 2 maintenance) advanced within 500ms |
 | 8 | Tier 2 — Unikernel Mechanisms | **G5 managed memory, admission & hysteresis (--arenas-demo)** | `PASS` | `raw_exit=3` | 0.45s | Cache evicted in 3x16MiB batches to 32MiB soft target; admission drained to 4; 3s emergency hold cleared |
-| 9 | Tier 2 — Unikernel Mechanisms | **Controller absent at boot (autonomous fallback)** | `PASS` | `raw_exit=3` | 1.64s | FERRUM_NO_CONTROLLER -> stayed at generation 1 on balanced fallback |
-| 10 | Tier 3 — Protocol & Fault Matrix | **Authenticated actuation & 3s lease expiry** | `PASS` | `raw_exit=3, ctrl=0` | 5.72s | stage_delay=3 us, expiry_delay=5 us (target <= 10,000 us) |
+| 9 | Tier 2 — Unikernel Mechanisms | **Controller absent at boot (autonomous fallback)** | `PASS` | `raw_exit=3` | 1.62s | FERRUM_NO_CONTROLLER -> stayed at generation 1 on balanced fallback |
+| 10 | Tier 3 — Protocol & Fault Matrix | **Authenticated actuation & 3s lease expiry** | `PASS` | `raw_exit=3, ctrl=0` | 5.71s | stage_delay=3 us, expiry_delay=4 us (target <= 10,000 us) |
 | 11 | Tier 3 — Protocol & Fault Matrix | **Stale base generation rejected (--stale)** | `PASS` | `raw_exit=3, ctrl=0` | 1.72s | Rejected stale_generation at gen 1; service stayed balanced |
-| 12 | Tier 3 — Protocol & Fault Matrix | **Expired acceptance deadline rejected (--late)** | `PASS` | `raw_exit=3, ctrl=0` | 1.72s | Rejected late proposal; generation stayed 1 on balanced |
+| 12 | Tier 3 — Protocol & Fault Matrix | **Expired acceptance deadline rejected (--late)** | `PASS` | `raw_exit=3, ctrl=0` | 1.73s | Rejected late proposal; generation stayed 1 on balanced |
 | 13 | Tier 3 — Protocol & Fault Matrix | **Emergency override between stage & apply (--stage-race)** | `PASS` | `raw_exit=3, ctrl=0` | 1.72s | Emergency reclaim override dropped staged proposal and held 2:2:6 weights |
-| 14 | Tier 3 — Protocol & Fault Matrix | **Emergency override persists across lease expiry (--emergency)** | `PASS` | `raw_exit=3, ctrl=0` | 6.71s | Reclaim override held across 3s lease expiry and blocked weight mutation |
+| 14 | Tier 3 — Protocol & Fault Matrix | **Emergency override persists across lease expiry (--emergency)** | `PASS` | `raw_exit=3, ctrl=0` | 6.73s | Reclaim override held across 3s lease expiry and blocked weight mutation |
 | 15 | Tier 3 — Protocol & Fault Matrix | **Lost acknowledgment reconnect & replay rejection (--lose-ack)** | `PASS` | `raw_exit=3, ctrl=0` | 1.74s | Recovered generation=2 on reconnect; rejected replayed proposal (identity_mismatch) |
 | 16 | Tier 3 — Protocol & Fault Matrix | **Bad MAC, duplicate key, invalid & oversized frames (--reject-frames)** | `PASS` | `raw_exit=3, ctrl=0` | 1.66s | Refused unauthenticated, duplicate, invalid, and oversized frames at wire boundary |
-| 17 | Tier 3 — Protocol & Fault Matrix | **Controller killed by SIGKILL mid-lease (--hold)** | `PASS` | `raw_exit=3, ctrl=-9` | 5.72s | Guest logged FERRUM_CONTROLLER_LOST, finished latency window, expired lease to balanced |
-| 18 | Tier 3 — Protocol & Fault Matrix | **QEMU stop (5.05s) / cont VM pause resilience** | `PASS` | `raw_exit=3, ctrl=0` | 7.78s | Lease expired on first entry after cont; paused wall time capped at 1 quantum (no starvation) |
-| 19 | Tier 4 — Real-Data & Soak | **Real-payload RPC & HMAC-SHA256 benchmark (--real-workload)** | `PASS` | `raw_exit=3` | 5.45s | RPC p99 cut 49.4ms -> 23.7ms (-52.0%), batch HMAC throughput 98.9% (1027 MiB/2s) |
-| 20 | Tier 4 — Real-Data & Soak | **Closed-loop candidate branch with FERRUM_EXPLAIN (s4-u35/151)** | `PASS` | `raw_exit=3` | 10.65s | pending=2 -> choice=latency in 4 us, completion=100.0%, p99=24904 us |
-| 21 | Tier 2 — Unikernel Mechanisms | **S4 Joint ABI & tickless coalescing (--joint-abi)** | `PASS` | `raw_exit=3` | 4.72s | All 5 mixed-v1 phases actuated via AbiStageJointIn; tickless idle=197.6ms, wakeups=10 (110 coalesced) |
-| 22 | Tier 4 — Real-Data & Soak | **Live lease-renewal soak (--soak-s=60)** | `PASS` | `raw_exit=3, ctrl=0` | 65.10s | FERRUM_SOAK_OK passes=1 rounds=40 (60s window, 0 missed renewals) |
+| 17 | Tier 3 — Protocol & Fault Matrix | **Controller killed by SIGKILL mid-lease (--hold)** | `PASS` | `raw_exit=3, ctrl=-9` | 5.73s | Guest logged FERRUM_CONTROLLER_LOST, finished latency window, expired lease to balanced |
+| 18 | Tier 3 — Protocol & Fault Matrix | **QEMU stop (5.05s) / cont VM pause resilience** | `PASS` | `raw_exit=3, ctrl=0` | 7.89s | Lease expired on first entry after cont; paused wall time capped at 1 quantum (no starvation) |
+| 19 | Tier 4 — Real-Data & Soak | **Real-payload RPC & HMAC-SHA256 benchmark (--real-workload)** | `PASS` | `raw_exit=3` | 5.42s | RPC p99 cut 46.9ms -> 18.2ms (-61.3%), batch HMAC throughput 101.4% (1036 MiB/2s) |
+| 20 | Tier 4 — Real-Data & Soak | **Closed-loop candidate branch with FERRUM_EXPLAIN (s4-u35/151)** | `PASS` | `raw_exit=3` | 10.66s | pending=2 -> choice=latency in 3 us, completion=100.0%, p99=25021 us |
+| 21 | Tier 2 — Unikernel Mechanisms | **S4 Joint ABI & tickless coalescing (--joint-abi)** | `PASS` | `raw_exit=3` | 4.74s | All 5 mixed-v1 phases actuated via AbiStageJointIn; tickless idle=197.7ms, wakeups=10 (110 coalesced) |
+| 22 | Tier 4 — Real-Data & Soak | **Live lease-renewal soak (--soak-s=60)** | `PASS` | `raw_exit=3, ctrl=0` | 65.13s | FERRUM_SOAK_OK passes=1 rounds=40 (60s window, 0 missed renewals) |
 | 23 | Tier 4 — Real-Data & Soak | **Full 1-hour renewal soak (`--soak`, recorded)** | `PASS` | `raw_exit=3, ctrl=0` | 3611.15s | `FERRUM_SOAK_OK passes=26 rounds=2314`, gen 2315, 0 missed renewals |
 
 ---
@@ -179,10 +180,10 @@ AIK_ACCEL=kvm AIK_APPEND="-- --fair-demo" ./tools/run-qemu.sh
 Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
-FERRUM_SCHED window=balanced latency=332673 batch=334667 maintenance=332668
-FERRUM_SCHED window=latency latency=601213 batch=198390 maintenance=200406
-FERRUM_SCHED window=throughput latency=202358 batch=597108 maintenance=200541
-FERRUM_SCHED window=reclaim latency=198693 batch=200314 maintenance=601000
+FERRUM_SCHED window=balanced latency=332653 batch=334654 maintenance=332702
+FERRUM_SCHED window=latency latency=601233 batch=198374 maintenance=200402
+FERRUM_SCHED window=throughput latency=202414 batch=597183 maintenance=200412
+FERRUM_SCHED window=reclaim latency=198407 batch=200397 maintenance=601198
 FERRUM_SCHED_OK
 FERRUM_COMPLETE
 ```
@@ -197,9 +198,9 @@ AIK_ACCEL=kvm AIK_APPEND="-- --fair-credit" ./tools/run-qemu.sh
 Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
-FERRUM_CREDIT sleep latency=4 batch=400004
-FERRUM_CREDIT wake latency=99857 batch=100150
-FERRUM_CREDIT yield latency=199697 batch=200310
+FERRUM_CREDIT sleep latency=4 batch=400003
+FERRUM_CREDIT wake latency=100194 batch=99815
+FERRUM_CREDIT yield latency=199936 batch=200072
 FERRUM_CREDIT_OK
 FERRUM_COMPLETE
 ```
@@ -215,10 +216,10 @@ Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
 FERRUM_ACK kind=applied reason=none profile=throughput previous=1 generation=2
-FERRUM_QUEUE exit generation=2 latency=0 batch=113941 maintenance=36067
+FERRUM_QUEUE exit generation=2 latency=0 batch=113947 maintenance=36060
 FERRUM_ACK kind=applied reason=none profile=reclaim previous=2 generation=3
-FERRUM_QUEUE block generation=3 latency=0 batch=0 maintenance=150002
-FERRUM_QUEUE wake latency=0 batch=49694 maintenance=150315
+FERRUM_QUEUE block generation=3 latency=0 batch=0 maintenance=150009
+FERRUM_QUEUE wake latency=0 batch=49756 maintenance=150247
 FERRUM_QUEUE_OK
 FERRUM_COMPLETE
 ```
@@ -233,11 +234,11 @@ AIK_ACCEL=kvm AIK_APPEND="-- --fair-dwell" ./tools/run-qemu.sh
 Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
-FERRUM_DWELL_APPLIED profile=latency generation=2 guest_us=428125 lease_until=3428122
-FERRUM_DWELL_REJECTED reason=dwell generation=2 guest_us=639868
-FERRUM_DWELL_RENEWED profile=latency previous=2 generation=3 guest_us=1951192 lease_until=4951189
-FERRUM_DWELL_CHANGED profile=throughput previous=3 generation=4 guest_us=2663181
-FERRUM_SCHED window=throughput latency=39725 batch=120214 maintenance=40068
+FERRUM_DWELL_APPLIED profile=latency generation=2 guest_us=432730 lease_until=3432727
+FERRUM_DWELL_REJECTED reason=dwell generation=2 guest_us=644489
+FERRUM_DWELL_RENEWED profile=latency previous=2 generation=3 guest_us=1955819 lease_until=4955816
+FERRUM_DWELL_CHANGED profile=throughput previous=3 generation=4 guest_us=2667814
+FERRUM_SCHED window=throughput latency=39680 batch=120252 maintenance=40077
 FERRUM_DWELL_OK
 FERRUM_COMPLETE
 ```
@@ -252,7 +253,7 @@ AIK_ACCEL=kvm AIK_APPEND="-- --fair-progress" ./tools/run-qemu.sh
 Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
-FERRUM_PROGRESS profile=latency threads=8 window_us=500000 deltas=1:99226,1:100201,1:100193,2:34065,2:32065,2:34069,3:50098,3:50093
+FERRUM_PROGRESS profile=latency threads=8 window_us=500000 deltas=1:100231,1:100178,1:99176,2:34065,2:32059,2:34074,3:50113,3:50106
 FERRUM_PROGRESS_OK
 FERRUM_COMPLETE
 ```
@@ -284,7 +285,7 @@ Captured serial / controller trace:
 FERRUM_START policy-guest
 FERRUM_NO_CONTROLLER Bad address (os error 14)
 FERRUM_FALLBACK profile=balanced generation=1
-FERRUM_SCHED window=balanced latency=332859 batch=334273 maintenance=332870
+FERRUM_SCHED window=balanced latency=334356 batch=332837 maintenance=332808
 FERRUM_FALLBACK_OK
 FERRUM_COMPLETE
 ```
@@ -300,21 +301,21 @@ Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
 FERRUM_ACTIVATED generation=2
-FERRUM_ACK kind=applied reason=none profile=latency previous=1 generation=2 guest_us=566018 lease_until=3566016
-FERRUM_STAGE_DELAY stage_us=566015 activate_us=566018 delay_us=3
-FERRUM_APPLIED profile=latency previous=1 generation=2 guest_us=566018 lease_until=3566016
-FERRUM_SCHED window=latency latency=599696 batch=200477 maintenance=199765
+FERRUM_ACK kind=applied reason=none profile=latency previous=1 generation=2 guest_us=574826 lease_until=3574823
+FERRUM_STAGE_DELAY stage_us=574823 activate_us=574826 delay_us=3
+FERRUM_APPLIED profile=latency previous=1 generation=2 guest_us=574826 lease_until=3574823
+FERRUM_SCHED window=latency latency=601636 batch=198506 maintenance=199771
 FERRUM_CONTROLLER_LOST closed
-FERRUM_ACK kind=lease_expired reason=none profile=balanced previous=2 generation=3 guest_us=3566021 lease_until=0
-FERRUM_EXPIRY_DELAY lease_until=3566016 expired_us=3566021 delay_us=5
-FERRUM_SCHED window=balanced latency=332825 batch=332836 maintenance=334340
+FERRUM_ACK kind=lease_expired reason=none profile=balanced previous=2 generation=3 guest_us=3574827 lease_until=0
+FERRUM_EXPIRY_DELAY lease_until=3574823 expired_us=3574827 delay_us=4
+FERRUM_SCHED window=balanced latency=334417 batch=332795 maintenance=332790
 FERRUM_LEASE_EXPIRED
 FERRUM_SCHED_OK
 FERRUM_COMPLETE
 CTRL: FEATURES schema=1 profile=balanced q=high/empty/empty trend=no_history/no_history/no_history pressure=low backlog=none emergency=clear window_us=1000000
 CTRL: PROPOSAL profile=latency seq=1 window_us=1000000 service=0/0/0
 CTRL: EXPLAIN seq=1 heuristic=latency(latency_queue_or_wait_high)
-CTRL: APPLIED profile=latency generation=2 previous=1 guest_us=566018 lease_until=3566016
+CTRL: APPLIED profile=latency generation=2 previous=1 guest_us=574826 lease_until=3574823
 ```
 
 ### Stale base generation rejected (--stale)
@@ -327,8 +328,8 @@ aik_controller.server --once + AIK_APPEND="-- --stale"
 Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
-FERRUM_SCHED window=balanced latency=334559 batch=332717 maintenance=332725
-FERRUM_ACK kind=rejected reason=stale profile=balanced previous=1 generation=1 guest_us=575075 lease_until=0
+FERRUM_SCHED window=balanced latency=334436 batch=332794 maintenance=332772
+FERRUM_ACK kind=rejected reason=stale profile=balanced previous=1 generation=1 guest_us=567875 lease_until=0
 FERRUM_REPORT kind=reject reason=stale_generation
 FERRUM_STALE_DROPPED
 FERRUM_SCHED_OK
@@ -348,8 +349,8 @@ aik_controller.server --once + AIK_APPEND="-- --late"
 Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
-FERRUM_SCHED window=balanced latency=334338 batch=332814 maintenance=332849
-FERRUM_ACK kind=rejected reason=late profile=balanced previous=1 generation=1 guest_us=561280 lease_until=0
+FERRUM_SCHED window=balanced latency=334482 batch=332739 maintenance=332781
+FERRUM_ACK kind=rejected reason=late profile=balanced previous=1 generation=1 guest_us=565055 lease_until=0
 FERRUM_REPORT kind=reject reason=late
 FERRUM_LATE_DROPPED
 FERRUM_SCHED_OK
@@ -370,10 +371,10 @@ Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
 FERRUM_EMERGENCY generation=2
-FERRUM_ACK kind=emergency reason=none profile=reclaim previous=1 generation=2 guest_us=572357 lease_until=0
+FERRUM_ACK kind=emergency reason=none profile=reclaim previous=1 generation=2 guest_us=572024 lease_until=0
 FERRUM_REPORT kind=reject reason=emergency
-FERRUM_SCHED window=reclaim latency=200901 batch=200560 maintenance=598542
-FERRUM_ACK kind=rejected reason=emergency profile=reclaim previous=2 generation=2 guest_us=576045 lease_until=0
+FERRUM_SCHED window=reclaim latency=200847 batch=200452 maintenance=598701
+FERRUM_ACK kind=rejected reason=emergency profile=reclaim previous=2 generation=2 guest_us=575602 lease_until=0
 FERRUM_STAGE_DROPPED
 FERRUM_SCHED_OK
 FERRUM_COMPLETE
@@ -393,15 +394,15 @@ Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
 FERRUM_ACTIVATED generation=2
-FERRUM_ACK kind=applied reason=none profile=latency previous=1 generation=2 guest_us=572390 lease_until=3572387
-FERRUM_STAGE_DELAY stage_us=572386 activate_us=572390 delay_us=4
-FERRUM_APPLIED profile=latency previous=1 generation=2 guest_us=572390 lease_until=3572387
-FERRUM_SCHED window=latency latency=599480 batch=200522 maintenance=199910
+FERRUM_ACK kind=applied reason=none profile=latency previous=1 generation=2 guest_us=559488 lease_until=3559484
+FERRUM_STAGE_DELAY stage_us=559484 activate_us=559488 delay_us=4
+FERRUM_APPLIED profile=latency previous=1 generation=2 guest_us=559488 lease_until=3559484
+FERRUM_SCHED window=latency latency=601742 batch=198597 maintenance=199645
 FERRUM_CONTROLLER_LOST closed
 FERRUM_EMERGENCY
-FERRUM_SCHED window=reclaim latency=200523 batch=200542 maintenance=598938
+FERRUM_SCHED window=reclaim latency=200596 batch=200624 maintenance=598780
 FERRUM_LEASE_EXPIRED
-FERRUM_SCHED window=reclaim latency=198508 batch=200488 maintenance=601007
+FERRUM_SCHED window=reclaim latency=200566 batch=200627 maintenance=598809
 FERRUM_EMERGENCY_HELD
 FERRUM_SCHED_OK
 FERRUM_COMPLETE
@@ -417,15 +418,15 @@ aik_controller.server --lose-ack + AIK_APPEND="-- --lose-ack"
 Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
-FERRUM_ACK kind=applied reason=none profile=latency previous=1 generation=2 guest_us=540359 lease_until=3540356
+FERRUM_ACK kind=applied reason=none profile=latency previous=1 generation=2 guest_us=536782 lease_until=3536779
 FERRUM_ACK_LOST generation=2
 FERRUM_RECOVERED generation=2 profile=latency
 FERRUM_REPLAY_REJECTED reason=identity_mismatch
-FERRUM_SCHED window=latency latency=601121 batch=200445 maintenance=198436
+FERRUM_SCHED window=latency latency=600994 batch=200528 maintenance=198479
 FERRUM_DUPLICATE_DROPPED
 FERRUM_SCHED_OK
 FERRUM_COMPLETE
-CTRL: HELLO boot=00112233445566778899aabbccddeeff session=fc4daa4a7a70bcfde895b1a96827ac4e
+CTRL: HELLO boot=00112233445566778899aabbccddeeff session=376a3229890a99d38e91837f7c2fa8ca
 CTRL: RECOVERED generation=2 profile=latency
 CTRL: REPLAY_REJECTED reason=identity_mismatch seq=1
 ```
@@ -444,10 +445,10 @@ FERRUM_FRAME_REJECTED unauthenticated
 FERRUM_FRAME_REJECTED duplicate
 FERRUM_FRAME_REJECTED invalid
 FERRUM_FRAME_REJECTED oversized
-FERRUM_SCHED window=balanced latency=334537 batch=332735 maintenance=332731
+FERRUM_SCHED window=balanced latency=332834 batch=332846 maintenance=334321
 FERRUM_FRAMES_OK
 FERRUM_COMPLETE
-CTRL: HELLO boot=00112233445566778899aabbccddeeff session=a838edcd5e716f48c16e814a1d6b8325
+CTRL: HELLO boot=00112233445566778899aabbccddeeff session=bcfa034ef36e11699fc15f8045ea0c27
 CTRL: REJECTED_FRAMES unauthenticated duplicate invalid oversized
 ```
 
@@ -462,14 +463,14 @@ Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
 FERRUM_ACTIVATED generation=2
-FERRUM_ACK kind=applied reason=none profile=latency previous=1 generation=2 guest_us=575012 lease_until=3575009
-FERRUM_STAGE_DELAY stage_us=575009 activate_us=575012 delay_us=3
-FERRUM_APPLIED profile=latency previous=1 generation=2 guest_us=575012 lease_until=3575009
-FERRUM_SCHED window=latency latency=601453 batch=199349 maintenance=199135
+FERRUM_ACK kind=applied reason=none profile=latency previous=1 generation=2 guest_us=579919 lease_until=3579915
+FERRUM_STAGE_DELAY stage_us=579915 activate_us=579919 delay_us=4
+FERRUM_APPLIED profile=latency previous=1 generation=2 guest_us=579919 lease_until=3579915
+FERRUM_SCHED window=latency latency=600672 batch=198710 maintenance=200514
 FERRUM_CONTROLLER_LOST closed
-FERRUM_ACK kind=lease_expired reason=none profile=balanced previous=2 generation=3 guest_us=3575013 lease_until=0
-FERRUM_EXPIRY_DELAY lease_until=3575009 expired_us=3575013 delay_us=4
-FERRUM_SCHED window=balanced latency=332924 batch=334184 maintenance=332894
+FERRUM_ACK kind=lease_expired reason=none profile=balanced previous=2 generation=3 guest_us=3579921 lease_until=0
+FERRUM_EXPIRY_DELAY lease_until=3579915 expired_us=3579921 delay_us=6
+FERRUM_SCHED window=balanced latency=334205 batch=332897 maintenance=332899
 FERRUM_LEASE_EXPIRED
 FERRUM_SCHED_OK
 FERRUM_COMPLETE
@@ -486,14 +487,14 @@ Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
 FERRUM_ACTIVATED generation=2
-FERRUM_ACK kind=applied reason=none profile=latency previous=1 generation=2 guest_us=563267 lease_until=3563264
-FERRUM_STAGE_DELAY stage_us=563264 activate_us=563267 delay_us=3
-FERRUM_APPLIED profile=latency previous=1 generation=2 guest_us=563267 lease_until=3563264
-FERRUM_SCHED window=latency latency=599578 batch=199831 maintenance=200504
+FERRUM_ACK kind=applied reason=none profile=latency previous=1 generation=2 guest_us=571994 lease_until=3571991
+FERRUM_STAGE_DELAY stage_us=571990 activate_us=571994 delay_us=4
+FERRUM_APPLIED profile=latency previous=1 generation=2 guest_us=571994 lease_until=3571991
+FERRUM_SCHED window=latency latency=601538 batch=198484 maintenance=199911
 FERRUM_CONTROLLER_LOST closed
-FERRUM_ACK kind=lease_expired reason=none profile=balanced previous=2 generation=3 guest_us=6680054 lease_until=0
-FERRUM_EXPIRY_DELAY lease_until=3563264 expired_us=6680054 delay_us=3116790
-FERRUM_SCHED window=balanced latency=334270 batch=332853 maintenance=332879
+FERRUM_ACK kind=lease_expired reason=none profile=balanced previous=2 generation=3 guest_us=6676799 lease_until=0
+FERRUM_EXPIRY_DELAY lease_until=3571991 expired_us=6676799 delay_us=3104808
+FERRUM_SCHED window=balanced latency=334389 batch=332816 maintenance=332796
 FERRUM_LEASE_EXPIRED
 FERRUM_SCHED_OK
 FERRUM_COMPLETE
@@ -509,10 +510,10 @@ AIK_ACCEL=kvm AIK_APPEND="-- --real-workload" ./tools/run-qemu.sh
 Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
-FERRUM_REAL_WORKLOAD mode=balanced profile=balanced rpc_passes=209 offered=168 completed=168 completion_bp=10000 p50_us=19955 p95_us=37463 p99_us=49359 batch_blocks=132993 batch_kib=1063944 latency_service_us=680785 batch_service_us=1319213
-FERRUM_EXPLAIN mode=real-workload pending=0 cut=14.5 margin=-14.5 regime=under_capacity max_wait_us=37463 heuristic=latency threshold=latency stage_delay_us=3 generation=2
-FERRUM_REAL_WORKLOAD mode=adaptive profile=latency rpc_passes=209 offered=168 completed=168 completion_bp=10000 p50_us=8096 p95_us=16246 p99_us=23679 batch_blocks=131511 batch_kib=1052088 latency_service_us=682556 batch_service_us=1303402
-FERRUM_REAL_WORKLOAD_SUMMARY balanced_p99_us=49359 adaptive_p99_us=23679 p99_reduction_bp=5202 batch_retained_bp=9888
+FERRUM_REAL_WORKLOAD mode=balanced profile=balanced rpc_passes=205 offered=168 completed=168 completion_bp=10000 p50_us=16684 p95_us=39920 p99_us=46922 batch_blocks=130820 batch_kib=1046560 latency_service_us=678596 batch_service_us=1321404
+FERRUM_EXPLAIN mode=real-workload pending=0 cut=14.5 margin=-14.5 regime=under_capacity max_wait_us=37352 heuristic=latency threshold=latency stage_delay_us=3 generation=2
+FERRUM_REAL_WORKLOAD mode=adaptive profile=latency rpc_passes=205 offered=168 completed=168 completion_bp=10000 p50_us=7972 p95_us=15594 p99_us=18176 batch_blocks=132683 batch_kib=1061464 latency_service_us=672395 batch_service_us=1309565
+FERRUM_REAL_WORKLOAD_SUMMARY balanced_p99_us=46922 adaptive_p99_us=18176 p99_reduction_bp=6126 batch_retained_bp=10142
 FERRUM_REAL_WORKLOAD_OK
 FERRUM_COMPLETE
 ```
@@ -527,11 +528,11 @@ AIK_ACCEL=kvm AIK_APPEND="-- --branch --family=jobs-v2 --scenario=s4-u35 --seed=
 Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
-FERRUM_BRANCH_BEGIN family=jobs-v2 scenario=s4-u35 seed=151 profile=candidate jobs=793 schedule_fnv64=0x7471b8e37368d9f6 spins_per_ms=56239 measured_spins_per_ms=56239
-FERRUM_BRANCH_STATE window_us=1000000 decision_late_us=14 latency_queue=2 latency_runnable=2 latency_service_us=343978 latency_wait_samples=84 latency_max_wait_us=56754 latency_completions=84 batch_queue=3 batch_runnable=3 batch_service_us=656014 batch_completions=1302 maintenance_service_us=0 system_service_us=0
-FERRUM_BRANCH_DECISION controller=pending-threshold cut=14.5 below=latency above=reclaim pending=2 choice=latency decide_us=4
-FERRUM_EXPLAIN controller=pending-threshold pending=2 cut=14.5 margin=-12.5 regime=under_capacity max_wait_us=56754 latency_service_us=343978 batch_service_us=656014 choice=latency
-FERRUM_BRANCH_OUTCOME scenario=s4-u35 seed=151 profile=candidate offered=442 completed=442 completion_bp=10000 p50_us=9980 p90_us=17601 p95_us=20542 p99_us=24904 batch_units=6358 latency_service_us=1783168 batch_service_us=3204541 batch_spins_per_ms=55789
+FERRUM_BRANCH_BEGIN family=jobs-v2 scenario=s4-u35 seed=151 profile=candidate jobs=793 schedule_fnv64=0x7471b8e37368d9f6 spins_per_ms=56185 measured_spins_per_ms=56185
+FERRUM_BRANCH_STATE window_us=1000000 decision_late_us=15 latency_queue=2 latency_runnable=2 latency_service_us=347122 latency_wait_samples=84 latency_max_wait_us=52943 latency_completions=84 batch_queue=3 batch_runnable=3 batch_service_us=652872 batch_completions=1291 maintenance_service_us=0 system_service_us=0
+FERRUM_BRANCH_DECISION controller=pending-threshold cut=14.5 below=latency above=reclaim pending=2 choice=latency decide_us=3
+FERRUM_EXPLAIN controller=pending-threshold pending=2 cut=14.5 margin=-12.5 regime=under_capacity max_wait_us=52943 latency_service_us=347122 batch_service_us=652872 choice=latency
+FERRUM_BRANCH_OUTCOME scenario=s4-u35 seed=151 profile=candidate offered=442 completed=442 completion_bp=10000 p50_us=10113 p90_us=16872 p95_us=20254 p99_us=25021 batch_units=6306 latency_service_us=1793786 batch_service_us=3193871 batch_spins_per_ms=55465
 FERRUM_BRANCH_OK
 ```
 
@@ -545,7 +546,7 @@ AIK_ACCEL=kvm AIK_APPEND="-- --joint-abi" ./tools/run-qemu.sh
 Captured serial / controller trace:
 ```text
 FERRUM_START policy-guest
-FERRUM_TICKLESS window_us=200000 idle_residency_us=197631 timer_wakeups=10 coalesced_wakeups=110 embedded_ram_mib=64
+FERRUM_TICKLESS window_us=200000 idle_residency_us=197718 timer_wakeups=10 coalesced_wakeups=110 embedded_ram_mib=64
 FERRUM_JOINT_ABI phase=burst profile=latency regime=under_capacity_burst confidence_bp=8575 gen=2 weights=6:2:2 cache_target_mib=64 inflight=16/4 override=0
 FERRUM_JOINT_ABI phase=steady profile=throughput regime=sustained_batch confidence_bp=9160 gen=3 weights=2:6:2 cache_target_mib=96 inflight=8/16 override=0
 FERRUM_JOINT_ABI phase=idle profile=balanced regime=idle_coalesced confidence_bp=9100 gen=4 weights=1:1:1 cache_target_mib=64 inflight=16/8 override=0
@@ -565,13 +566,13 @@ aik_controller.server --follow + AIK_APPEND="-- --soak-s=60"
 Captured serial / controller trace:
 ```text
 FERRUM_SOAK limit_us=60000000
-FERRUM_HOLD name=burst profile=latency applies=20 held_us=30000000 first_guest_us=2505140 first_lease_until=5505137 sample_us=32920848
-FERRUM_HOLD name=steady profile=throughput applies=20 held_us=30000000 first_guest_us=34004629 first_lease_until=37004626 sample_us=64420569
+FERRUM_HOLD name=burst profile=latency applies=20 held_us=30000000 first_guest_us=2505259 first_lease_until=5505256 sample_us=32921227
+FERRUM_HOLD name=steady profile=throughput applies=20 held_us=30000000 first_guest_us=34014095 first_lease_until=37014092 sample_us=64430000
 FERRUM_SOAK_PASS passes=1 rounds=40
 FERRUM_SOAK_OK passes=1 rounds=40
 FERRUM_COMPLETE
 CTRL: EXPLAIN seq=40 heuristic=throughput(sustained_batch_demand)
-CTRL: APPLIED profile=throughput generation=41 previous=40 guest_us=64405674 lease_until=67405666
+CTRL: APPLIED profile=throughput generation=41 previous=40 guest_us=64415105 lease_until=67415098
 CTRL: ROUNDS 40
 ```
 
