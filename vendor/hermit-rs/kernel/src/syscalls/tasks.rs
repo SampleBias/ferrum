@@ -79,6 +79,8 @@ pub(super) fn usleep(usecs: u64) {
 		// Not enough time to set a wakeup timer, so just do busy-waiting.
 		let end = arch::processor::get_timestamp() + u64::from(get_frequency()) * usecs;
 		while get_timestamp() < end {
+			#[cfg(feature = "ai-policy")]
+			crate::policy::note_yield();
 			core_scheduler().reschedule();
 		}
 	}
@@ -135,6 +137,8 @@ pub unsafe extern "C" fn sys_clone(id: *mut Tid, func: extern "C" fn(usize), arg
 #[hermit_macro::system(errno)]
 #[unsafe(no_mangle)]
 pub extern "C" fn sys_yield() {
+	#[cfg(feature = "ai-policy")]
+	crate::policy::note_yield();
 	core_scheduler().reschedule();
 }
 
@@ -205,6 +209,13 @@ pub extern "C" fn sys_policy_clear_emergency() -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn sys_policy_set_tickless(mode: u8) -> i32 {
 	crate::policy::set_tickless(mode)
+}
+
+#[cfg(feature = "ai-policy")]
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
+pub extern "C" fn sys_policy_set_wake(mode: u8) -> i32 {
+	crate::policy::set_wake(mode)
 }
 
 #[repr(C)]

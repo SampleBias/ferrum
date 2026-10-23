@@ -7,7 +7,7 @@ Ferrum is a [Hermit](https://github.com/hermit-os)-based Rust unikernel whose re
 The system runs as two paired artifacts over QEMU `virtio-net`:
 
 1. **Hermit Unikernel Guest (`apps/policy-guest` + `vendor/hermit-rs`):**
-   - Implements an opt-in hierarchical fair-share scheduler (`ai-policy` feature) across three workload classes (`latency`, `batch`, `maintenance`) plus a reserved `system` budget, with tickless idle and single-runnable quantum coalescing for constrained devices.
+   - Implements an opt-in hierarchical fair-share scheduler (`ai-policy` feature) across three workload classes (`latency`, `batch`, `maintenance`) plus a reserved `system` budget, with tickless idle and single-runnable quantum coalescing for constrained devices. An opt-in wake mode (`sys_policy_set_wake`, off at boot) adds bounded wake credit and in-class FIFO order; see [docs/03](docs/03-kernel-mechanisms-and-policies.md) and the [wake-mode results](#3-scheduler-wake-mode-sys_policy_set_wake-kvm-ab).
    - Exposes a narrow C ABI (`crates/hermit-policy-abi`: `AbiStageJointIn`, `AbiJointStatus`) that atomically actuates CPU weights, managed cache soft targets, and per-class admission limits (`joint-v1`).
    - Enforces minimum dwell times, generation checks, acceptance deadlines, emergency hysteresis overrides, and automatic fallback to `balanced` if a lease expires or the controller disappears.
 2. **Host Policy Controllers (`controller/` & `apps/policy-controller/`):**
@@ -20,7 +20,7 @@ The system runs as two paired artifacts over QEMU `virtio-net`:
 
 | Path | Description |
 | --- | --- |
-| `vendor/hermit-rs/` | Patched Hermit 0.13.0 kernel and `hermit` crate with the `ai-policy` scheduler, tickless coalescing, and joint ABI syscalls |
+| `vendor/hermit-rs/` | Patched Hermit 0.13.0 kernel and `hermit` crate with the `ai-policy` scheduler and its opt-in wake mode, tickless coalescing, and joint ABI syscalls |
 | `crates/policy-types/` | `no_std` policy identifiers, catalog types, and telemetry structures |
 | `crates/policy-core/` | Policy lease engine, scheduler reference model, resource ledgers, cache entry table, and `no_std` distilled/threshold policies |
 | `crates/policy-wire/` | Authenticated wire framing and strict JSON codec |
@@ -71,6 +71,14 @@ AIK_ACCEL=kvm \
 AIK_LOADER=artifacts/loader/hermit-loader-x86_64-v0.5.6 \
 AIK_GUEST=target/x86_64-unknown-hermit/release/policy-guest \
 AIK_APPEND="-- --joint-abi" \
+./tools/run-qemu.sh
+
+# Real-payload RPC benchmark with bounded wake credit and in-class FIFO
+# (--wake=3; the default 0 is the scheduler every label was collected under)
+AIK_ACCEL=kvm \
+AIK_LOADER=artifacts/loader/hermit-loader-x86_64-v0.5.6 \
+AIK_GUEST=target/x86_64-unknown-hermit/release/policy-guest \
+AIK_APPEND="-- --real-workload --wake=3" \
 ./tools/run-qemu.sh
 
 # Isolated Air Biological Sampling Sensor embedded deployment
@@ -127,7 +135,14 @@ Note: Hermit exits QEMU via `isa-debug-exit`, where raw exit status `3` indicate
   - **`distilled-joint` (Work-Aware Boundary):** Combines `queue_len` (`14.5`) with `max_wait_us < 350 ms` transient spike absorption, hitting **`21 / 21 (100%)` of sealed units (`180/180` final-test and `72/72` OOD decisions) with `0` infeasible decisions on both Ryzen 5 1600 and Intel Core i7-10750H**.
   - **`pending-threshold` (`cut=14.5` / `14.0`):** Hits `21 / 21 (100%)` on Ryzen and `20 / 21 (95.2%)` on Intel (`168/180` final-test, `72/72` OOD), achieving **`71.9 ms` mean under-capacity p99** (`2.35x` faster than `balanced`/Laya at `169.0 ms`) and **`100.0%` overload batch CPU retention** (whereas `heuristic-v0` drops batch CPU to `51.1%`, violating the `95%` floor).
 
-### 3. Policy Explainability & Counterfactual Attribution
+### 3. Scheduler Wake Mode (`sys_policy_set_wake`, KVM A/B)
+
+- **What it changes:** Mode `3` combines bounded wake credit (a waking group reclaims at most four of its competitor's slices that it missed while idle) with in-class FIFO turns of `4 ms` (a woken thread queues behind its class-mates instead of preempting one mid-slice). Mode `0` is the default and is the scheduler that every label, frozen cut, and sealed result above was measured under.
+- **Real-payload RPC benchmark (`--real-workload`, 6 boots per mode, Ryzen 5 1600 `kvm_amd`):** Under the `latency` profile, RPC **p99 drops from `18.5 ms` to `12.1 ms` (`-35%`)** and p50 from `8.0 ms` to `4.1 ms`, close to one RPC's `~4 ms` solo cost. Under `balanced`, p99 drops from `46.5 ms` to `39.6 ms` and p50 from `16.7 ms` to `6.4 ms`. Batch HMAC throughput stays within `0.7%`.
+- **`jobs-v2` branch sweep (5 under-capacity scenarios × 2 seeds, 2 clean repeats per cell):** p99 falls `25%` on average under `latency` (range `-46%` to `-4%`) and `15%` under `balanced`; p50 falls `39%` under both, and batch CPU is unchanged (`0.998x`). The `balanced`/`latency` p99 gap widens from `2.09x` to `2.43x`, so profile choice still matters. In overload (`s4-u65`) p99 is unchanged, but `latency`-profile p50 rises `7–19%` and batch CPU falls `3–4%`.
+- **Using it:** Pass `--wake=3` to the guest's `--branch` or `--real-workload` modes, or to `aik_controller.branches collect`. Labelling, fitting, and closed-loop scoring refuse records from mixed modes, so a controller on mode `3` needs its own labels and re-validated cuts.
+
+### 4. Policy Explainability & Counterfactual Attribution
 
 ![Policy Explainability and Feature Attribution](docs/figures/explainability-attribution.png)
 

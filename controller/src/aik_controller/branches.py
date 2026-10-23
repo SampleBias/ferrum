@@ -87,6 +87,8 @@ def parse_boot(text: str) -> dict:
     if decided != (begin["profile"] == CANDIDATE_PROFILE):
         raise BranchError("a candidate branch carries one decision line and a forced branch none")
     extra = {"decision": _fields(lines["FERRUM_BRANCH_DECISION"])} if decided else {}
+    if begin.get("wake", 0):
+        extra["wake"] = begin["wake"]
     return {
         "family": begin["family"],
         "scenario": begin["scenario"],
@@ -101,6 +103,15 @@ def parse_boot(text: str) -> dict:
         "host": host_fields,
         **extra,
     }
+
+
+def wake_mode(docs: list[dict]) -> int:
+    """The one scheduler wake mode behind records or label files. A record
+    without `wake` ran mode 0. Labels, cuts and fits only carry over inside a mode."""
+    modes = {doc.get("wake", 0) for doc in docs}
+    if len(modes) != 1:
+        raise BranchError(f"records mix wake modes {sorted(modes)}; keep each mode separate")
+    return modes.pop()
 
 
 def drift_bp(record: dict) -> int:
@@ -311,13 +322,22 @@ def _read_records(path: Path) -> list[dict]:
 
 
 def boot(
-    root: Path, family: str, unit: dict, profile: str, timeout_s: int, serial: Path, choice: str | None = None
+    root: Path,
+    family: str,
+    unit: dict,
+    profile: str,
+    timeout_s: int,
+    serial: Path,
+    choice: str | None = None,
+    wake: int = 0,
 ) -> str:
     """One fresh guest. `choice` replaces `--profile=` with a candidate's own arguments."""
     append = (
         f"-- --branch --family={family} --scenario={unit['scenario']} "
         f"--seed={unit['seed']} {choice or f'--profile={profile}'}"
     )
+    if wake:
+        append += f" --wake={wake}"
     env = dict(
         os.environ,
         AIK_ACCEL="kvm",
@@ -360,6 +380,8 @@ def collect(args: argparse.Namespace, root: Path) -> int:
     earlier = _read_records(out)
     if earlier and not args.fill:
         raise BranchError(f"{out} already has records; pass --fill to add only missing branches")
+    if earlier and wake_mode(earlier) != args.wake:
+        raise BranchError(f"{out} holds wake mode {wake_mode(earlier)}, not {args.wake}")
     if args.fill:
         steps = missing(steps, earlier)
     tried: dict[tuple, int] = {}
@@ -370,16 +392,19 @@ def collect(args: argparse.Namespace, root: Path) -> int:
         first = tried.get((unit["scenario"], unit["seed"], profile, repeat), -1) + 1
         for attempt in range(first, first + args.retries + 1):
             name = f"{unit['scenario']}-{unit['seed']}-{profile}-r{repeat}-a{attempt}"
-            text = boot(root, family["id"], unit, profile, args.timeout_s, logs / f"{name}.log")
+            text = boot(root, family["id"], unit, profile, args.timeout_s, logs / f"{name}.log", wake=args.wake)
             entry = {
                 "split": args.split,
                 "manifest": doc["id"],
                 "manifest_sha256": manifest_sha,
                 "repeat": repeat,
                 "attempt": attempt,
+                **({"wake": args.wake} if args.wake else {}),
             }
             try:
                 record = parse_boot(text)
+                if record.get("wake", 0) != args.wake:
+                    raise BranchError(f"guest ran wake mode {record.get('wake', 0)}, not {args.wake}")
                 entry.update(record)
                 entry["flags"] = check_record(record, family, objective)
             except BranchError as err:
@@ -423,6 +448,7 @@ def label(args: argparse.Namespace, root: Path) -> int:
     hosts = {record["host"]["host_cpu"] for record in records if "host" in record}
     if len(hosts) != 1:
         raise BranchError(f"records mix hosts {sorted(hosts)}; label each host separately")
+    wake = wake_mode(records)
     thresholds = load_thresholds(root / "configs" / "heuristic-v0.json")
     units = label_records(records, family, objective, thresholds)
     host = next(record["host"] for record in records if "host" in record)
@@ -440,6 +466,7 @@ def label(args: argparse.Namespace, root: Path) -> int:
         "attempts": len(records),
         "refused": sum(1 for record in records if record.get("error") or record.get("flags")),
         "units": units,
+        **({"wake": wake} if wake else {}),
     }
     Path(args.out).write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
     for unit in units:
@@ -473,6 +500,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--timeout-s", type=int, default=40)
     run.add_argument("--sealed-evaluation", action="store_true")
     run.add_argument("--fill", action="store_true")
+    run.add_argument("--wake", type=int, default=0, choices=range(4))
     run.add_argument("--out", required=True)
     mark = sub.add_parser("label")
     mark.add_argument("--manifest", choices=sorted(splits.BRANCHED))

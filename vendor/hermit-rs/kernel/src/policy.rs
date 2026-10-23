@@ -6,6 +6,14 @@
 //! virtual runtime of the other runnable groups. Weight changes keep the
 //! accumulated virtual runtime.
 //!
+//! The wake mode is zero at boot. Bit 0 (`WAKE_CREDIT`) lets a waking group
+//! sit up to `WAKE_CREDIT_SLICES` of its competitor's slices below that
+//! minimum, so it reclaims at most that much of the share it left unused
+//! while idle. Bit 1 (`WAKE_FIFO`) runs workload threads in queue order
+//! inside their class: a thread that becomes runnable or yields joins the
+//! back, and the running thread keeps its place and its slice until it has
+//! taken `CLASS_TURN_US` of service.
+//!
 //! This state is only used from the scheduler with interrupts disabled and
 //! from the policy syscalls.
 
@@ -53,6 +61,10 @@ const LATENCY_INFLIGHT: [u16; 2] = [16, 4];
 const THROUGHPUT_INFLIGHT: [u16; 2] = [8, 16];
 const RECLAIM_INFLIGHT: [u16; 2] = [4, 2];
 const COALESCED_QUANTUM_US: u64 = 8_000;
+pub const WAKE_CREDIT: u8 = 1;
+pub const WAKE_FIFO: u8 = 2;
+const WAKE_CREDIT_SLICES: u64 = 4;
+const CLASS_TURN_US: u64 = 2 * QUANTUM_US;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Choice {
@@ -67,7 +79,20 @@ struct Member {
 	class: u8,
 	ticket: u64,
 	service_us: u64,
+	/// Runnable at the previous scheduling entry.
+	queued: bool,
+	/// Service since this thread last took a place at the back of its class.
+	turn_us: u64,
 }
+
+const EMPTY_MEMBER: Member = Member {
+	id: None,
+	class: 0,
+	ticket: 0,
+	service_us: 0,
+	queued: false,
+	turn_us: 0,
+};
 
 #[derive(Clone, Copy)]
 pub struct SchedAck {
@@ -149,6 +174,12 @@ struct State {
 	dwell_armed: bool,
 	/// Tickless idle coalescing (bit 0) and single-thread slice coalescing (bit 1).
 	tickless_mode: u8,
+	/// `WAKE_CREDIT` and `WAKE_FIFO` bits.
+	wake_mode: u8,
+	/// End of the running thread's slice, measured from its dispatch.
+	slice_end_us: u64,
+	/// The running thread asked to yield since the previous scheduling entry.
+	yielded: bool,
 	idle_residency_us: u64,
 	timer_wakeups: u64,
 	coalesced_wakeups: u64,
@@ -161,12 +192,7 @@ struct State {
 
 static STATE: hermit_sync::InterruptTicketMutex<State> = hermit_sync::InterruptTicketMutex::new(
 	State {
-		members: [Member {
-			id: None,
-			class: 0,
-			ticket: 0,
-			service_us: 0,
-		}; MAX_MEMBERS],
+		members: [EMPTY_MEMBER; MAX_MEMBERS],
 		weights: [1, 1, 1],
 		cache_soft_target_bytes: BALANCED_CACHE_BYTES,
 		inflight_limits: BALANCED_INFLIGHT,
@@ -188,6 +214,9 @@ static STATE: hermit_sync::InterruptTicketMutex<State> = hermit_sync::InterruptT
 		last_profile_change_us: 0,
 		dwell_armed: false,
 		tickless_mode: 1,
+		wake_mode: 0,
+		slice_end_us: 0,
+		yielded: false,
 		idle_residency_us: 0,
 		timer_wakeups: 0,
 		coalesced_wakeups: 0,
@@ -236,10 +265,12 @@ pub fn register(id: TaskId, class: u8) -> i32 {
 	};
 	let ticket = state.next_ticket;
 	state.next_ticket = ticket.saturating_add(1);
-	state.members[index].id = Some(id);
-	state.members[index].class = class;
-	state.members[index].ticket = ticket;
-	state.members[index].service_us = 0;
+	state.members[index] = Member {
+		id: Some(id),
+		class,
+		ticket,
+		..EMPTY_MEMBER
+	};
 	state.active = true;
 	0
 }
@@ -267,6 +298,19 @@ pub fn set_tickless(mode: u8) -> i32 {
 	let mut state = STATE.lock();
 	state.tickless_mode = mode;
 	0
+}
+
+pub fn set_wake(mode: u8) -> i32 {
+	if mode > (WAKE_CREDIT | WAKE_FIFO) {
+		return -1;
+	}
+	STATE.lock().wake_mode = mode;
+	0
+}
+
+/// The running thread is about to give up the CPU while still runnable.
+pub fn note_yield() {
+	STATE.lock().yielded = true;
 }
 
 pub fn joint_status() -> JointStatus {
@@ -492,6 +536,7 @@ pub fn decide(
 	ready: &[(TaskId, u8)],
 ) -> (Choice, Option<u64>) {
 	let mut state = STATE.lock();
+	let yielded = core::mem::take(&mut state.yielded);
 	if !state.active {
 		enforce_lease(&mut state, now);
 		activate_staged(&mut state, now);
@@ -549,6 +594,12 @@ pub fn decide(
 	clamp_woken(&mut state, workload_runnable);
 
 	let runnable = &runnable[..n];
+	let fifo = state.wake_mode & WAKE_FIFO != 0;
+	if fifo {
+		let slice_over = now >= state.slice_end_us;
+		let current = current_running.then_some(current_id);
+		requeue(&mut state, current, yielded, slice_over, runnable);
+	}
 	let chosen = if system_due(&state, runnable) {
 		pick_rr(&state, runnable, CLASS_SYSTEM).or_else(|| pick_workload(&state, runnable))
 	} else {
@@ -569,7 +620,15 @@ pub fn decide(
 	} else {
 		Choice::Switch(id)
 	};
-	let (preempt_at, coalesced) = preempt_at(now, blocked_deadline, &state, class, n);
+	let keep_slice = fifo && !yielded && choice == Choice::Stay && now < state.slice_end_us;
+	let (preempt_at, coalesced) = if keep_slice {
+		state.slice_end_us = state.slice_end_us.min(now.saturating_add(QUANTUM_US));
+		(deadline(now, blocked_deadline, &state, state.slice_end_us), 0)
+	} else {
+		let (slice_end, preempt_at, coalesced) = preempt_at(now, blocked_deadline, &state, class, n);
+		state.slice_end_us = slice_end;
+		(preempt_at, coalesced)
+	};
 	state.next_timer_us = preempt_at;
 	state.timer_wakeups = state.timer_wakeups.saturating_add(1);
 	state.coalesced_wakeups = state.coalesced_wakeups.saturating_add(coalesced);
@@ -591,7 +650,7 @@ fn preempt_at(
 	state: &State,
 	class: u8,
 	runnable_count: usize,
-) -> (u64, u64) {
+) -> (u64, u64, u64) {
 	let mut slice = if state.tickless_mode & 2 != 0
 		&& runnable_count == 1
 		&& class != CLASS_SYSTEM
@@ -607,20 +666,26 @@ fn preempt_at(
 			slice = slice.min(remain);
 		}
 	}
-	let mut when = now.saturating_add(slice);
-	if let Some(blocked) = blocked_deadline {
-		when = when.min(blocked);
-	}
-	if state.lease_until > now {
-		when = when.min(state.lease_until);
-	}
+	let slice_end = now.saturating_add(slice);
+	let when = deadline(now, blocked_deadline, state, slice_end);
 	let span = when.saturating_sub(now);
 	let coalesced = if state.tickless_mode & 2 != 0 && span > QUANTUM_US {
 		(span / QUANTUM_US).saturating_sub(1)
 	} else {
 		0
 	};
-	(when, coalesced)
+	(slice_end, when, coalesced)
+}
+
+fn deadline(now: u64, blocked_deadline: Option<u64>, state: &State, slice_end: u64) -> u64 {
+	let mut when = slice_end;
+	if let Some(blocked) = blocked_deadline {
+		when = when.min(blocked);
+	}
+	if state.lease_until > now {
+		when = when.min(state.lease_until);
+	}
+	when
 }
 
 /// After the current slice has been charged, an elapsed lease installs
@@ -823,6 +888,7 @@ fn account(state: &mut State, now: u64, current_id: TaskId, current_class: u8, b
 		.find(|member| member.id == Some(current_id))
 	{
 		member.service_us = member.service_us.saturating_add(delta);
+		member.turn_us = member.turn_us.saturating_add(delta);
 	}
 	if current_class == CLASS_SYSTEM {
 		state.system_service = state.system_service.saturating_add(delta);
@@ -861,22 +927,62 @@ fn renormalize(state: &mut State) {
 fn clamp_woken(state: &mut State, runnable: [bool; 3]) {
 	for index in 0..3 {
 		if runnable[index] && !state.was_runnable[index] {
-			let mut min_other = None;
+			let mut min_other: Option<(u128, usize)> = None;
 			for other in 0..3 {
-				if other != index && runnable[other] {
-					min_other = Some(match min_other {
-						Some(value) => core::cmp::min(value, state.vr[other]),
-						None => state.vr[other],
-					});
+				if other != index
+					&& runnable[other]
+					&& min_other.is_none_or(|(value, _)| state.vr[other] < value)
+				{
+					min_other = Some((state.vr[other], other));
 				}
 			}
-			if let Some(min_other) = min_other {
-				if state.vr[index] < min_other {
-					state.vr[index] = min_other;
+			if let Some((min_other, other)) = min_other {
+				let credit = if state.wake_mode & WAKE_CREDIT != 0 {
+					u128::from(WAKE_CREDIT_SLICES * QUANTUM_US) * SCALE
+						/ u128::from(state.weights[other].max(1))
+				} else {
+					0
+				};
+				let floor = min_other.saturating_sub(credit);
+				if state.vr[index] < floor {
+					state.vr[index] = floor;
 				}
 			}
 		}
 		state.was_runnable[index] = runnable[index];
+	}
+}
+
+/// A workload member that was not runnable at the previous entry takes a
+/// place at the back of its class, and so does the running thread when it
+/// yields or its slice ends with a full turn of service behind it.
+fn requeue(
+	state: &mut State,
+	current: Option<TaskId>,
+	yielded: bool,
+	slice_over: bool,
+	runnable: &[(TaskId, u8, bool)],
+) {
+	for slot in 0..MAX_MEMBERS {
+		let member = state.members[slot];
+		let Some(id) = member.id else {
+			continue;
+		};
+		if member.class == CLASS_SYSTEM {
+			continue;
+		}
+		if !runnable.iter().any(|(candidate, _, _)| *candidate == id) {
+			state.members[slot].queued = false;
+			continue;
+		}
+		let turn_over = current == Some(id)
+			&& (yielded || (slice_over && member.turn_us >= CLASS_TURN_US));
+		if !member.queued || turn_over {
+			state.members[slot].ticket = state.next_ticket;
+			state.members[slot].turn_us = 0;
+			state.next_ticket = state.next_ticket.saturating_add(1);
+		}
+		state.members[slot].queued = true;
 	}
 }
 
@@ -906,9 +1012,15 @@ fn pick_workload(state: &State, runnable: &[(TaskId, u8, bool)]) -> Option<(Task
 	pick_rr(state, runnable, index as u8 + CLASS_LATENCY)
 }
 
+/// Under `WAKE_FIFO`, workload classes take the oldest queue place instead
+/// of the next ticket after the cursor.
 fn pick_rr(state: &State, runnable: &[(TaskId, u8, bool)], class: u8) -> Option<(TaskId, u8)> {
 	let index = rr_index(class)?;
-	let cursor = state.rr[index];
+	let cursor = if state.wake_mode & WAKE_FIFO != 0 && class != CLASS_SYSTEM {
+		u64::MAX
+	} else {
+		state.rr[index]
+	};
 	let mut wrapped: Option<(TaskId, u64)> = None;
 	let mut after: Option<(TaskId, u64)> = None;
 	for &(id, candidate, _) in runnable {
@@ -968,11 +1080,6 @@ fn workload_index(class: u8) -> Option<usize> {
 
 fn clear_member(state: &mut State, id: TaskId) {
 	if let Some(member) = state.members.iter_mut().find(|member| member.id == Some(id)) {
-		*member = Member {
-			id: None,
-			class: 0,
-			ticket: 0,
-			service_us: 0,
-		};
+		*member = EMPTY_MEMBER;
 	}
 }

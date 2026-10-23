@@ -251,6 +251,7 @@ def score(root: Path, candidate_path: Path, labels: list[Path], records_paths: l
     docs = fit._gather(root, labels, split)
     if fit._host(docs) != _host(candidate):
         raise ClosedLoopError("labels come from a different host than the candidate's fit")
+    branches.wake_mode(records + docs)
     usable = [record for record in records if not record.get("error") and not record.get("flags")]
     grouped: dict[tuple[str, int], list[dict]] = {}
     for record in sorted(usable, key=lambda r: (r["repeat"], r["attempt"])):

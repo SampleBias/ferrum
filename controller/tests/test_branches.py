@@ -13,6 +13,7 @@ from aik_controller.branches import (
     plan,
     prefix_drift_bp,
     snapshot,
+    wake_mode,
 )
 from aik_controller.features import encode, load_edges
 from aik_controller.jobs import load_family
@@ -62,6 +63,21 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(parsed["host"]["kvm_module"], "kvm_intel")
         self.assertEqual(parsed["host"]["host_cpu"], "Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz")
         self.assertEqual(check_record(parsed, FAMILY, OBJECTIVE), [])
+
+    def test_a_wake_mode_is_recorded_only_when_it_is_not_the_default(self):
+        def begin(wake):
+            return BOOT.replace("measured_spins_per_ms=39723", f"measured_spins_per_ms=39723 wake={wake}")
+
+        self.assertNotIn("wake", parse_boot(BOOT))
+        self.assertEqual(parse_boot(begin(0)), parse_boot(BOOT))
+        self.assertEqual(parse_boot(begin(3))["wake"], 3)
+
+    def test_records_from_different_wake_modes_are_never_pooled(self):
+        base = parse_boot(BOOT)
+        self.assertEqual(wake_mode([base, base]), 0)
+        self.assertEqual(wake_mode([base | {"wake": 3}] * 2), 3)
+        with self.assertRaises(BranchError):
+            wake_mode([base, base | {"wake": 3}])
 
     def test_censored_percentiles_are_none(self):
         text = BOOT.replace("p99_us=34112", "p99_us=censored")

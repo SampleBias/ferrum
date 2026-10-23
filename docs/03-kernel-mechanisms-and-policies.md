@@ -32,6 +32,15 @@ The inspected upstream ready queues prioritize runnable tasks; there is no demon
 5. On waking a sleeping group or adding a thread, clamp its starting virtual runtime to the active minimum so sleeping cannot bank unlimited service credit. Preserve service history across weight changes; a change must not reset debt or grant a free burst.
 6. If no workload is runnable, service bounded pending system work or idle normally. Recheck a workload wakeup at the next eligible preemption point.
 
+#### Wake mode (`sys_policy_set_wake`, off at boot)
+
+With the clamp in step 5, a woken group starts level with its competitor. It gets one slice and then yields the CPU back, so a 4 ms job takes at least 6 ms even under the `latency` profile. In-class round-robin also rotates on every scheduler entry, so a woken thread preempts a class-mate in mid-slice. `sys_policy_set_wake(mode)` takes two independent bits. Mode 0 is the behaviour described above and the only mode behind the existing labels, cuts and sealed results.
+
+- Bit 0, bounded wake credit: the clamp floor becomes `min_other - 4 * quantum * scale / weight_competitor`. A waking group reclaims at most four of its competitor's slices of the share it left unused while idle, whatever the sleep length. A group that stays runnable never gains credit, so long-run weighted shares are unchanged.
+- Bit 1, in-class FIFO: a workload thread that becomes runnable or yields (`sys_yield`, short busy-wait `usleep`) joins the back of its class. The running thread keeps its place, and the end of its slice, until it has taken 4 ms of service. A kept slice ends no later than one quantum after the wake. The system class keeps round-robin.
+
+The reference model in `crates/policy-core/src/sched.rs` mirrors both bits and tests the credit bound, FIFO order, yield, and the progress and weight-direction properties under every mode. Records collected with a nonzero mode carry `wake`, and the label, fit and closed-loop tools refuse to mix modes.
+
 A code review must specify exact tie-breaking, per-thread queue membership, minimum virtual runtime updates, and borrow/clamp arithmetic before implementation. A host-side model of these operations must test blocking, wakeup, yield-heavy tasks, changes, and overflow. Timer-driven preemption must be demonstrated with a thread that never voluntarily yields.
 
 Keep scheduling metadata in preallocated task/group records. Do not allocate, perform inference, serialize JSON, or do network I/O in the new selection path. Existing upstream operations in that path still require a timing audit; adding a bounded policy lookup does not retroactively make the entire scheduler constant-time. Audit background executor polling inside the scheduling path explicitly and keep new bridge/inference work out of it if it runs with interrupts disabled.

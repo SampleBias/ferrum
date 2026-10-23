@@ -2358,6 +2358,23 @@ fn arenas_demo_run() -> Result<(), String> {
     Ok(())
 }
 
+/// `sys_policy_set_wake` bits: 1 is bounded wake credit, 2 is in-class FIFO.
+fn wake_arg(value: &str) -> Result<u8, String> {
+    value
+        .parse::<u8>()
+        .ok()
+        .filter(|mode| *mode <= 3)
+        .ok_or(format!("bad wake mode {value}"))
+}
+
+#[cfg_attr(not(target_os = "hermit"), allow(dead_code))]
+fn wake_flag() -> Result<u8, String> {
+    env::args()
+        .skip(1)
+        .find_map(|arg| arg.strip_prefix("--wake=").map(wake_arg))
+        .unwrap_or(Ok(0))
+}
+
 fn real_workload_exit() -> ExitCode {
     match real_workload_run() {
         Ok(()) => {
@@ -2437,10 +2454,16 @@ fn real_workload_run() -> Result<(), String> {
         fn sys_policy_generation(generation: *mut u64) -> i32;
         fn sys_policy_read_ack(ack: *mut PolicyAck) -> i32;
         fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
+        fn sys_policy_set_wake(mode: u8) -> i32;
         fn sys_clock_gettime(clock_id: i32, tp: *mut Timespec) -> i32;
         fn sys_usleep(usecs: u64);
         fn sys_block_current_task_with_timeout(timeout_ms: u64);
         fn sys_yield();
+    }
+
+    let wake = wake_flag()?;
+    if unsafe { sys_policy_set_wake(wake) } != 0 {
+        return Err(format!("wake mode {wake} was refused"));
     }
 
     fn now_us() -> u64 {
@@ -2665,7 +2688,7 @@ fn real_workload_run() -> Result<(), String> {
     let bal_bat_srv = bal_srv_after.1.saturating_sub(bal_srv_before.1);
     let bal_kib = bal_blocks.saturating_mul((BLOCK_BYTES / 1024) as u64);
     println!(
-        "FERRUM_REAL_WORKLOAD mode=balanced profile=balanced rpc_passes={rpc_passes} offered={} completed={} completion_bp={} p50_us={} p95_us={} p99_us={} batch_blocks={bal_blocks} batch_kib={bal_kib} latency_service_us={bal_lat_srv} batch_service_us={bal_bat_srv}",
+        "FERRUM_REAL_WORKLOAD mode=balanced profile=balanced rpc_passes={rpc_passes} offered={} completed={} completion_bp={} p50_us={} p95_us={} p99_us={} batch_blocks={bal_blocks} batch_kib={bal_kib} latency_service_us={bal_lat_srv} batch_service_us={bal_bat_srv} wake={wake}",
         out_bal.offered,
         out_bal.completed,
         out_bal.completion_bp,
@@ -2757,7 +2780,7 @@ fn real_workload_run() -> Result<(), String> {
     let adp_bat_srv = adp_srv_after.1.saturating_sub(adp_srv_before.1);
     let adp_kib = adp_blocks.saturating_mul((BLOCK_BYTES / 1024) as u64);
     println!(
-        "FERRUM_REAL_WORKLOAD mode=adaptive profile={} rpc_passes={rpc_passes} offered={} completed={} completion_bp={} p50_us={} p95_us={} p99_us={} batch_blocks={adp_blocks} batch_kib={adp_kib} latency_service_us={adp_lat_srv} batch_service_us={adp_bat_srv}",
+        "FERRUM_REAL_WORKLOAD mode=adaptive profile={} rpc_passes={rpc_passes} offered={} completed={} completion_bp={} p50_us={} p95_us={} p99_us={} batch_blocks={adp_blocks} batch_kib={adp_kib} latency_service_us={adp_lat_srv} batch_service_us={adp_bat_srv} wake={wake}",
         threshold_choice.as_str(),
         out_adp.offered,
         out_adp.completed,

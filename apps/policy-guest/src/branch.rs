@@ -94,6 +94,7 @@ struct Request {
     seed: u64,
     choice: Choice,
     spins_per_ms: Option<u64>,
+    wake: u8,
 }
 
 fn calibrate_only() -> bool {
@@ -118,6 +119,7 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Request, String> {
     let mut below = None;
     let mut above = None;
     let mut spins_per_ms = None;
+    let mut wake = 0;
     for arg in args {
         if let Some(value) = arg.strip_prefix("--family=") {
             family = Some(jobs::family(value).ok_or(format!("unknown family {value}"))?);
@@ -149,6 +151,8 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Request, String> {
                     .filter(|rate| *rate > 0)
                     .ok_or(format!("bad spin rate {value}"))?,
             );
+        } else if let Some(value) = arg.strip_prefix("--wake=") {
+            wake = crate::wake_arg(value)?;
         }
     }
     let choice = match (profile, candidate.as_deref()) {
@@ -173,6 +177,7 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Request, String> {
         seed: seed.ok_or("--seed is required")?,
         choice,
         spins_per_ms,
+        wake,
     })
 }
 
@@ -188,12 +193,13 @@ fn run() -> Result<(), String> {
     }
     let request = request()?;
     Err(format!(
-        "branch {} {}/{} under {} ({:?} spins/ms) runs inside the hermit guest",
+        "branch {} {}/{} under {} ({:?} spins/ms, wake {}) runs inside the hermit guest",
         request.family.id,
         request.scenario.name,
         request.seed,
         request.choice.name(),
-        request.spins_per_ms
+        request.spins_per_ms,
+        request.wake
     ))
 }
 
@@ -216,6 +222,7 @@ fn run() -> Result<(), String> {
         fn sys_policy_register(class: u8) -> i32;
         fn sys_policy_set_weights(latency: u32, batch: u32, maintenance: u32) -> i32;
         fn sys_policy_read(class: u8, service_us: *mut u64) -> i32;
+        fn sys_policy_set_wake(mode: u8) -> i32;
         fn sys_clock_gettime(clock_id: i32, tp: *mut Timespec) -> i32;
         fn sys_usleep(usecs: u64);
         fn sys_block_current_task_with_timeout(timeout_ms: u64);
@@ -349,6 +356,10 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
     let request = request()?;
+    let rc = unsafe { sys_policy_set_wake(request.wake) };
+    if rc != 0 {
+        return Err(format!("wake mode {} returned {rc}", request.wake));
+    }
     let arrivals = request.scenario.schedule(request.seed);
     let digest = jobs::schedule_digest(&arrivals);
     let measured_spins_per_ms = calibrate()?;
@@ -363,7 +374,7 @@ fn run() -> Result<(), String> {
         unit_spins: jobs::BATCH_UNIT_US * spins_per_ms / 1_000,
     });
     println!(
-        "FERRUM_BRANCH_BEGIN family={} scenario={} seed={} profile={} jobs={} schedule_fnv64={:#018x} spins_per_ms={} measured_spins_per_ms={}",
+        "FERRUM_BRANCH_BEGIN family={} scenario={} seed={} profile={} jobs={} schedule_fnv64={:#018x} spins_per_ms={} measured_spins_per_ms={} wake={}",
         request.family.id,
         request.scenario.name,
         request.seed,
@@ -371,7 +382,8 @@ fn run() -> Result<(), String> {
         trial.arrivals.len(),
         digest,
         spins_per_ms,
-        measured_spins_per_ms
+        measured_spins_per_ms,
+        request.wake
     );
 
     for _ in 0..workloads::LATENCY_WORKERS {
@@ -584,6 +596,15 @@ mod tests {
         let request = args(&format!("{UNIT} --profile=reclaim")).unwrap();
         assert_eq!(request.choice, Choice::Forced(ProfileId::Reclaim));
         assert_eq!(request.choice.name(), "reclaim");
+        assert_eq!(request.wake, 0);
+    }
+
+    #[test]
+    fn a_branch_takes_a_wake_mode_of_at_most_three() {
+        assert_eq!(args(&format!("{UNIT} --profile=latency --wake=3")).unwrap().wake, 3);
+        for bad in ["4", "-1", "x"] {
+            assert!(args(&format!("{UNIT} --profile=latency --wake={bad}")).is_err(), "{bad}");
+        }
     }
 
     #[test]

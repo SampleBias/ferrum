@@ -257,6 +257,7 @@ def _gather(root: Path, paths: list[Path], split: str) -> list[dict]:
             if key in seen:
                 raise FitError(f"unit {key[0]}/{key[1]} appears in more than one {split} file")
             seen.add(key)
+    branches.wake_mode(docs)
     return docs
 
 

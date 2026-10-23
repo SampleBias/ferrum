@@ -5,6 +5,12 @@
 //! runtime of other runnable groups so they cannot bank credit. System work
 //! takes at most 5 ms of each 100 ms interval before workload groups run.
 //! This model is evidence for the algorithm, not a substitute for the kernel port.
+//!
+//! The wake mode mirrors `sys_policy_set_wake`. `WAKE_CREDIT` lets a waking
+//! group sit up to `WAKE_CREDIT_SLICES` of its competitor's slices below the
+//! clamp. `WAKE_FIFO` keeps workload threads in queue order inside their
+//! class: a woken or yielding thread joins the back, and a thread keeps its
+//! place across slice ends until it has taken `CLASS_TURN_US` of service.
 
 use policy_types::{
     GroupId, ProfileId, ACCOUNTING_INTERVAL_US, QUANTUM_US, SYSTEM_RESERVATION_US,
@@ -15,6 +21,10 @@ use policy_types::CatalogId;
 
 pub const VRUNTIME_SCALE: u128 = 1_048_576;
 pub const COALESCED_QUANTUM_US: u64 = 8_000;
+pub const WAKE_CREDIT: u8 = 1;
+pub const WAKE_FIFO: u8 = 2;
+pub const WAKE_CREDIT_SLICES: u64 = 4;
+pub const CLASS_TURN_US: u64 = 2 * QUANTUM_US;
 const MAX_THREADS: usize = 12;
 const MAX_WORKLOAD: usize = 8;
 const MAX_SYSTEM: usize = 4;
@@ -44,6 +54,7 @@ struct Thread {
     ticket: u64,
     service_us: u64,
     last_cpu_end: u64,
+    turn_us: u64,
 }
 
 impl Thread {
@@ -54,6 +65,7 @@ impl Thread {
             ticket: 0,
             service_us: 0,
             last_cpu_end: 0,
+            turn_us: 0,
         }
     }
 }
@@ -77,6 +89,7 @@ pub struct FairScheduler {
     system_deferrals: u64,
     system_demand_exceeded: bool,
     tickless_mode: u8,
+    wake_mode: u8,
     idle_residency_us: u64,
     timer_wakeups: u64,
     coalesced_wakeups: u64,
@@ -102,6 +115,7 @@ impl FairScheduler {
             system_deferrals: 0,
             system_demand_exceeded: false,
             tickless_mode: 1,
+            wake_mode: 0,
             idle_residency_us: 0,
             timer_wakeups: 0,
             coalesced_wakeups: 0,
@@ -112,6 +126,10 @@ impl FairScheduler {
 
     pub fn set_tickless_mode(&mut self, mode: u8) {
         self.tickless_mode = mode & 3;
+    }
+
+    pub fn set_wake_mode(&mut self, mode: u8) {
+        self.wake_mode = mode & (WAKE_CREDIT | WAKE_FIFO);
     }
 
     pub fn idle_residency_us(&self) -> u64 {
@@ -186,6 +204,7 @@ impl FairScheduler {
             ticket: self.alloc_ticket(),
             service_us: 0,
             last_cpu_end: self.now,
+            turn_us: 0,
         };
         Ok(index as u8)
     }
@@ -254,6 +273,9 @@ impl FairScheduler {
         let group_was_idle = self.runnable_in(class) == 0;
         self.threads[index].state = State::Runnable;
         self.threads[index].last_cpu_end = self.now;
+        if self.fifo(class) {
+            self.requeue(index);
+        }
         if group_was_idle {
             self.clamp_group(class);
         }
@@ -267,7 +289,7 @@ impl FairScheduler {
             return Err(SchedError::NotRunnable);
         }
         self.leave_cpu(index);
-        self.threads[index].ticket = self.alloc_ticket();
+        self.requeue(index);
         Ok(())
     }
 
@@ -334,6 +356,15 @@ impl FairScheduler {
         ticket
     }
 
+    fn requeue(&mut self, index: usize) {
+        self.threads[index].ticket = self.alloc_ticket();
+        self.threads[index].turn_us = 0;
+    }
+
+    fn fifo(&self, class: GroupId) -> bool {
+        self.wake_mode & WAKE_FIFO != 0 && class.is_workload()
+    }
+
     fn live(&self, workload: bool) -> usize {
         self.threads
             .iter()
@@ -387,7 +418,9 @@ impl FairScheduler {
             }
         }
         let index = best.expect("class had a runnable thread").1;
-        self.threads[index].ticket = self.alloc_ticket();
+        if !self.fifo(class) {
+            self.threads[index].ticket = self.alloc_ticket();
+        }
         index
     }
 
@@ -431,6 +464,7 @@ impl FairScheduler {
             return;
         }
         self.threads[id].service_us = self.threads[id].service_us.saturating_add(delta);
+        self.threads[id].turn_us = self.threads[id].turn_us.saturating_add(delta);
         if self.threads[id].class == GroupId::System {
             self.system_charged = self.system_charged.saturating_add(delta);
             self.system_service = self.system_service.saturating_add(delta);
@@ -469,7 +503,9 @@ impl FairScheduler {
             self.system_demand_exceeded = true;
         }
         self.threads[id].last_cpu_end = self.now;
-        self.threads[id].ticket = self.alloc_ticket();
+        if !self.fifo(self.threads[id].class) || self.threads[id].turn_us >= CLASS_TURN_US {
+            self.requeue(id);
+        }
         self.running = None;
     }
 
@@ -484,7 +520,7 @@ impl FairScheduler {
         let Some(index) = workload_index(class) else {
             return;
         };
-        let mut min_other: Option<u128> = None;
+        let mut min_other: Option<(u128, usize)> = None;
         for (other, vr) in self.vr.iter().enumerate() {
             if other == index {
                 continue;
@@ -497,11 +533,20 @@ impl FairScheduler {
             if self.runnable_in(other_class) == 0 {
                 continue;
             }
-            min_other = Some(min_other.map(|current| current.min(*vr)).unwrap_or(*vr));
+            if min_other.is_none_or(|(current, _)| *vr < current) {
+                min_other = Some((*vr, other));
+            }
         }
-        if let Some(min_other) = min_other {
-            if self.vr[index] < min_other {
-                self.vr[index] = min_other;
+        if let Some((min_other, other)) = min_other {
+            let credit = if self.wake_mode & WAKE_CREDIT != 0 {
+                u128::from(WAKE_CREDIT_SLICES * QUANTUM_US) * VRUNTIME_SCALE
+                    / u128::from(self.weights[other].max(1))
+            } else {
+                0
+            };
+            let floor = min_other.saturating_sub(credit);
+            if self.vr[index] < floor {
+                self.vr[index] = floor;
             }
         }
     }
@@ -608,45 +653,117 @@ mod tests {
         assert_eq!(sched.system_deferrals(), 0);
     }
 
+    const WAKE_MODES: [u8; 4] = [0, WAKE_CREDIT, WAKE_FIFO, WAKE_CREDIT | WAKE_FIFO];
+
     #[test]
     fn runnable_threads_receive_service_within_500ms() {
-        let mut sched = FairScheduler::new();
-        sched.set_profile(ProfileId::Latency, 0).unwrap();
-        let mut ids = spawn_class(&mut sched, GroupId::Latency, 3);
-        ids.extend(spawn_class(&mut sched, GroupId::Batch, 3));
-        ids.extend(spawn_class(&mut sched, GroupId::Maintenance, 2));
-        sched.close_registration();
-        assert!(sched.spawn(GroupId::Latency).is_err());
-        sched.advance_to(500_000);
-        for id in ids {
-            assert!(sched.service_us(id).unwrap() > 0);
+        for mode in WAKE_MODES {
+            let mut sched = FairScheduler::new();
+            sched.set_wake_mode(mode);
+            sched.set_profile(ProfileId::Latency, 0).unwrap();
+            let mut ids = spawn_class(&mut sched, GroupId::Latency, 3);
+            ids.extend(spawn_class(&mut sched, GroupId::Batch, 3));
+            ids.extend(spawn_class(&mut sched, GroupId::Maintenance, 2));
+            sched.close_registration();
+            assert!(sched.spawn(GroupId::Latency).is_err());
+            sched.advance_to(500_000);
+            for id in ids {
+                assert!(sched.service_us(id).unwrap() > 0, "mode {mode}");
+            }
+            assert!(sched.max_dispatch_gap_us() <= 500_000, "mode {mode}");
         }
-        assert!(sched.max_dispatch_gap_us() <= 500_000);
     }
 
     #[test]
     fn profile_direction_follows_weights() {
-        let mut sched = FairScheduler::new();
-        sched.spawn(GroupId::Latency).unwrap();
-        sched.spawn(GroupId::Batch).unwrap();
-        sched.spawn(GroupId::Maintenance).unwrap();
-        sched.set_profile(ProfileId::Latency, 0).unwrap();
-        sched.advance_to(2_000_000);
-        let latency = sched.group_service_us(GroupId::Latency);
-        let batch = sched.group_service_us(GroupId::Batch);
-        let maintenance = sched.group_service_us(GroupId::Maintenance);
-        assert!(latency > batch);
-        assert!(latency > maintenance);
-        assert!(latency > 1_000_000);
+        for mode in WAKE_MODES {
+            let mut sched = FairScheduler::new();
+            sched.set_wake_mode(mode);
+            sched.spawn(GroupId::Latency).unwrap();
+            sched.spawn(GroupId::Batch).unwrap();
+            sched.spawn(GroupId::Maintenance).unwrap();
+            sched.set_profile(ProfileId::Latency, 0).unwrap();
+            sched.advance_to(2_000_000);
+            let latency = sched.group_service_us(GroupId::Latency);
+            let batch = sched.group_service_us(GroupId::Batch);
+            let maintenance = sched.group_service_us(GroupId::Maintenance);
+            assert!(latency > batch, "mode {mode}");
+            assert!(latency > maintenance, "mode {mode}");
+            assert!(latency > 1_000_000, "mode {mode}");
 
-        sched.set_profile(ProfileId::Throughput, 2_000_000).unwrap();
-        let base_l = latency;
-        let base_b = batch;
-        sched.advance_to(4_000_000);
-        let d_latency = sched.group_service_us(GroupId::Latency) - base_l;
-        let d_batch = sched.group_service_us(GroupId::Batch) - base_b;
-        assert!(d_batch > d_latency);
-        assert!(d_batch > 1_000_000);
+            sched.set_profile(ProfileId::Throughput, 2_000_000).unwrap();
+            let base_l = latency;
+            let base_b = batch;
+            sched.advance_to(4_000_000);
+            let d_latency = sched.group_service_us(GroupId::Latency) - base_l;
+            let d_batch = sched.group_service_us(GroupId::Batch) - base_b;
+            assert!(d_batch > d_latency, "mode {mode}");
+            assert!(d_batch > 1_000_000, "mode {mode}");
+        }
+    }
+
+    #[test]
+    fn wake_credit_is_bounded_regardless_of_sleep_length() {
+        for sleep_us in [100_000, 10_000_000] {
+            for (mode, lead_us) in [(0, 0), (WAKE_CREDIT, WAKE_CREDIT_SLICES * QUANTUM_US)] {
+                let mut sched = FairScheduler::new();
+                sched.set_wake_mode(mode);
+                let latency = sched.spawn(GroupId::Latency).unwrap();
+                let batch = sched.spawn(GroupId::Batch).unwrap();
+                sched.block(latency, 0).unwrap();
+                sched.advance_to(sleep_us);
+                let batch_before = sched.service_us(batch).unwrap();
+                sched.wake(latency, sleep_us).unwrap();
+                sched.advance_to(sleep_us + 40_000);
+                let latency_got = sched.service_us(latency).unwrap();
+                let batch_got = sched.service_us(batch).unwrap() - batch_before;
+                assert_eq!(latency_got + batch_got, 40_000);
+                assert_eq!(latency_got - batch_got, lead_us, "sleep {sleep_us} mode {mode}");
+            }
+        }
+    }
+
+    #[test]
+    fn fifo_runs_a_full_turn_before_rotating() {
+        for (mode, turn_us) in [(0, QUANTUM_US), (WAKE_FIFO, CLASS_TURN_US)] {
+            let mut sched = FairScheduler::new();
+            sched.set_wake_mode(mode);
+            let ids = spawn_class(&mut sched, GroupId::Latency, 2);
+            sched.advance_to(turn_us);
+            assert_eq!(sched.service_us(ids[0]).unwrap(), turn_us, "mode {mode}");
+            assert_eq!(sched.service_us(ids[1]).unwrap(), 0, "mode {mode}");
+            sched.advance_to(2 * turn_us);
+            assert_eq!(sched.service_us(ids[1]).unwrap(), turn_us, "mode {mode}");
+        }
+    }
+
+    #[test]
+    fn fifo_woken_thread_queues_behind_waiting_class_mates() {
+        let mut sched = FairScheduler::new();
+        sched.set_wake_mode(WAKE_FIFO);
+        let [woken, running, waiting] = spawn_class(&mut sched, GroupId::Latency, 3)[..] else {
+            unreachable!()
+        };
+        sched.block(woken, 0).unwrap();
+        sched.wake(woken, 1_000).unwrap();
+        sched.advance_to(2 * CLASS_TURN_US);
+        assert_eq!(sched.service_us(running).unwrap(), CLASS_TURN_US);
+        assert_eq!(sched.service_us(waiting).unwrap(), CLASS_TURN_US);
+        assert_eq!(sched.service_us(woken).unwrap(), 0);
+        sched.advance_to(3 * CLASS_TURN_US);
+        assert_eq!(sched.service_us(woken).unwrap(), CLASS_TURN_US);
+    }
+
+    #[test]
+    fn fifo_yield_gives_up_the_rest_of_the_turn() {
+        let mut sched = FairScheduler::new();
+        sched.set_wake_mode(WAKE_FIFO);
+        let first = sched.spawn(GroupId::Latency).unwrap();
+        let second = sched.spawn(GroupId::Latency).unwrap();
+        sched.yield_thread(first, 1_000).unwrap();
+        sched.advance_to(1_000 + CLASS_TURN_US);
+        assert_eq!(sched.service_us(first).unwrap(), 1_000);
+        assert_eq!(sched.service_us(second).unwrap(), CLASS_TURN_US);
     }
 
     #[test]
