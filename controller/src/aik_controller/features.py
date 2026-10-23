@@ -17,7 +17,8 @@ class FeatureError(ValueError):
 
 def load_edges(path: Path) -> dict:
     edges = json.loads(path.read_text())
-    if edges.get("id") != "features-v0" or edges.get("schema") != 1:
+    fid, schema = edges.get("id"), edges.get("schema")
+    if (fid, schema) not in {("features-v0", 1), ("features-v1", 2)}:
         raise FeatureError("feature schema is not features-v0")
     return edges
 
@@ -139,7 +140,7 @@ def _group(group: dict, edges: dict, window: int, previous: int | None, previous
         service_bin = _service_bin(share, edges)
     alpha = edges["trend_alpha_bp"]
     updated_ema = queue if previous_ema is None else (previous_ema * (10_000 - alpha) + queue * alpha) // 10_000
-    return {
+    out = {
         "queue_len": queue,
         "queue_bin": _queue_bin(queue, edges),
         "queue_trend": _trend(queue, previous),
@@ -150,6 +151,13 @@ def _group(group: dict, edges: dict, window: int, previous: int | None, previous
         "service_bin": service_bin,
         "wait": _wait_bin(wait_samples, max_wait, edges),
     }
+    if edges.get("schema") == 2:
+        out["queue_regime_bin"] = _queue_regime_bin(queue, edges)
+        out["wait_regime_bin"] = _wait_regime_bin(wait_samples, max_wait, edges)
+        out["max_wait_us"] = max_wait
+        out["wait_samples"] = wait_samples
+        out["completions"] = int(group.get("completions", 0))
+    return out
 
 
 def _pressure(snapshot: dict, edges: dict) -> dict:
@@ -181,13 +189,18 @@ def _pressure(snapshot: dict, edges: dict) -> dict:
     emergency = pressure["emergency"]
     if not isinstance(emergency, bool):
         raise FeatureError("emergency is not a flag")
-    return {
+    out = {
         "managed_pressure_bp": ratio,
         "pressure_bin": pressure_bin,
         "evictable_backlog_bytes": backlog,
         "backlog_bin": backlog_bin,
         "emergency": "set" if emergency else "clear",
     }
+    if edges.get("schema") == 2:
+        headroom = int(pressure.get("headroom_bytes", 134_217_728))
+        out["headroom_bytes"] = headroom
+        out["headroom_bin"] = "low" if headroom < edges.get("min_headroom_bytes", 67_108_864) else "healthy"
+    return out
 
 
 def _queue_bin(queue: int, edges: dict) -> str:
@@ -196,6 +209,16 @@ def _queue_bin(queue: int, edges: dict) -> str:
     if queue >= edges["queue_high_min"]:
         return "high"
     return "present"
+
+
+def _queue_regime_bin(queue: int, edges: dict) -> str:
+    if queue <= 0:
+        return "empty"
+    if queue >= edges.get("queue_saturated_min", 15):
+        return "saturated"
+    if queue >= edges.get("queue_elevated_min", 4):
+        return "elevated"
+    return "light"
 
 
 def _service_bin(share: int, edges: dict) -> str:
@@ -214,6 +237,16 @@ def _wait_bin(samples: int, max_wait: int, edges: dict) -> str:
     if max_wait >= edges["wait_us_high"]:
         return "above"
     return "within"
+
+
+def _wait_regime_bin(samples: int, max_wait: int, edges: dict) -> str:
+    if samples == 0:
+        return "no_samples"
+    if max_wait >= edges.get("wait_stalled_us", 250_000):
+        return "stalled"
+    if max_wait >= edges.get("wait_elevated_us", 5_000):
+        return "elevated"
+    return "within_slo"
 
 
 def _trend(current: int, previous: int | None) -> str:

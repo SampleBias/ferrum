@@ -331,20 +331,42 @@ def withhold_expired(decision: dict, note: dict, window_us: int | None) -> dict:
     return decision
 
 
-def decide_live(note: dict) -> dict:
+def calibrate_probabilities(probabilities: dict, temperature: float = 1.0) -> tuple[dict, float]:
+    """Apply temperature scaling (T > 0) to a choice probability dictionary."""
+    import math
+
+    if temperature <= 0 or not probabilities:
+        raise ValueError("temperature must be positive and probabilities non-empty")
+    logits = {
+        label: math.log(max(float(prob), 1e-12)) / float(temperature)
+        for label, prob in probabilities.items()
+    }
+    top = max(logits.values())
+    exps = {label: math.exp(val - top) for label, val in logits.items()}
+    total = sum(exps.values())
+    scaled = {label: val / total for label, val in exps.items()}
+    best_conf = max(scaled.values())
+    return scaled, best_conf
+
+
+def decide_live(note: dict, min_confidence_bp: int = 0) -> dict:
     """The frame to send after the forward.
 
     A choice becomes a `model_choice` proposal. A structural failure becomes
-    an abstain and is not turned into a profile.
+    an abstain and is not turned into a profile. When `min_confidence_bp > 0`,
+    a choice below that calibrated threshold abstains with `low_confidence`.
     """
     chosen = live_choice(note)
     if chosen is None:
         return {"kind": "abstain", "reason": abstain_reason(note)}
+    conf_bp = confidence_bp(note)
+    if min_confidence_bp > 0 and conf_bp < min_confidence_bp:
+        return {"kind": "abstain", "reason": "low_confidence"}
     return {
         "kind": "proposal",
         "profile": chosen,
         "reason_code": "model_choice",
-        "answer_confidence_bp": confidence_bp(note),
+        "answer_confidence_bp": conf_bp,
     }
 
 

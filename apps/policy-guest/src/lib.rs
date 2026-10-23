@@ -12,7 +12,7 @@ use policy_core::{
 };
 use policy_types::{
     BootId, CatalogId, ControlPhase, Hash32, Hello, ObjectiveId, Observation, ProfileId,
-    RejectReason, RunMode, SessionId, CAP_CPU, GUEST_MEMORY_BYTES, MAX_WORKLOAD_THREADS,
+    RejectReason, RunMode, SessionId, GUEST_MEMORY_BYTES, MAX_WORKLOAD_THREADS,
     TELEMETRY_VERSION,
 };
 use policy_wire::{
@@ -527,12 +527,13 @@ fn exchange_hello(
     mode: RunMode,
 ) -> Result<(), SessionError> {
     let status = engine.status();
+    let capabilities = policy_core::catalog_spec(status.catalog).capabilities;
     let hello = Hello {
         boot_id,
         catalog_id: status.catalog,
         catalog_hash: status.catalog_hash,
         mode,
-        capabilities: CAP_CPU,
+        capabilities,
         max_workload_threads: MAX_WORKLOAD_THREADS,
         guest_memory_bytes: GUEST_MEMORY_BYTES,
         telemetry_version: TELEMETRY_VERSION,
@@ -587,17 +588,27 @@ pub struct LiveSession {
 
 impl LiveSession {
     pub fn open(stream: &mut TcpStream, boot_id: BootId) -> Result<Self, SessionError> {
-        Self::open_mode(stream, boot_id, RunMode::Mock)
+        Self::open_catalog_mode(stream, boot_id, CatalogId::CpuV1, RunMode::Mock)
     }
 
     /// Same session as [`LiveSession::open`], with hello mode `live`.
     pub fn open_live(stream: &mut TcpStream, boot_id: BootId) -> Result<Self, SessionError> {
-        Self::open_mode(stream, boot_id, RunMode::Live)
+        Self::open_catalog_mode(stream, boot_id, CatalogId::CpuV1, RunMode::Live)
     }
 
-    fn open_mode(
+    /// Open a joint-catalog (`joint-v1`: CPU + Memory + Admission) session.
+    pub fn open_joint(
         stream: &mut TcpStream,
         boot_id: BootId,
+        mode: RunMode,
+    ) -> Result<Self, SessionError> {
+        Self::open_catalog_mode(stream, boot_id, CatalogId::JointV1, mode)
+    }
+
+    fn open_catalog_mode(
+        stream: &mut TcpStream,
+        boot_id: BootId,
+        catalog: CatalogId,
         mode: RunMode,
     ) -> Result<Self, SessionError> {
         if !mode.allows_network_activation() {
@@ -605,7 +616,7 @@ impl LiveSession {
         }
         prepare(stream);
         let mut engine = PolicyEngine::boot(EngineConfig {
-            catalog: CatalogId::CpuV1,
+            catalog,
             boot_id,
             objective: ObjectiveId::MixedLatencyV1,
             approved_model: Hash32::repeat(0xcc),
@@ -621,6 +632,10 @@ impl LiveSession {
             .promote_to_active()
             .map_err(|_| SessionError::Protocol("promote rejected"))?;
         Ok(Self { engine })
+    }
+
+    pub fn report_cache_used(&mut self, bytes: u64) {
+        self.engine.report_cache_used(bytes);
     }
 
     pub fn status(&self) -> policy_core::PolicyStatus {

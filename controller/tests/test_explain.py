@@ -4,6 +4,7 @@ from pathlib import Path
 
 from aik_controller.explain import (
     explain_counterfactual,
+    explain_distilled,
     explain_heuristic,
     explain_line,
     explain_logistic,
@@ -68,7 +69,14 @@ class ExplainTests(unittest.TestCase):
         summary = summarize_real_data_benchmarks(ROOT, "r5-1600")
         self.assertEqual(summary["controllers"]["pending-threshold"]["hits"], 21)
         self.assertEqual(summary["controllers"]["pending-threshold"]["units"], 21)
+        self.assertEqual(summary["controllers"]["distilled-joint"]["hits"], 21)
+        self.assertEqual(summary["controllers"]["distilled-joint"]["feasible_units"], 21)
         self.assertEqual(len(summary["case_studies"]), 4)
+
+        d_exp = explain_distilled(unit["snapshot"])
+        self.assertEqual(d_exp["choice"], "latency")
+        self.assertEqual(d_exp["regime"], "plume_trigger_capture")
+        self.assertGreaterEqual(d_exp["confidence_bp"], 6_500)
 
         line = explain_line(unit["snapshot"], self.thresholds, self.cand_r5, self.log_r5)
         self.assertTrue(line.startswith("EXPLAIN seq="))

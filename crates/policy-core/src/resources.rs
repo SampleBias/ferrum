@@ -43,6 +43,43 @@ pub struct InflightLimits {
     pub batch: u16,
 }
 
+/// Memory budget envelope that scales `joint-v1` arenas and headroom triggers
+/// from the 512 MiB lab VM down to small embedded biosensor devices (e.g. 64 MiB).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SmallDeviceEnvelope {
+    pub total_guest_bytes: u64,
+    pub managed_arena_bytes: u64,
+    pub latency_cap_bytes: u64,
+    pub batch_cap_bytes: u64,
+    pub cache_cap_bytes: u64,
+    pub emergency_headroom_bytes: u64,
+    pub clear_headroom_bytes: u64,
+}
+
+impl SmallDeviceEnvelope {
+    pub const LAB_512M: Self = Self::from_total_guest_bytes(512 * 1024 * 1024);
+    pub const BIOSENSOR_64M: Self = Self::from_total_guest_bytes(64 * 1024 * 1024);
+    pub const BIOSENSOR_32M: Self = Self::from_total_guest_bytes(32 * 1024 * 1024);
+
+    pub const fn from_total_guest_bytes(total: u64) -> Self {
+        let managed = total / 2;
+        Self {
+            total_guest_bytes: total,
+            managed_arena_bytes: managed,
+            latency_cap_bytes: managed / 4,
+            batch_cap_bytes: managed / 4,
+            cache_cap_bytes: managed / 2,
+            emergency_headroom_bytes: total / 8,
+            clear_headroom_bytes: (total * 3) / 16,
+        }
+    }
+
+    /// Scale a 512 MiB catalog `cache_soft_target_bytes` to this device's cache cap.
+    pub const fn scale_cache_target(&self, lab_target_bytes: u64) -> u64 {
+        (lab_target_bytes * self.cache_cap_bytes) / CACHE_CAP_BYTES
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ArenaLedger {
     pub latency_used: u64,
@@ -347,5 +384,25 @@ mod tests {
         assert!(!reset.observe(0, true));
         assert!(!reset.observe(1_000, false));
         assert!(!reset.observe(1_000 + CLEAR_HOLD_US, true));
+    }
+
+    #[test]
+    fn small_device_envelope_scales_biosensor_arenas_proportionally() {
+        let lab = SmallDeviceEnvelope::LAB_512M;
+        assert_eq!(lab.managed_arena_bytes, 256 * 1024 * 1024);
+        assert_eq!(lab.latency_cap_bytes, LATENCY_ARENA_CAP_BYTES);
+        assert_eq!(lab.cache_cap_bytes, CACHE_CAP_BYTES);
+        assert_eq!(lab.emergency_headroom_bytes, EMERGENCY_HEADROOM_BYTES);
+        assert_eq!(lab.clear_headroom_bytes, CLEAR_HEADROOM_BYTES);
+
+        let bio64 = SmallDeviceEnvelope::BIOSENSOR_64M;
+        assert_eq!(bio64.total_guest_bytes, 64 * 1024 * 1024);
+        assert_eq!(bio64.managed_arena_bytes, 32 * 1024 * 1024);
+        assert_eq!(bio64.latency_cap_bytes, 8 * 1024 * 1024);
+        assert_eq!(bio64.batch_cap_bytes, 8 * 1024 * 1024);
+        assert_eq!(bio64.cache_cap_bytes, 16 * 1024 * 1024);
+        assert_eq!(bio64.scale_cache_target(64 * 1024 * 1024), 8 * 1024 * 1024);
+        assert_eq!(bio64.scale_cache_target(96 * 1024 * 1024), 12 * 1024 * 1024);
+        assert_eq!(bio64.scale_cache_target(32 * 1024 * 1024), 4 * 1024 * 1024);
     }
 }

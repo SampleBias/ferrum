@@ -192,6 +192,132 @@ pub extern "C" fn sys_policy_install_emergency() -> i32 {
 	crate::policy::install_emergency(now)
 }
 
+#[cfg(feature = "ai-policy")]
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
+pub extern "C" fn sys_policy_clear_emergency() -> i32 {
+	let now = arch::processor::get_timer_ticks();
+	crate::policy::clear_emergency(now)
+}
+
+#[cfg(feature = "ai-policy")]
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
+pub extern "C" fn sys_policy_set_tickless(mode: u8) -> i32 {
+	crate::policy::set_tickless(mode)
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PolicyAbiHeader {
+	version: u16,
+	size: u16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PolicyStageJointIn {
+	header: PolicyAbiHeader,
+	profile_id: u8,
+	_pad0: u8,
+	inflight_latency: u16,
+	inflight_batch: u16,
+	_pad1: u16,
+	weight_latency: u32,
+	weight_batch: u32,
+	weight_maintenance: u32,
+	cache_soft_target_bytes: u64,
+	accept_us: u64,
+	lease_us: u64,
+	base_generation: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PolicyJointStatusOut {
+	header: PolicyAbiHeader,
+	profile_id: u8,
+	override_active: u8,
+	tickless_enabled: u8,
+	_pad0: u8,
+	inflight_latency: u16,
+	inflight_batch: u16,
+	weight_latency: u32,
+	weight_batch: u32,
+	weight_maintenance: u32,
+	generation: u64,
+	cache_soft_target_bytes: u64,
+	lease_until_guest_us: u64,
+	idle_residency_us: u64,
+	timer_wakeups: u64,
+	coalesced_wakeups: u64,
+}
+
+#[cfg(feature = "ai-policy")]
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sys_policy_stage_joint(input: *const PolicyStageJointIn) -> i32 {
+	if input.is_null() || !input.is_aligned() {
+		return -1;
+	}
+	let cmd = unsafe { input.read() };
+	if cmd.header.version != 1
+		|| usize::from(cmd.header.size) != core::mem::size_of::<PolicyStageJointIn>()
+	{
+		return -1;
+	}
+	let now = arch::processor::get_timer_ticks();
+	crate::policy::stage_joint(
+		now,
+		cmd.weight_latency,
+		cmd.weight_batch,
+		cmd.weight_maintenance,
+		cmd.cache_soft_target_bytes,
+		cmd.inflight_latency,
+		cmd.inflight_batch,
+		cmd.accept_us,
+		cmd.lease_us,
+		cmd.base_generation,
+	)
+}
+
+#[cfg(feature = "ai-policy")]
+#[hermit_macro::system]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sys_policy_read_joint(out: *mut PolicyJointStatusOut) -> i32 {
+	if out.is_null() || !out.is_aligned() {
+		return -1;
+	}
+	let header = unsafe { (*out).header };
+	if header.version != 1
+		|| usize::from(header.size) != core::mem::size_of::<PolicyJointStatusOut>()
+	{
+		return -1;
+	}
+	let status = crate::policy::joint_status();
+	unsafe {
+		out.write(PolicyJointStatusOut {
+			header,
+			profile_id: status.profile,
+			override_active: status.override_active,
+			tickless_enabled: status.tickless_enabled,
+			_pad0: 0,
+			inflight_latency: status.inflight_latency,
+			inflight_batch: status.inflight_batch,
+			weight_latency: status.weights[0],
+			weight_batch: status.weights[1],
+			weight_maintenance: status.weights[2],
+			generation: status.generation,
+			cache_soft_target_bytes: status.cache_soft_target_bytes,
+			lease_until_guest_us: status.lease_until_guest_us,
+			idle_residency_us: status.idle_residency_us,
+			timer_wakeups: status.timer_wakeups,
+			coalesced_wakeups: status.coalesced_wakeups,
+		});
+	}
+	0
+}
+
 #[repr(C)]
 struct PolicyAckOut {
 	kind: u8,

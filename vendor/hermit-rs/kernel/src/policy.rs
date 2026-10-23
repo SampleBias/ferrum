@@ -34,6 +34,7 @@ pub const ACK_APPLIED: u8 = 1;
 pub const ACK_LEASE_EXPIRED: u8 = 2;
 pub const ACK_EMERGENCY: u8 = 3;
 pub const ACK_REJECTED: u8 = 4;
+pub const ACK_FALLBACK: u8 = 5;
 pub const ACK_REASON_NONE: u8 = 0;
 pub const ACK_REASON_EMERGENCY: u8 = 1;
 pub const ACK_REASON_LATE: u8 = 2;
@@ -43,6 +44,15 @@ pub const PROFILE_BALANCED: u8 = 0;
 pub const PROFILE_LATENCY: u8 = 1;
 pub const PROFILE_THROUGHPUT: u8 = 2;
 pub const PROFILE_RECLAIM: u8 = 3;
+
+const BALANCED_CACHE_BYTES: u64 = 67_108_864;
+const THROUGHPUT_CACHE_BYTES: u64 = 100_663_296;
+const RECLAIM_CACHE_BYTES: u64 = 33_554_432;
+const BALANCED_INFLIGHT: [u16; 2] = [16, 8];
+const LATENCY_INFLIGHT: [u16; 2] = [16, 4];
+const THROUGHPUT_INFLIGHT: [u16; 2] = [8, 16];
+const RECLAIM_INFLIGHT: [u16; 2] = [4, 2];
+const COALESCED_QUANTUM_US: u64 = 8_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Choice {
@@ -70,6 +80,22 @@ pub struct SchedAck {
 	pub lease_until_guest_us: u64,
 }
 
+#[derive(Clone, Copy)]
+pub struct JointStatus {
+	pub profile: u8,
+	pub override_active: u8,
+	pub tickless_enabled: u8,
+	pub inflight_latency: u16,
+	pub inflight_batch: u16,
+	pub weights: [u32; 3],
+	pub generation: u64,
+	pub cache_soft_target_bytes: u64,
+	pub lease_until_guest_us: u64,
+	pub idle_residency_us: u64,
+	pub timer_wakeups: u64,
+	pub coalesced_wakeups: u64,
+}
+
 const EMPTY_ACK: SchedAck = SchedAck {
 	kind: 0,
 	reason: 0,
@@ -83,6 +109,8 @@ const EMPTY_ACK: SchedAck = SchedAck {
 struct Pending {
 	occupied: bool,
 	weights: [u32; 3],
+	cache_soft_target_bytes: u64,
+	inflight_limits: [u16; 2],
 	accept_until: u64,
 	lease_until: u64,
 	base_generation: u64,
@@ -91,6 +119,8 @@ struct Pending {
 struct State {
 	members: [Member; MAX_MEMBERS],
 	weights: [u32; 3],
+	cache_soft_target_bytes: u64,
+	inflight_limits: [u16; 2],
 	vr: [u128; 3],
 	group_service: [u64; 3],
 	system_service: u64,
@@ -117,6 +147,11 @@ struct State {
 	last_profile_change_us: u64,
 	/// The boot weights are not a dwell event. The first staged change arms it.
 	dwell_armed: bool,
+	/// Tickless idle coalescing (bit 0) and single-thread slice coalescing (bit 1).
+	tickless_mode: u8,
+	idle_residency_us: u64,
+	timer_wakeups: u64,
+	coalesced_wakeups: u64,
 	staged: Pending,
 	ack_head: usize,
 	ack_len: usize,
@@ -133,6 +168,8 @@ static STATE: hermit_sync::InterruptTicketMutex<State> = hermit_sync::InterruptT
 			service_us: 0,
 		}; MAX_MEMBERS],
 		weights: [1, 1, 1],
+		cache_soft_target_bytes: BALANCED_CACHE_BYTES,
+		inflight_limits: BALANCED_INFLIGHT,
 		vr: [0; 3],
 		group_service: [0; 3],
 		system_service: 0,
@@ -150,9 +187,15 @@ static STATE: hermit_sync::InterruptTicketMutex<State> = hermit_sync::InterruptT
 		generation: 1,
 		last_profile_change_us: 0,
 		dwell_armed: false,
+		tickless_mode: 1,
+		idle_residency_us: 0,
+		timer_wakeups: 0,
+		coalesced_wakeups: 0,
 		staged: Pending {
 			occupied: false,
 			weights: [0, 0, 0],
+			cache_soft_target_bytes: BALANCED_CACHE_BYTES,
+			inflight_limits: BALANCED_INFLIGHT,
 			accept_until: 0,
 			lease_until: 0,
 			base_generation: 0,
@@ -209,8 +252,39 @@ pub fn set_weights(latency: u32, batch: u32, maintenance: u32) -> i32 {
 	if state.emergency {
 		return -1;
 	}
-	state.weights = [latency, batch, maintenance];
+	let weights = [latency, batch, maintenance];
+	let (cache, inflight) = default_joint_params(weights);
+	state.weights = weights;
+	state.cache_soft_target_bytes = cache;
+	state.inflight_limits = inflight;
 	0
+}
+
+pub fn set_tickless(mode: u8) -> i32 {
+	if mode > 3 {
+		return -1;
+	}
+	let mut state = STATE.lock();
+	state.tickless_mode = mode;
+	0
+}
+
+pub fn joint_status() -> JointStatus {
+	let state = STATE.lock();
+	JointStatus {
+		profile: profile_code(state.weights),
+		override_active: u8::from(state.emergency),
+		tickless_enabled: state.tickless_mode,
+		inflight_latency: state.inflight_limits[0],
+		inflight_batch: state.inflight_limits[1],
+		weights: state.weights,
+		generation: state.generation,
+		cache_soft_target_bytes: state.cache_soft_target_bytes,
+		lease_until_guest_us: state.lease_until,
+		idle_residency_us: state.idle_residency_us,
+		timer_wakeups: state.timer_wakeups,
+		coalesced_wakeups: state.coalesced_wakeups,
+	}
 }
 
 /// Arm a one-shot fallback to balanced weights. `duration_us` is measured
@@ -229,7 +303,7 @@ pub fn arm_lease(now: u64, duration_us: u64) -> i32 {
 }
 
 /// Install the catalog `reclaim` weights and hold them across lease expiry.
-/// A second call leaves the override in place. There is no syscall that clears it.
+/// A second call leaves the override in place.
 /// Any staged profile is discarded here so a scheduling entry cannot apply it later.
 pub fn install_emergency(now: u64) -> i32 {
 	let mut state = STATE.lock();
@@ -240,6 +314,8 @@ pub fn install_emergency(now: u64) -> i32 {
 	let previous = state.generation;
 	state.emergency = true;
 	state.weights = [2, 2, 6];
+	state.cache_soft_target_bytes = RECLAIM_CACHE_BYTES;
+	state.inflight_limits = RECLAIM_INFLIGHT;
 	state.generation = state.generation.saturating_add(1);
 	let generation = state.generation;
 	let lease_until = state.lease_until;
@@ -258,6 +334,38 @@ pub fn install_emergency(now: u64) -> i32 {
 	0
 }
 
+/// Clear emergency override after pressure hysteresis is satisfied, restoring
+/// balanced fallback and incrementing generation.
+pub fn clear_emergency(now: u64) -> i32 {
+	let mut state = STATE.lock();
+	if !state.emergency {
+		return -1;
+	}
+	let previous = state.generation;
+	state.emergency = false;
+	state.staged.occupied = false;
+	state.lease_until = 0;
+	state.weights = [1, 1, 1];
+	state.cache_soft_target_bytes = BALANCED_CACHE_BYTES;
+	state.inflight_limits = BALANCED_INFLIGHT;
+	state.last_profile_change_us = now;
+	state.generation = state.generation.saturating_add(1);
+	let generation = state.generation;
+	push_ack(
+		&mut state,
+		SchedAck {
+			kind: ACK_FALLBACK,
+			reason: ACK_REASON_NONE,
+			profile: PROFILE_BALANCED,
+			previous_generation: previous,
+			generation,
+			guest_us: now,
+			lease_until_guest_us: 0,
+		},
+	);
+	0
+}
+
 /// Record a profile for the scheduler to install at its next entry.
 /// This does not change the weights in force. A stage is stored even during
 /// an emergency; the scheduling entry drops it without applying it.
@@ -270,7 +378,43 @@ pub fn stage(
 	lease_us: u64,
 	base_generation: u64,
 ) -> i32 {
-	if latency == 0 || batch == 0 || maintenance == 0 || lease_us == 0 {
+	let weights = [latency, batch, maintenance];
+	let (cache, inflight) = default_joint_params(weights);
+	stage_joint(
+		now,
+		latency,
+		batch,
+		maintenance,
+		cache,
+		inflight[0],
+		inflight[1],
+		accept_us,
+		lease_us,
+		base_generation,
+	)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn stage_joint(
+	now: u64,
+	latency: u32,
+	batch: u32,
+	maintenance: u32,
+	cache_soft_target_bytes: u64,
+	inflight_latency: u16,
+	inflight_batch: u16,
+	accept_us: u64,
+	lease_us: u64,
+	base_generation: u64,
+) -> i32 {
+	if latency == 0
+		|| batch == 0
+		|| maintenance == 0
+		|| cache_soft_target_bytes == 0
+		|| inflight_latency == 0
+		|| inflight_batch == 0
+		|| lease_us == 0
+	{
 		return -1;
 	}
 	// A zero acceptance window is already closed at the staging instant, so the
@@ -284,6 +428,8 @@ pub fn stage(
 	state.staged = Pending {
 		occupied: true,
 		weights: [latency, batch, maintenance],
+		cache_soft_target_bytes,
+		inflight_limits: [inflight_latency, inflight_batch],
 		accept_until,
 		lease_until: now.saturating_add(lease_us),
 		base_generation,
@@ -349,7 +495,7 @@ pub fn decide(
 	if !state.active {
 		enforce_lease(&mut state, now);
 		activate_staged(&mut state, now);
-		let wakeup = lease_wakeup(now, &state);
+		let wakeup = soonest(blocked_deadline, lease_wakeup(now, &state));
 		state.next_timer_us = wakeup.unwrap_or(0);
 		return (Choice::Fallback, wakeup);
 	}
@@ -378,8 +524,19 @@ pub fn decide(
 		}
 	}
 	if n == 0 {
-		let wakeup = soonest(blocked_deadline, lease_wakeup(now, &state));
+		let wakeup = if state.tickless_mode & 1 != 0 {
+			soonest(blocked_deadline, lease_wakeup(now, &state))
+		} else {
+			let periodic = now.saturating_add(QUANTUM_US);
+			Some(
+				soonest(blocked_deadline, lease_wakeup(now, &state))
+					.map_or(periodic, |deadline| deadline.min(periodic)),
+			)
+		};
 		state.next_timer_us = wakeup.unwrap_or(0);
+		if wakeup.is_some() {
+			state.timer_wakeups = state.timer_wakeups.saturating_add(1);
+		}
 		return (Choice::Fallback, wakeup);
 	}
 
@@ -412,8 +569,10 @@ pub fn decide(
 	} else {
 		Choice::Switch(id)
 	};
-	let preempt_at = preempt_at(now, blocked_deadline, &state, class);
+	let (preempt_at, coalesced) = preempt_at(now, blocked_deadline, &state, class, n);
 	state.next_timer_us = preempt_at;
+	state.timer_wakeups = state.timer_wakeups.saturating_add(1);
+	state.coalesced_wakeups = state.coalesced_wakeups.saturating_add(coalesced);
 	(choice, Some(preempt_at))
 }
 
@@ -426,8 +585,22 @@ pub fn timer_deadline(wakeup: Option<u64>) -> Option<u64> {
 	soonest(wakeup, soonest(next, lease))
 }
 
-fn preempt_at(now: u64, blocked_deadline: Option<u64>, state: &State, class: u8) -> u64 {
-	let mut slice = QUANTUM_US;
+fn preempt_at(
+	now: u64,
+	blocked_deadline: Option<u64>,
+	state: &State,
+	class: u8,
+	runnable_count: usize,
+) -> (u64, u64) {
+	let mut slice = if state.tickless_mode & 2 != 0
+		&& runnable_count == 1
+		&& class != CLASS_SYSTEM
+		&& class != 0
+	{
+		COALESCED_QUANTUM_US
+	} else {
+		QUANTUM_US
+	};
 	if class == CLASS_SYSTEM || class == 0 {
 		let remain = SYSTEM_BUDGET_US.saturating_sub(state.system_charged);
 		if remain > 0 {
@@ -441,7 +614,13 @@ fn preempt_at(now: u64, blocked_deadline: Option<u64>, state: &State, class: u8)
 	if state.lease_until > now {
 		when = when.min(state.lease_until);
 	}
-	when
+	let span = when.saturating_sub(now);
+	let coalesced = if state.tickless_mode & 2 != 0 && span > QUANTUM_US {
+		(span / QUANTUM_US).saturating_sub(1)
+	} else {
+		0
+	};
+	(when, coalesced)
 }
 
 /// After the current slice has been charged, an elapsed lease installs
@@ -459,6 +638,8 @@ fn enforce_lease(state: &mut State, now: u64) {
 	}
 	let previous = state.generation;
 	state.weights = [1, 1, 1];
+	state.cache_soft_target_bytes = BALANCED_CACHE_BYTES;
+	state.inflight_limits = BALANCED_INFLIGHT;
 	state.generation = state.generation.saturating_add(1);
 	let generation = state.generation;
 	push_ack(
@@ -495,7 +676,11 @@ fn activate_staged(state: &mut State, now: u64) {
 		return;
 	}
 	let weights = state.staged.weights;
-	let renewal = weights == state.weights;
+	let cache_target = state.staged.cache_soft_target_bytes;
+	let inflight = state.staged.inflight_limits;
+	let renewal = weights == state.weights
+		&& cache_target == state.cache_soft_target_bytes
+		&& inflight == state.inflight_limits;
 	if !renewal
 		&& state.dwell_armed
 		&& now.saturating_sub(state.last_profile_change_us) < MIN_DWELL_US
@@ -510,6 +695,8 @@ fn activate_staged(state: &mut State, now: u64) {
 		state.dwell_armed = true;
 	}
 	state.weights = weights;
+	state.cache_soft_target_bytes = cache_target;
+	state.inflight_limits = inflight;
 	state.lease_until = lease_until;
 	state.lease_expired = false;
 	state.generation = state.generation.saturating_add(1);
@@ -558,6 +745,15 @@ fn profile_code(weights: [u32; 3]) -> u8 {
 	}
 }
 
+fn default_joint_params(weights: [u32; 3]) -> (u64, [u16; 2]) {
+	match weights {
+		[6, 2, 2] => (BALANCED_CACHE_BYTES, LATENCY_INFLIGHT),
+		[2, 6, 2] => (THROUGHPUT_CACHE_BYTES, THROUGHPUT_INFLIGHT),
+		[2, 2, 6] => (RECLAIM_CACHE_BYTES, RECLAIM_INFLIGHT),
+		_ => (BALANCED_CACHE_BYTES, BALANCED_INFLIGHT),
+	}
+}
+
 fn push_ack(state: &mut State, ack: SchedAck) {
 	if state.ack_len == ACK_CAP {
 		state.ack_head = (state.ack_head + 1) % ACK_CAP;
@@ -600,7 +796,16 @@ fn account(state: &mut State, now: u64, current_id: TaskId, current_class: u8, b
 	}
 	let raw_delta = now.saturating_sub(state.last_account_us);
 	state.last_account_us = now;
-	if raw_delta == 0 || !bill_current {
+	if raw_delta == 0 {
+		return;
+	}
+	if !bill_current {
+		state.idle_residency_us = state.idle_residency_us.saturating_add(raw_delta);
+		if state.tickless_mode & 1 != 0 && raw_delta >= QUANTUM_US {
+			state.coalesced_wakeups = state
+				.coalesced_wakeups
+				.saturating_add(raw_delta / QUANTUM_US);
+		}
 		return;
 	}
 	let delta = if raw_delta > MAX_SLICE_US {

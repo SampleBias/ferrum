@@ -11,7 +11,13 @@ from pathlib import Path
 
 from aik_controller import fit
 from aik_controller.features import PROFILES, encode, load_edges
-from aik_controller.laya_offline import QUESTION_ID, model_state, resource_question
+from aik_controller.laya_offline import (
+    QUESTION_ID,
+    joint_resource_question,
+    model_state,
+    model_state_v1,
+    resource_question,
+)
 
 
 class AdaptError(ValueError):
@@ -20,8 +26,8 @@ class AdaptError(ValueError):
 
 def load_declaration(path: Path) -> dict:
     doc = json.loads(path.read_text())
-    if doc.get("id") != "adapt-v0":
-        raise AdaptError(f"{path.name} is not an adapt-v0 declaration")
+    if doc.get("id") not in {"adapt-v0", "adapt-v1"}:
+        raise AdaptError(f"{path.name} is not an adapt-v0 or adapt-v1 declaration")
     if doc.get("fit_reads") != ["training"]:
         raise AdaptError("an adaptation fits on training labels")
     if doc.get("question") != QUESTION_ID:
@@ -46,8 +52,11 @@ def rows(root: Path, declaration: dict, paths: list[Path]) -> list[dict]:
     docs = fit._gather(root, paths, "training")
     if fit._host(docs) != (declaration["host_cpu"], declaration["kvm_module"]):
         raise AdaptError("training labels come from a different host than the declaration")
-    edges = load_edges(root / "configs" / "features-v0.json")
-    question = resource_question()
+    feature_name = declaration.get("features", "features-v0")
+    edges = load_edges(root / "configs" / f"{feature_name}.json")
+    use_v1 = edges.get("schema") == 2 or declaration.get("id") == "adapt-v1"
+    question = joint_resource_question() if use_v1 else resource_question()
+    encoder_fn = model_state_v1 if use_v1 else model_state
     built = []
     for doc in docs:
         for unit in doc["units"]:
@@ -55,7 +64,7 @@ def rows(root: Path, declaration: dict, paths: list[Path]) -> list[dict]:
                 continue
             weights = _weights(unit["label"])
             for branch in unit["branches"]:
-                state = model_state(encode(branch["snapshot"], edges), include_profile=True)
+                state = encoder_fn(encode(branch["snapshot"], edges), include_profile=True)
                 built.append({
                     "state": state,
                     "questions": question,

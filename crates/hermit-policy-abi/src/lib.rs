@@ -132,6 +132,49 @@ pub struct AbiAckBatch {
     pub records: [AbiAck; 8],
 }
 
+/// S4 joint profile staging payload (`joint-v1`: CPU weights, cache target, and
+/// per-class admission limits) for freestanding applications above the kernel.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AbiStageJointIn {
+    pub header: AbiHeader,
+    pub profile_id: u8,
+    pub _pad0: u8,
+    pub inflight_latency: u16,
+    pub inflight_batch: u16,
+    pub _pad1: u16,
+    pub weight_latency: u32,
+    pub weight_batch: u32,
+    pub weight_maintenance: u32,
+    pub cache_soft_target_bytes: u64,
+    pub accept_us: u64,
+    pub lease_us: u64,
+    pub base_generation: u64,
+}
+
+/// Authoritative kernel-side joint policy and power-residency status read back
+/// by the guest bridge or a freestanding biosensor application.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AbiJointStatus {
+    pub header: AbiHeader,
+    pub profile_id: u8,
+    pub override_active: u8,
+    pub tickless_enabled: u8,
+    pub _pad0: u8,
+    pub inflight_latency: u16,
+    pub inflight_batch: u16,
+    pub weight_latency: u32,
+    pub weight_batch: u32,
+    pub weight_maintenance: u32,
+    pub generation: u64,
+    pub cache_soft_target_bytes: u64,
+    pub lease_until_guest_us: u64,
+    pub idle_residency_us: u64,
+    pub timer_wakeups: u64,
+    pub coalesced_wakeups: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,5 +193,9 @@ mod tests {
         assert_eq!(size_of::<AbiAck>(), 48);
         assert_eq!(size_of::<RegisterClassIn>(), 12);
         assert!(size_of::<AbiAckBatch>() > size_of::<[AbiAck; 8]>());
+        assert_eq!(size_of::<AbiStageJointIn>(), 56);
+        assert_eq!(offset_of!(AbiStageJointIn, cache_soft_target_bytes), 24);
+        assert_eq!(size_of::<AbiJointStatus>(), 72);
+        assert_eq!(offset_of!(AbiJointStatus, idle_residency_us), 48);
     }
 }

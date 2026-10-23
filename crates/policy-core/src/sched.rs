@@ -14,6 +14,7 @@ use crate::catalog::catalog_spec;
 use policy_types::CatalogId;
 
 pub const VRUNTIME_SCALE: u128 = 1_048_576;
+pub const COALESCED_QUANTUM_US: u64 = 8_000;
 const MAX_THREADS: usize = 12;
 const MAX_WORKLOAD: usize = 8;
 const MAX_SYSTEM: usize = 4;
@@ -75,6 +76,10 @@ pub struct FairScheduler {
     max_gap: u64,
     system_deferrals: u64,
     system_demand_exceeded: bool,
+    tickless_mode: u8,
+    idle_residency_us: u64,
+    timer_wakeups: u64,
+    coalesced_wakeups: u64,
 }
 
 impl FairScheduler {
@@ -96,9 +101,29 @@ impl FairScheduler {
             max_gap: 0,
             system_deferrals: 0,
             system_demand_exceeded: false,
+            tickless_mode: 1,
+            idle_residency_us: 0,
+            timer_wakeups: 0,
+            coalesced_wakeups: 0,
         };
         sched.install_weights(ProfileId::Balanced);
         sched
+    }
+
+    pub fn set_tickless_mode(&mut self, mode: u8) {
+        self.tickless_mode = mode & 3;
+    }
+
+    pub fn idle_residency_us(&self) -> u64 {
+        self.idle_residency_us
+    }
+
+    pub fn timer_wakeups(&self) -> u64 {
+        self.timer_wakeups
+    }
+
+    pub fn coalesced_wakeups(&self) -> u64 {
+        self.coalesced_wakeups
     }
 
     pub fn now_us(&self) -> u64 {
@@ -172,6 +197,17 @@ impl FairScheduler {
                 match self.pick() {
                     Some(id) => self.dispatch(id),
                     None => {
+                        let idle_delta = target - self.now;
+                        self.idle_residency_us = self.idle_residency_us.saturating_add(idle_delta);
+                        if self.tickless_mode & 1 != 0 {
+                            self.coalesced_wakeups = self
+                                .coalesced_wakeups
+                                .saturating_add(idle_delta / QUANTUM_US);
+                        } else {
+                            self.timer_wakeups = self
+                                .timer_wakeups
+                                .saturating_add(idle_delta.div_ceil(QUANTUM_US));
+                        }
                         self.now = target;
                         self.realign_interval();
                         return;
@@ -355,6 +391,13 @@ impl FairScheduler {
         index
     }
 
+    fn total_runnable(&self) -> usize {
+        self.threads
+            .iter()
+            .filter(|thread| thread.state == State::Runnable)
+            .count()
+    }
+
     fn dispatch(&mut self, id: usize) {
         let gap = self.now.saturating_sub(self.threads[id].last_cpu_end);
         if gap > self.max_gap {
@@ -362,6 +405,13 @@ impl FairScheduler {
         }
         self.running = Some(id);
         self.slice_start = self.now;
+        self.timer_wakeups = self.timer_wakeups.saturating_add(1);
+        let allowed = self.allowed_slice(id);
+        if self.tickless_mode & 2 != 0 && allowed > QUANTUM_US {
+            self.coalesced_wakeups = self
+                .coalesced_wakeups
+                .saturating_add((allowed / QUANTUM_US).saturating_sub(1));
+        }
     }
 
     fn allowed_slice(&self, id: usize) -> u64 {
@@ -369,6 +419,8 @@ impl FairScheduler {
             SYSTEM_RESERVATION_US
                 .saturating_sub(self.system_charged)
                 .min(QUANTUM_US)
+        } else if self.tickless_mode & 2 != 0 && self.total_runnable() == 1 {
+            COALESCED_QUANTUM_US
         } else {
             QUANTUM_US
         }
@@ -639,5 +691,32 @@ mod tests {
         let d_bat = sched.service_us(batch).unwrap() - before.1;
         let d_mnt = sched.service_us(maint).unwrap() - before.2;
         assert!(d_lat >= 95_000 && d_bat >= 95_000 && d_mnt >= 95_000);
+    }
+
+    #[test]
+    fn tickless_coalescing_reduces_wakeups_during_idle_and_solo_patrol() {
+        let mut periodic = FairScheduler::new();
+        periodic.set_tickless_mode(0);
+        let sensor_p = periodic.spawn(GroupId::Latency).unwrap();
+        periodic.block(sensor_p, 2_000).unwrap();
+        periodic.advance_to(100_000);
+        assert_eq!(periodic.idle_residency_us(), 98_000);
+        assert_eq!(periodic.coalesced_wakeups(), 0);
+        assert_eq!(periodic.timer_wakeups(), 50);
+
+        let mut tickless = FairScheduler::new();
+        tickless.set_tickless_mode(3);
+        let sensor_t = tickless.spawn(GroupId::Latency).unwrap();
+        tickless.block(sensor_t, 2_000).unwrap();
+        tickless.advance_to(100_000);
+        assert_eq!(tickless.idle_residency_us(), 98_000);
+        assert_eq!(tickless.timer_wakeups(), 1);
+        assert!(tickless.coalesced_wakeups() >= 49);
+
+        // Waking a single solo thread under mode=3 coalesces 8 ms slices (4x fewer timer wakeups).
+        tickless.wake(sensor_t, 100_000).unwrap();
+        tickless.advance_to(116_000);
+        assert_eq!(tickless.service_us(sensor_t).unwrap(), 18_000);
+        assert_eq!(tickless.timer_wakeups(), 3);
     }
 }

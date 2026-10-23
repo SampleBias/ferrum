@@ -119,6 +119,34 @@ class FeatureTests(unittest.TestCase):
         self.assertIn(laya_status(ROOT), {"absent", "incomplete", "mismatch", "ready"})
         self.assertFalse((ROOT / "configs" / "laya-manifest.json").exists())
 
+    def test_features_v1_separates_elevated_plume_burst_from_saturated_overload(self):
+        from aik_controller.laya_offline import model_state_v1
+
+        edges_v1 = load_edges(ROOT / "configs" / "features-v1.json")
+        self.assertEqual(edges_v1["schema"], 2)
+
+        plume = snapshot()
+        plume["groups"][0]["queue_len"] = 8
+        plume["groups"][0]["wait_samples"] = 6
+        plume["groups"][0]["max_wait_us"] = 18_000
+        s_plume = encode(plume, edges_v1)
+        self.assertEqual(s_plume["groups"]["latency"]["queue_regime_bin"], "elevated")
+        self.assertEqual(s_plume["groups"]["latency"]["wait_regime_bin"], "elevated")
+        ms_plume = model_state_v1(s_plume)
+        self.assertEqual(ms_plume["latency_queue_regime"], "elevated")
+        self.assertEqual(ms_plume["latency_max_wait_ms"], 18.0)
+
+        saturated = snapshot()
+        saturated["groups"][0]["queue_len"] = 22
+        saturated["groups"][0]["wait_samples"] = 16
+        saturated["groups"][0]["max_wait_us"] = 420_000
+        s_sat = encode(saturated, edges_v1)
+        self.assertEqual(s_sat["groups"]["latency"]["queue_regime_bin"], "saturated")
+        self.assertEqual(s_sat["groups"]["latency"]["wait_regime_bin"], "stalled")
+        ms_sat = model_state_v1(s_sat)
+        self.assertEqual(ms_sat["latency_queue_regime"], "saturated")
+        self.assertEqual(ms_sat["latency_wait_regime"], "stalled")
+
 
 if __name__ == "__main__":
     unittest.main()

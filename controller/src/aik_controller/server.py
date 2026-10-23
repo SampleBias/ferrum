@@ -22,10 +22,10 @@ from aik_controller.framing import (
     seal,
     snapshot_hash,
 )
-from aik_controller.explain import explain_line
+from aik_controller.explain import explain_distilled, explain_line
 from aik_controller.features import FeatureError, FeatureHistory, feature_line, laya_status, load_edges
 from aik_controller.heuristic import choose, load_thresholds
-from aik_controller.laya_offline import model_state
+from aik_controller.laya_offline import model_state, model_state_v1
 from aik_controller.shadow import (
     acceptance_window_us,
     decide_live,
@@ -710,6 +710,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="propose Laya's choice for an isolated trial; abstain instead of inventing a profile",
     )
+    parser.add_argument(
+        "--catalog",
+        choices=("cpu-v1", "joint-v1"),
+        default="cpu-v1",
+        help="catalog to negotiate with the guest (default: cpu-v1)",
+    )
+    parser.add_argument(
+        "--features",
+        choices=("features-v0", "features-v1"),
+        default="features-v0",
+        help="feature schema to encode snapshots with (default: features-v0)",
+    )
     args = parser.parse_args(argv)
     if args.live and (args.shadow or args.lose_ack or args.reject_frames):
         print("live is a separate session", file=sys.stderr)
@@ -718,11 +730,11 @@ def main(argv: list[str] | None = None) -> int:
     root = args.root
     host, port_text = args.bind.rsplit(":", 1)
     key = load_key(root / "configs" / "lab-psk.hex")
-    catalog_path = root / "configs" / "catalog-cpu-v1.json"
+    catalog_path = root / "configs" / f"catalog-{args.catalog}.json"
     catalog_doc = json.loads(catalog_path.read_text())
     catalog = {"id": catalog_doc["catalog_id"], "hash": catalog_hash(catalog_path)}
     thresholds = load_thresholds(root / "configs" / "heuristic-v0.json")
-    edges = load_edges(root / "configs" / "features-v0.json")
+    edges = load_edges(root / "configs" / f"{args.features}.json")
     identity = json.loads((root / "configs" / "lab-identity.json").read_text())
     shadow = None
     live = None

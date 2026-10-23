@@ -1,0 +1,19 @@
+{
+  "id": "features-v1",
+  "schema": 2,
+  "queue_high_min": 4,
+  "queue_elevated_min": 4,
+  "queue_saturated_min": 15,
+  "wait_us_high": 5000,
+  "wait_elevated_us": 5000,
+  "wait_stalled_us": 250000,
+  "service_mid_bp": 2500,
+  "service_high_bp": 5000,
+  "service_dominant_bp": 7500,
+  "pressure_medium_bp": 2000,
+  "pressure_high_bp": 8000,
+  "evictable_backlog_bytes": 33554432,
+  "min_headroom_bytes": 67108864,
+  "trend_alpha_bp": 5000,
+  "note": "Multi-regime telemetry schema separating under-capacity plume bursts (4..14) from overload saturation (>=15) and exposing numeric wait, completion, and headroom signals for Laya."
+}

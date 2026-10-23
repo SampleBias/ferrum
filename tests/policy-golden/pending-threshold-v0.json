@@ -1,0 +1,9 @@
+[
+  {"unit": "boundary-below", "pending": 0, "choice": "latency"},
+  {"unit": "boundary-14", "pending": 14, "choice": "latency"},
+  {"unit": "boundary-15", "pending": 15, "choice": "reclaim"},
+  {"unit": "s12-u35/301", "pending": 1, "choice": "latency"},
+  {"unit": "s12-u45/312", "pending": 9, "choice": "latency"},
+  {"unit": "s12-u72/311", "pending": 56, "choice": "reclaim"},
+  {"unit": "s32-u65/401", "pending": 22, "choice": "reclaim"}
+]

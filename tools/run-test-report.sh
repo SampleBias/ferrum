@@ -578,6 +578,37 @@ record(
     flines,
 )
 
+el, rc, flines = run_guest_standalone(
+    "biosensor-joint",
+    "-- --biosensor",
+    "FERRUM_BIOSENSOR_OK",
+    timeout_s=40,
+)
+bio_summary = "S4 JointV1 ABI & Air Biological Sampling Sensor benchmark passed"
+for l in flines:
+    if l.startswith("FERRUM_BIOSENSOR_SUMMARY"):
+        m_bio = re.search(
+            r"static_p99_us=(\d+) adaptive_p99_us=(\d+) static_sensitivity_bp=(\d+) adaptive_sensitivity_bp=(\d+) .* adaptive_specificity_bp=(\d+) .* patrol_wakeups=(\d+) patrol_coalesced=(\d+)",
+            l,
+        )
+        if m_bio:
+            bio_summary = (
+                f"Plume p99 {int(m_bio.group(1))/1000:.1f}ms->{int(m_bio.group(2))/1000:.1f}ms, "
+                f"sensitivity {int(m_bio.group(3))/100:.1f}%->{int(m_bio.group(4))/100:.1f}%, "
+                f"specificity {int(m_bio.group(5))/100:.1f}%, "
+                f"patrol wakeups {m_bio.group(6)} ({m_bio.group(7)} coalesced)"
+            )
+record(
+    "Tier 4 — Real-Data & Soak",
+    "S4 Joint ABI & Air Biosensor benchmark (--biosensor)",
+    'AIK_ACCEL=kvm AIK_APPEND="-- --biosensor" ./tools/run-qemu.sh',
+    rc == 3 and any("FERRUM_BIOSENSOR_OK" in l for l in flines),
+    el,
+    f"raw_exit={rc}",
+    bio_summary,
+    flines,
+)
+
 el, q_rc, c_rc, flines, clines = run_connected_case(
     f"soak-{soak_s}s",
     ["--follow"],

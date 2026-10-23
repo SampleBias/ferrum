@@ -49,6 +49,18 @@ class RowTests(unittest.TestCase):
         with self.assertRaises((AdaptError, FitError, SplitError)):
             development_score(ROOT, DECL, TRAINING[0])
 
+    def test_adapt_v1_builds_multi_regime_features_v1_rows(self):
+        decl_v1 = load_declaration(ROOT / "configs" / "adapt-v1-r5-1600.json")
+        train_v1 = [ROOT / rel for rel in decl_v1["reads"]]
+        built = rows(ROOT, decl_v1, train_v1)
+        self.assertEqual(len(built), 288)
+        under = [row for row in built if row["state"]["latency_queue_len"] < 14]
+        over = [row for row in built if row["state"]["latency_queue_len"] >= 15]
+        self.assertTrue(under and over)
+        self.assertTrue(all(r["state"]["latency_queue_regime"] in {"empty", "light", "elevated"} for r in under))
+        self.assertTrue(all(r["state"]["latency_queue_regime"] == "saturated" for r in over))
+        self.assertTrue(all(r["state"]["latency_wait_regime"] == "stalled" for r in over))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -120,6 +120,80 @@ def explain_threshold(snapshot: dict, params: dict) -> dict:
     }
 
 
+def explain_distilled(snapshot: dict, cut: float = 14.5) -> dict:
+    """Explain a `distilled-joint` (`DISTILLED_JOINT_V1`) multi-regime decision."""
+    latency = _group(snapshot, "latency")
+    batch = _group(snapshot, "batch")
+    maint = _group(snapshot, "maintenance")
+    pressure = snapshot["pressure"]
+    cap = int(pressure.get("managed_cap_bytes", 0))
+    used = int(pressure.get("managed_used_bytes", 0))
+    headroom = int(pressure.get("headroom_bytes", 134_217_728))
+    backlog = int(pressure.get("evictable_backlog_bytes", 0))
+    emergency = bool(pressure.get("emergency", False))
+    pressure_bp = 0 if cap == 0 else (used * 10_000) // cap
+
+    q_len = int(latency["queue_len"])
+    b_len = int(batch["queue_len"])
+    wait_us = int(latency["max_wait_us"])
+    wait_samples = int(latency["wait_samples"])
+    margin = q_len - cut
+
+    if emergency or pressure_bp >= 8_000 or backlog >= 33_554_432 or (cap > 0 and headroom < 67_108_864):
+        choice = "reclaim"
+        regime = "overload_or_reclaim"
+        conf_bp = 9_900 if emergency else 9_400
+        rationale = (
+            f"memory_pressure={pressure_bp}bp, backlog={backlog // (1024*1024)}MiB, emergency={emergency} "
+            f"-> reclaim (2:2:6, 32MiB cache, 4/2 admission)"
+        )
+    elif q_len >= cut:
+        choice = "reclaim"
+        regime = "overload_or_reclaim"
+        excess_x2 = int(round((q_len - cut) * 2))
+        conf_bp = min(7_800 + excess_x2 * 150, 9_800)
+        rationale = (
+            f"pending={q_len} >= cut={cut} (margin={margin:+.1f} jobs) "
+            f"-> reclaim (protects >=95% batch confirmation specificity under overload)"
+        )
+    elif q_len >= 4 or (wait_samples > 0 and wait_us >= 5_000) or (q_len > 0 and maint["runnable"] == 0 and b_len == 0):
+        choice = "latency"
+        regime = "plume_trigger_capture"
+        slack_x2 = int(round((cut - q_len) * 2))
+        conf_bp = min(7_600 + slack_x2 * 75, 9_700)
+        rationale = (
+            f"pending={q_len} < cut={cut} (wait={wait_us/1000:.1f}ms) "
+            f"-> latency (6:2:2, 16/4 admission; maximizes plume capture sensitivity)"
+        )
+    elif b_len >= 4 and q_len == 0:
+        choice = "throughput"
+        regime = "deep_confirmation"
+        conf_bp = min(8_200 + b_len * 120, 9_600)
+        rationale = (
+            f"batch_queue={b_len}>=4 with latency_queue=0 "
+            f"-> throughput (2:6:2, 96MiB cache, 8/16 admission; accelerates confirmation)"
+        )
+    else:
+        choice = "balanced"
+        regime = "clean_air_patrol"
+        conf_bp = 9_100
+        rationale = (
+            f"quiet patrol (lat_q={q_len}, bat_q={b_len}) "
+            f"-> balanced (1:1:1, 64MiB cache, tickless sleep coalescing)"
+        )
+
+    return {
+        "controller": "distilled-joint",
+        "choice": choice,
+        "regime": regime,
+        "confidence_bp": conf_bp,
+        "pending": q_len,
+        "cut": cut,
+        "margin_jobs": round(margin, 2),
+        "rationale": rationale,
+    }
+
+
 def explain_logistic(snapshot: dict, params: dict) -> dict:
     """Decompose `logistic-v0` into standardized z-scores and per-feature log-odds contributions."""
     names = params["features"]
@@ -244,6 +318,7 @@ def summarize_real_data_benchmarks(root: Path, host_tag: str = "r5-1600") -> dic
 
     # Aggregate real outcome metrics per controller across the 21 sealed units (15 final_test + 6 OOD)
     controller_names = [
+        "distilled-joint",
         "pending-threshold",
         "logistic-v0",
         "fixed-balanced",
@@ -266,11 +341,13 @@ def summarize_real_data_benchmarks(root: Path, host_tag: str = "r5-1600") -> dic
 
     for split_name, unit in units:
         snap = unit["snapshot"]
+        d_exp = explain_distilled(snap, cand_params["cut"])
         t_exp = explain_threshold(snap, cand_params)
         l_exp = explain_logistic(snap, log_params)
         h_exp = explain_heuristic(snap, thresholds)
 
         picks = {
+            "distilled-joint": d_exp["choice"],
             "pending-threshold": t_exp["choice"],
             "logistic-v0": l_exp["choice"],
             "fixed-balanced": "balanced",

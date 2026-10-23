@@ -8,6 +8,7 @@ from aik_controller.laya_offline import QUESTION_ID, cases
 from aik_controller.shadow import (
     ShadowError,
     ShadowWorker,
+    calibrate_probabilities,
     decide_live,
     prepare,
     send_heuristic_then_shadow,
@@ -276,6 +277,22 @@ class ShadowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(SystemExit):
                 prepare(ROOT, Path(tmp))
+
+    def test_temperature_calibration_and_low_confidence_abstention(self):
+        raw = {"balanced": 0.20, "latency": 0.55, "throughput": 0.15, "reclaim": 0.10}
+        scaled, top_conf = calibrate_probabilities(raw, temperature=0.5)
+        self.assertGreater(top_conf, 0.55)
+        self.assertAlmostEqual(sum(scaled.values()), 1.0, places=6)
+
+        note = {
+            "choice": "latency",
+            "kind": "agree",
+            "structural": None,
+            "answer_confidence": 0.42,
+        }
+        self.assertEqual(decide_live(note)["kind"], "proposal")
+        abstained = decide_live(note, min_confidence_bp=6_500)
+        self.assertEqual(abstained, {"kind": "abstain", "reason": "low_confidence"})
 
 
 def resource_question():
