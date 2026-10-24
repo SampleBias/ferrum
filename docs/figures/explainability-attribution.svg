@@ -1,46 +1,63 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="378" viewBox="0 0 760 378" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
-  <rect width="760" height="378" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
-  <text x="28" y="34" font-size="17" font-weight="700" fill="#0f172a">Policy Explainability: Boundary Margins, Feature Attribution &amp; Counterfactuals</text>
-  <text x="28" y="54" font-size="12.5" fill="#475569">Why the controller selects each profile across the 4 operating regimes in sealed KVM evaluation</text>
-  
-    <rect x="24" y="74" width="350" height="132" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
-    <text x="38" y="96" font-size="13" font-weight="700" fill="#0f172a">1. Under-Capacity (35% load) (s12-u35/301)</text>
-    <rect x="282" y="82" width="78" height="20" rx="4" fill="#dcfce7"/>
-    <text x="321" y="96" text-anchor="middle" font-size="11" font-weight="700" fill="#15803d">-&gt; latency</text>
-    <text x="38" y="118" font-size="11.5" font-weight="600" fill="#334155">Threshold: pending=1 vs cut=14.5 (margin=-13.5 jobs)</text>
-    <text x="38" y="138" font-size="11" fill="#475569">Regime: under_capacity | max_wait=61.1ms | lat_share=0.30</text>
-    <text x="38" y="158" font-size="11" fill="#475569">Logistic (latency, P=0.98): log1p_q=+1.15, wait=+0.94, share=+0.40</text>
-    <rect x="38" y="170" width="322" height="24" rx="4" fill="#f1f5f9"/>
-    <text x="46" y="186" font-size="11" font-weight="600" fill="#0f172a">Counterfactual: p99: 76.2ms (2.22x vs balanced), batch: 98.7%</text>
-    
-    <rect x="386" y="74" width="350" height="132" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
-    <text x="400" y="96" font-size="13" font-weight="700" fill="#0f172a">2. Unseen Boundary (45% load) (s12-u45/312)</text>
-    <rect x="644" y="82" width="78" height="20" rx="4" fill="#dcfce7"/>
-    <text x="683" y="96" text-anchor="middle" font-size="11" font-weight="700" fill="#15803d">-&gt; latency</text>
-    <text x="400" y="118" font-size="11.5" font-weight="600" fill="#334155">Threshold: pending=9 vs cut=14.5 (margin=-5.5 jobs)</text>
-    <text x="400" y="138" font-size="11" fill="#475569">Regime: under_capacity | max_wait=239.3ms | lat_share=0.49</text>
-    <text x="400" y="158" font-size="11" fill="#475569">Logistic (reclaim, P=0.38): log1p_q=-0.05, wait=+0.06, share=+0.38</text>
-    <rect x="400" y="170" width="322" height="24" rx="4" fill="#f1f5f9"/>
-    <text x="408" y="186" font-size="11" font-weight="600" fill="#0f172a">Counterfactual: p99: 88.2ms (2.57x vs balanced), batch: 98.8%</text>
-    
-    <rect x="24" y="218" width="350" height="132" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
-    <text x="38" y="240" font-size="13" font-weight="700" fill="#0f172a">3. Unseen Overload (72% load) (s12-u72/311)</text>
-    <rect x="282" y="226" width="78" height="20" rx="4" fill="#fef3c7"/>
-    <text x="321" y="240" text-anchor="middle" font-size="11" font-weight="700" fill="#b45309">-&gt; reclaim</text>
-    <text x="38" y="262" font-size="11.5" font-weight="600" fill="#334155">Threshold: pending=56 vs cut=14.5 (margin=+41.5 jobs)</text>
-    <text x="38" y="282" font-size="11" fill="#475569">Regime: overload_shedding | max_wait=984.8ms | lat_share=0.50</text>
-    <text x="38" y="302" font-size="11" fill="#475569">Logistic (reclaim, P=0.55): log1p_q=+0.39, wait=+0.73, share=+0.41</text>
-    <rect x="38" y="314" width="322" height="24" rx="4" fill="#f1f5f9"/>
-    <text x="46" y="330" font-size="11" font-weight="600" fill="#0f172a">Counterfactual: batch retained: 100.0% (vs 50.0% if latency)</text>
-    
-    <rect x="386" y="218" width="350" height="132" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
-    <text x="400" y="240" font-size="13" font-weight="700" fill="#0f172a">4. OOD 32ms Jobs (65% load) (s32-u65/401)</text>
-    <rect x="644" y="226" width="78" height="20" rx="4" fill="#fef3c7"/>
-    <text x="683" y="240" text-anchor="middle" font-size="11" font-weight="700" fill="#b45309">-&gt; reclaim</text>
-    <text x="400" y="262" font-size="11.5" font-weight="600" fill="#334155">Threshold: pending=22 vs cut=14.5 (margin=+7.5 jobs)</text>
-    <text x="400" y="282" font-size="11" fill="#475569">Regime: overload_shedding | max_wait=959.0ms | lat_share=0.50</text>
-    <text x="400" y="302" font-size="11" fill="#475569">Logistic (reclaim, P=0.57): log1p_q=+0.16, wait=+0.72, share=+0.41</text>
-    <rect x="400" y="314" width="322" height="24" rx="4" fill="#f1f5f9"/>
-    <text x="408" y="330" font-size="11" font-weight="600" fill="#0f172a">Counterfactual: batch retained: 100.0% (vs 50.0% if latency)</text>
-    
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="430" viewBox="0 0 1120 430" font-family="'Noto Sans Mono', 'Liberation Mono', ui-monospace, monospace">
+  <defs>
+    <pattern id="grid" width="8" height="8" patternUnits="userSpaceOnUse">
+      <path d="M8 0 H0 V8" fill="none" stroke="#240808" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1120" height="430" fill="#050505"/>
+  <rect width="1120" height="430" fill="url(#grid)"/>
+  <rect x="2" y="2" width="1116" height="426" fill="none" stroke="#ff1a1a" stroke-width="3"/>
+  <rect x="8" y="8" width="1104" height="414" fill="none" stroke="#2a2a2a" stroke-width="1"/>
+  <rect x="10" y="421" width="1100" height="2" fill="#c8c8c8"/>
+  <g fill="#ffffff">
+    <rect x="18" y="16" width="2" height="8"/>
+    <rect x="15" y="19" width="8" height="2"/>
+    <rect x="1100" y="16" width="2" height="8"/>
+    <rect x="1097" y="19" width="8" height="2"/>
+    <rect x="18" y="402" width="2" height="8"/>
+    <rect x="15" y="405" width="8" height="2"/>
+    <rect x="1100" y="402" width="2" height="8"/>
+    <rect x="1097" y="405" width="8" height="2"/>
+  </g>
+<text x="28" y="36" text-anchor="start" font-size="15" font-weight="800" fill="#ff2a2a">Policy explainability: margins, attribution, counterfactuals</text><text x="28" y="56" text-anchor="start" font-size="11" font-weight="500" fill="#a3a3a3">Why the controller selects each profile across the four sealed-KVM regimes.</text>
+<rect x="24" y="78" width="528" height="152" fill="#070707" stroke="#e10600" stroke-width="1.5"/><rect x="24" y="227" width="528" height="3" fill="#c8c8c8"/><rect x="24" y="78" width="3" height="152" fill="#ff1a1a"/>
+<text x="42" y="106" text-anchor="start" font-size="13" font-weight="800" fill="#f4f4f4">1. Under-capacity (35% load) (s12-u35/301)</text>
+<rect x="416" y="90" width="118" height="20" fill="#d01212"/><rect x="416" y="94" width="118" height="2" fill="#8a0a0a"/><rect x="416" y="98" width="118" height="2" fill="#8a0a0a"/><rect x="416" y="102" width="118" height="2" fill="#8a0a0a"/><rect x="416" y="106" width="118" height="1" fill="#8a0a0a"/><rect x="416" y="90" width="118" height="2" fill="#ff3a3a"/><rect x="416" y="107" width="118" height="3" fill="#d4d4d4"/><rect x="533" y="90" width="1" height="20" fill="#ff3a3a"/>
+<text x="475" y="105" text-anchor="middle" font-size="12" font-weight="800" fill="#ffffff">-&gt; latency</text>
+<text x="42" y="132" text-anchor="start" font-size="12" font-weight="700" fill="#f0f0f0">Threshold: pending=1 vs cut=14.5 (margin=-13.5 jobs)</text>
+<text x="42" y="152" text-anchor="start" font-size="11" font-weight="500" fill="#b5b5b5">Regime: under_capacity | max_wait=61.1 ms | lat_share=0.30</text>
+<text x="42" y="172" text-anchor="start" font-size="11" font-weight="500" fill="#b5b5b5">Logistic (latency, P=0.98): log1p_q=+1.15, wait=+0.94, share=+0.40</text>
+<rect x="42" y="184" width="492" height="28" fill="#100404" stroke="#3a1010" stroke-width="1"/>
+<rect x="42" y="184" width="3" height="28" fill="#ff1a1a"/>
+<text x="54" y="203" text-anchor="start" font-size="11" font-weight="700" fill="#f2f2f2">Counterfactual: p99 76.2 ms (2.22x vs balanced), batch 98.7%</text>
+<rect x="572" y="78" width="528" height="152" fill="#070707" stroke="#e10600" stroke-width="1.5"/><rect x="572" y="227" width="528" height="3" fill="#c8c8c8"/><rect x="572" y="78" width="3" height="152" fill="#ff1a1a"/>
+<text x="590" y="106" text-anchor="start" font-size="13" font-weight="800" fill="#f4f4f4">2. Unseen boundary (45% load) (s12-u45/312)</text>
+<rect x="964" y="90" width="118" height="20" fill="#d01212"/><rect x="964" y="94" width="118" height="2" fill="#8a0a0a"/><rect x="964" y="98" width="118" height="2" fill="#8a0a0a"/><rect x="964" y="102" width="118" height="2" fill="#8a0a0a"/><rect x="964" y="106" width="118" height="1" fill="#8a0a0a"/><rect x="964" y="90" width="118" height="2" fill="#ff3a3a"/><rect x="964" y="107" width="118" height="3" fill="#d4d4d4"/><rect x="1081" y="90" width="1" height="20" fill="#ff3a3a"/>
+<text x="1023" y="105" text-anchor="middle" font-size="12" font-weight="800" fill="#ffffff">-&gt; latency</text>
+<text x="590" y="132" text-anchor="start" font-size="12" font-weight="700" fill="#f0f0f0">Threshold: pending=9 vs cut=14.5 (margin=-5.5 jobs)</text>
+<text x="590" y="152" text-anchor="start" font-size="11" font-weight="500" fill="#b5b5b5">Regime: under_capacity | max_wait=239.3 ms | lat_share=0.49</text>
+<text x="590" y="172" text-anchor="start" font-size="11" font-weight="500" fill="#b5b5b5">Logistic (reclaim, P=0.38): log1p_q=-0.05, wait=+0.06, share=+0.38</text>
+<rect x="590" y="184" width="492" height="28" fill="#100404" stroke="#3a1010" stroke-width="1"/>
+<rect x="590" y="184" width="3" height="28" fill="#ff1a1a"/>
+<text x="602" y="203" text-anchor="start" font-size="11" font-weight="700" fill="#f2f2f2">Counterfactual: p99 88.2 ms (2.57x vs balanced), batch 98.8%</text>
+<rect x="24" y="246" width="528" height="152" fill="#070707" stroke="#e10600" stroke-width="1.5"/><rect x="24" y="395" width="528" height="3" fill="#c8c8c8"/><rect x="24" y="246" width="3" height="152" fill="#ff1a1a"/>
+<text x="42" y="274" text-anchor="start" font-size="13" font-weight="800" fill="#f4f4f4">3. Unseen overload (72% load) (s12-u72/311)</text>
+<rect x="416" y="258" width="118" height="20" fill="#c2c2c2"/><rect x="416" y="262" width="118" height="2" fill="#8a8a8a"/><rect x="416" y="266" width="118" height="2" fill="#8a8a8a"/><rect x="416" y="270" width="118" height="2" fill="#8a8a8a"/><rect x="416" y="274" width="118" height="1" fill="#8a8a8a"/><rect x="416" y="258" width="118" height="2" fill="#f4f4f4"/><rect x="416" y="275" width="118" height="3" fill="#242424"/><rect x="533" y="258" width="1" height="20" fill="#f4f4f4"/>
+<text x="475" y="273" text-anchor="middle" font-size="12" font-weight="800" fill="#111111">-&gt; reclaim</text>
+<text x="42" y="300" text-anchor="start" font-size="12" font-weight="700" fill="#f0f0f0">Threshold: pending=56 vs cut=14.5 (margin=+41.5 jobs)</text>
+<text x="42" y="320" text-anchor="start" font-size="11" font-weight="500" fill="#b5b5b5">Regime: overload_shedding | max_wait=984.8 ms | lat_share=0.50</text>
+<text x="42" y="340" text-anchor="start" font-size="11" font-weight="500" fill="#b5b5b5">Logistic (reclaim, P=0.55): log1p_q=+0.39, wait=+0.73, share=+0.41</text>
+<rect x="42" y="352" width="492" height="28" fill="#100404" stroke="#3a1010" stroke-width="1"/>
+<rect x="42" y="352" width="3" height="28" fill="#ff1a1a"/>
+<text x="54" y="371" text-anchor="start" font-size="11" font-weight="700" fill="#f2f2f2">Counterfactual: batch retained 100.0% (vs 50.0% if latency)</text>
+<rect x="572" y="246" width="528" height="152" fill="#070707" stroke="#e10600" stroke-width="1.5"/><rect x="572" y="395" width="528" height="3" fill="#c8c8c8"/><rect x="572" y="246" width="3" height="152" fill="#ff1a1a"/>
+<text x="590" y="274" text-anchor="start" font-size="13" font-weight="800" fill="#f4f4f4">4. OOD 32 ms jobs (65% load) (s32-u65/401)</text>
+<rect x="964" y="258" width="118" height="20" fill="#c2c2c2"/><rect x="964" y="262" width="118" height="2" fill="#8a8a8a"/><rect x="964" y="266" width="118" height="2" fill="#8a8a8a"/><rect x="964" y="270" width="118" height="2" fill="#8a8a8a"/><rect x="964" y="274" width="118" height="1" fill="#8a8a8a"/><rect x="964" y="258" width="118" height="2" fill="#f4f4f4"/><rect x="964" y="275" width="118" height="3" fill="#242424"/><rect x="1081" y="258" width="1" height="20" fill="#f4f4f4"/>
+<text x="1023" y="273" text-anchor="middle" font-size="12" font-weight="800" fill="#111111">-&gt; reclaim</text>
+<text x="590" y="300" text-anchor="start" font-size="12" font-weight="700" fill="#f0f0f0">Threshold: pending=22 vs cut=14.5 (margin=+7.5 jobs)</text>
+<text x="590" y="320" text-anchor="start" font-size="11" font-weight="500" fill="#b5b5b5">Regime: overload_shedding | max_wait=959.0 ms | lat_share=0.50</text>
+<text x="590" y="340" text-anchor="start" font-size="11" font-weight="500" fill="#b5b5b5">Logistic (reclaim, P=0.57): log1p_q=+0.16, wait=+0.72, share=+0.41</text>
+<rect x="590" y="352" width="492" height="28" fill="#100404" stroke="#3a1010" stroke-width="1"/>
+<rect x="590" y="352" width="3" height="28" fill="#ff1a1a"/>
+<text x="602" y="371" text-anchor="start" font-size="11" font-weight="700" fill="#f2f2f2">Counterfactual: batch retained 100.0% (vs 50.0% if latency)</text>
 </svg>

@@ -1,74 +1,84 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="420" viewBox="0 0 760 420" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
-  <rect width="760" height="420" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
-  <text x="28" y="34" font-size="17" font-weight="700" fill="#0f172a">Scheduler Wake Mode A/B: Bounded Wake Credit + In-Class FIFO (KVM)</text>
-  <text x="28" y="54" font-size="12.5" fill="#475569">Same guest binary on AMD Ryzen 5 1600 (kvm_amd). wake=0 is the default scheduler behind every label and sealed result.</text>
-  <g transform="translate(470, 66)">
-    <rect x="0" y="0" width="12" height="12" rx="2" fill="#64748b"/>
-    <text x="18" y="10" font-size="12" font-weight="600" fill="#334155">wake=0 (default)</text>
-    <rect x="130" y="0" width="12" height="12" rx="2" fill="#16a34a"/>
-    <text x="148" y="10" font-size="12" font-weight="600" fill="#334155">wake=3</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="460" viewBox="0 0 1120 460" font-family="'Noto Sans Mono', 'Liberation Mono', ui-monospace, monospace">
+  <defs>
+    <pattern id="grid" width="8" height="8" patternUnits="userSpaceOnUse">
+      <path d="M8 0 H0 V8" fill="none" stroke="#240808" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1120" height="460" fill="#050505"/>
+  <rect width="1120" height="460" fill="url(#grid)"/>
+  <rect x="2" y="2" width="1116" height="456" fill="none" stroke="#ff1a1a" stroke-width="3"/>
+  <rect x="8" y="8" width="1104" height="444" fill="none" stroke="#2a2a2a" stroke-width="1"/>
+  <rect x="10" y="451" width="1100" height="2" fill="#c8c8c8"/>
+  <g fill="#ffffff">
+    <rect x="18" y="16" width="2" height="8"/>
+    <rect x="15" y="19" width="8" height="2"/>
+    <rect x="1100" y="16" width="2" height="8"/>
+    <rect x="1097" y="19" width="8" height="2"/>
+    <rect x="18" y="432" width="2" height="8"/>
+    <rect x="15" y="435" width="8" height="2"/>
+    <rect x="1100" y="432" width="2" height="8"/>
+    <rect x="1097" y="435" width="8" height="2"/>
   </g>
-
-  <rect x="24" y="86" width="346" height="310" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
-  <text x="40" y="110" font-size="13.5" font-weight="700" fill="#0f172a">A. Real-Payload RPC Benchmark</text>
-  <text x="40" y="128" font-size="11.5" fill="#64748b">HMAC/JSON RPCs, median of 6 boots per mode</text>
-  
-    <text x="120" y="152" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">latency p50</text>
-    <rect x="128" y="140" width="25.8" height="14" rx="3" fill="#64748b"/>
-    <text x="159.8" y="151" font-size="11" fill="#475569">8.0 ms</text>
-    <rect x="128" y="157" width="13.2" height="14" rx="3" fill="#16a34a"/>
-    <text x="147.2" y="168" font-size="11" font-weight="700" fill="#15803d">4.1 ms (-49%)</text>
-    <text x="120" y="196" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">latency p99</text>
-    <rect x="128" y="184" width="59.6" height="14" rx="3" fill="#64748b"/>
-    <text x="193.6" y="195" font-size="11" fill="#475569">18.5 ms</text>
-    <rect x="128" y="201" width="38.9" height="14" rx="3" fill="#16a34a"/>
-    <text x="172.9" y="212" font-size="11" font-weight="700" fill="#15803d">12.1 ms (-35%)</text>
-    <text x="120" y="240" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">balanced p50</text>
-    <rect x="128" y="228" width="53.9" height="14" rx="3" fill="#64748b"/>
-    <text x="187.9" y="239" font-size="11" fill="#475569">16.7 ms</text>
-    <rect x="128" y="245" width="20.7" height="14" rx="3" fill="#16a34a"/>
-    <text x="154.7" y="256" font-size="11" font-weight="700" fill="#15803d">6.4 ms (-62%)</text>
-    <text x="120" y="284" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">balanced p99</text>
-    <rect x="128" y="272" width="150.0" height="14" rx="3" fill="#64748b"/>
-    <text x="284.0" y="283" font-size="11" fill="#475569">46.5 ms</text>
-    <rect x="128" y="289" width="127.9" height="14" rx="3" fill="#16a34a"/>
-    <text x="261.9" y="300" font-size="11" font-weight="700" fill="#15803d">39.6 ms (-15%)</text>
-  <rect x="40" y="322" width="314" height="24" rx="4" fill="#dcfce7"/>
-  <text x="197" y="338" text-anchor="middle" font-size="11.5" font-weight="700" fill="#15803d">A 4 ms RPC now finishes at its ~4 ms solo cost (p50)</text>
-  <text x="40" y="372" font-size="11.5" fill="#475569">Batch HMAC throughput: 1,038 → 1,031 MiB per 2 s (-0.7%)</text>
-
-  <rect x="386" y="86" width="350" height="310" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
-  <text x="402" y="110" font-size="13.5" font-weight="700" fill="#0f172a">B. jobs-v2 Branch Sweep (latency profile p99)</text>
-  <text x="402" y="128" font-size="11.5" fill="#64748b">Geo-mean of seeds 151 and 301, two clean repeats per cell</text>
-  
-    <text x="456" y="152" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">s4-u15</text>
-    <rect x="464" y="140" width="27.5" height="14" rx="3" fill="#64748b"/>
-    <text x="497.5" y="151" font-size="11" fill="#475569">15.4 ms</text>
-    <rect x="464" y="157" width="17.5" height="14" rx="3" fill="#16a34a"/>
-    <text x="487.5" y="168" font-size="11" font-weight="700" fill="#15803d">9.8 ms (-36%)</text>
-    <text x="456" y="188" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">s4-u35</text>
-    <rect x="464" y="176" width="48.2" height="14" rx="3" fill="#64748b"/>
-    <text x="518.2" y="187" font-size="11" fill="#475569">27.0 ms</text>
-    <rect x="464" y="193" width="37.7" height="14" rx="3" fill="#16a34a"/>
-    <text x="507.7" y="204" font-size="11" font-weight="700" fill="#15803d">21.1 ms (-22%)</text>
-    <text x="456" y="224" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">s4-u45</text>
-    <rect x="464" y="212" width="103.5" height="14" rx="3" fill="#64748b"/>
-    <text x="573.5" y="223" font-size="11" fill="#475569">58.0 ms</text>
-    <rect x="464" y="229" width="91.2" height="14" rx="3" fill="#16a34a"/>
-    <text x="561.2" y="240" font-size="11" font-weight="700" fill="#15803d">51.1 ms (-12%)</text>
-    <text x="456" y="260" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">s12-u15</text>
-    <rect x="464" y="248" width="72.6" height="14" rx="3" fill="#64748b"/>
-    <text x="542.6" y="259" font-size="11" fill="#475569">40.6 ms</text>
-    <rect x="464" y="265" width="58.0" height="14" rx="3" fill="#16a34a"/>
-    <text x="528.0" y="276" font-size="11" font-weight="700" fill="#15803d">32.5 ms (-20%)</text>
-    <text x="456" y="296" text-anchor="end" font-size="11.5" font-weight="600" fill="#334155">s12-u35</text>
-    <rect x="464" y="284" width="150.0" height="14" rx="3" fill="#64748b"/>
-    <text x="620.0" y="295" font-size="11" fill="#475569">84.0 ms</text>
-    <rect x="464" y="301" width="99.6" height="14" rx="3" fill="#16a34a"/>
-    <text x="569.6" y="312" font-size="11" font-weight="700" fill="#15803d">55.8 ms (-34%)</text>
-  <line x1="402" y1="324" x2="720" y2="324" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="402" y="342" font-size="11.5" font-weight="600" fill="#15803d">Under capacity: p99 -25% latency, -15% balanced; p50 -39%</text>
-  <text x="402" y="360" font-size="11.5" fill="#475569">Batch CPU under capacity: 0.998x of wake=0</text>
-  <text x="402" y="378" font-size="11.5" fill="#b45309">Overload s4-u65: p99 +1–3%, p50 +7–19%, batch −3–4%</text>
-  <text x="402" y="392" font-size="10" fill="#94a3b8">(latency profile, both seeds; not a win when latency work saturates)</text>
+<text x="28" y="36" text-anchor="start" font-size="15" font-weight="800" fill="#ff2a2a">Scheduler wake mode A/B: bounded wake credit + in-class FIFO</text><text x="28" y="56" text-anchor="start" font-size="11" font-weight="500" fill="#a3a3a3">Same guest binary on AMD Ryzen 5 1600 (kvm_amd). wake=0 is the scheduler behind every label and sealed result.</text>
+<rect x="700" y="68" width="14" height="14" fill="#c2c2c2"/><rect x="700" y="72" width="14" height="2" fill="#8a8a8a"/><rect x="700" y="76" width="14" height="2" fill="#8a8a8a"/><rect x="700" y="68" width="14" height="2" fill="#f4f4f4"/><rect x="700" y="80" width="14" height="2" fill="#242424"/><rect x="713" y="68" width="1" height="14" fill="#f4f4f4"/><text x="720" y="80" text-anchor="start" font-size="12" font-weight="600" fill="#d0d0d0">wake=0 (default)</text>
+<rect x="920" y="68" width="14" height="14" fill="#d01212"/><rect x="920" y="72" width="14" height="2" fill="#8a0a0a"/><rect x="920" y="76" width="14" height="2" fill="#8a0a0a"/><rect x="920" y="68" width="14" height="2" fill="#ff3a3a"/><rect x="920" y="80" width="14" height="2" fill="#d4d4d4"/><rect x="933" y="68" width="1" height="14" fill="#ff3a3a"/><text x="940" y="80" text-anchor="start" font-size="12" font-weight="600" fill="#d0d0d0">wake=3</text>
+<rect x="24" y="96" width="528" height="340" fill="#070707" stroke="#e10600" stroke-width="1.5"/><rect x="24" y="433" width="528" height="3" fill="#c8c8c8"/><rect x="24" y="96" width="3" height="340" fill="#ff1a1a"/>
+<text x="44" y="124" text-anchor="start" font-size="14" font-weight="800" fill="#f4f4f4">A. Real-payload RPC benchmark</text>
+<text x="44" y="144" text-anchor="start" font-size="11" font-weight="500" fill="#a3a3a3">HMAC/JSON RPCs, median of 6 boots per mode</text>
+<text x="164" y="186" text-anchor="end" font-size="12" font-weight="700" fill="#e8e8e8">latency p50</text>
+<rect x="174" y="160" width="34" height="14" fill="#c2c2c2"/><rect x="174" y="164" width="34" height="2" fill="#8a8a8a"/><rect x="174" y="168" width="34" height="2" fill="#8a8a8a"/><rect x="174" y="160" width="34" height="2" fill="#f4f4f4"/><rect x="174" y="172" width="34" height="2" fill="#242424"/><rect x="207" y="160" width="1" height="14" fill="#f4f4f4"/>
+<text x="216" y="172" text-anchor="start" font-size="12" font-weight="600" fill="#c8c8c8">8.0 ms</text>
+<rect x="174" y="176" width="18" height="14" fill="#d01212"/><rect x="174" y="180" width="18" height="2" fill="#8a0a0a"/><rect x="174" y="184" width="18" height="2" fill="#8a0a0a"/><rect x="174" y="176" width="18" height="2" fill="#ff3a3a"/><rect x="174" y="188" width="18" height="2" fill="#d4d4d4"/><rect x="191" y="176" width="1" height="14" fill="#ff3a3a"/>
+<text x="200" y="188" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">4.1 ms (-49%)</text>
+<text x="164" y="230" text-anchor="end" font-size="12" font-weight="700" fill="#e8e8e8">latency p99</text>
+<rect x="174" y="204" width="80" height="14" fill="#c2c2c2"/><rect x="174" y="208" width="80" height="2" fill="#8a8a8a"/><rect x="174" y="212" width="80" height="2" fill="#8a8a8a"/><rect x="174" y="204" width="80" height="2" fill="#f4f4f4"/><rect x="174" y="216" width="80" height="2" fill="#242424"/><rect x="253" y="204" width="1" height="14" fill="#f4f4f4"/>
+<text x="262" y="216" text-anchor="start" font-size="12" font-weight="600" fill="#c8c8c8">18.5 ms</text>
+<rect x="174" y="220" width="52" height="14" fill="#d01212"/><rect x="174" y="224" width="52" height="2" fill="#8a0a0a"/><rect x="174" y="228" width="52" height="2" fill="#8a0a0a"/><rect x="174" y="220" width="52" height="2" fill="#ff3a3a"/><rect x="174" y="232" width="52" height="2" fill="#d4d4d4"/><rect x="225" y="220" width="1" height="14" fill="#ff3a3a"/>
+<text x="234" y="232" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">12.1 ms (-35%)</text>
+<text x="164" y="274" text-anchor="end" font-size="12" font-weight="700" fill="#e8e8e8">balanced p50</text>
+<rect x="174" y="248" width="72" height="14" fill="#c2c2c2"/><rect x="174" y="252" width="72" height="2" fill="#8a8a8a"/><rect x="174" y="256" width="72" height="2" fill="#8a8a8a"/><rect x="174" y="248" width="72" height="2" fill="#f4f4f4"/><rect x="174" y="260" width="72" height="2" fill="#242424"/><rect x="245" y="248" width="1" height="14" fill="#f4f4f4"/>
+<text x="254" y="260" text-anchor="start" font-size="12" font-weight="600" fill="#c8c8c8">16.7 ms</text>
+<rect x="174" y="264" width="28" height="14" fill="#d01212"/><rect x="174" y="268" width="28" height="2" fill="#8a0a0a"/><rect x="174" y="272" width="28" height="2" fill="#8a0a0a"/><rect x="174" y="264" width="28" height="2" fill="#ff3a3a"/><rect x="174" y="276" width="28" height="2" fill="#d4d4d4"/><rect x="201" y="264" width="1" height="14" fill="#ff3a3a"/>
+<text x="210" y="276" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">6.4 ms (-62%)</text>
+<text x="164" y="318" text-anchor="end" font-size="12" font-weight="700" fill="#e8e8e8">balanced p99</text>
+<rect x="174" y="292" width="200" height="14" fill="#c2c2c2"/><rect x="174" y="296" width="200" height="2" fill="#8a8a8a"/><rect x="174" y="300" width="200" height="2" fill="#8a8a8a"/><rect x="174" y="292" width="200" height="2" fill="#f4f4f4"/><rect x="174" y="304" width="200" height="2" fill="#242424"/><rect x="373" y="292" width="1" height="14" fill="#f4f4f4"/>
+<text x="382" y="304" text-anchor="start" font-size="12" font-weight="600" fill="#c8c8c8">46.5 ms</text>
+<rect x="174" y="308" width="171" height="14" fill="#d01212"/><rect x="174" y="312" width="171" height="2" fill="#8a0a0a"/><rect x="174" y="316" width="171" height="2" fill="#8a0a0a"/><rect x="174" y="308" width="171" height="2" fill="#ff3a3a"/><rect x="174" y="320" width="171" height="2" fill="#d4d4d4"/><rect x="344" y="308" width="1" height="14" fill="#ff3a3a"/>
+<text x="353" y="320" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">39.6 ms (-15%)</text>
+<rect x="44" y="348" width="488" height="26" fill="#140404" stroke="#ff1a1a" stroke-width="1"/>
+<text x="56" y="366" text-anchor="start" font-size="12" font-weight="700" fill="#ff2a2a">A 4 ms RPC now finishes near its ~4 ms solo cost (p50)</text>
+<text x="44" y="404" text-anchor="start" font-size="12" font-weight="500" fill="#c8c8c8">Batch HMAC throughput: 1,038 → 1,031 MiB per 2 s (-0.7%)</text>
+<rect x="568" y="96" width="528" height="340" fill="#070707" stroke="#e10600" stroke-width="1.5"/><rect x="568" y="433" width="528" height="3" fill="#c8c8c8"/><rect x="568" y="96" width="3" height="340" fill="#ff1a1a"/>
+<text x="588" y="124" text-anchor="start" font-size="14" font-weight="800" fill="#f4f4f4">B. jobs-v2 branch sweep, latency p99</text>
+<text x="588" y="144" text-anchor="start" font-size="11" font-weight="500" fill="#a3a3a3">Geo-mean of seeds 151 and 301, two clean repeats per cell</text>
+<text x="656" y="184" text-anchor="end" font-size="12" font-weight="700" fill="#e8e8e8">s4-u15</text>
+<rect x="666" y="158" width="35" height="14" fill="#c2c2c2"/><rect x="666" y="162" width="35" height="2" fill="#8a8a8a"/><rect x="666" y="166" width="35" height="2" fill="#8a8a8a"/><rect x="666" y="158" width="35" height="2" fill="#f4f4f4"/><rect x="666" y="170" width="35" height="2" fill="#242424"/><rect x="700" y="158" width="1" height="14" fill="#f4f4f4"/>
+<text x="709" y="170" text-anchor="start" font-size="12" font-weight="600" fill="#c8c8c8">15.4 ms</text>
+<rect x="666" y="174" width="22" height="14" fill="#d01212"/><rect x="666" y="178" width="22" height="2" fill="#8a0a0a"/><rect x="666" y="182" width="22" height="2" fill="#8a0a0a"/><rect x="666" y="174" width="22" height="2" fill="#ff3a3a"/><rect x="666" y="186" width="22" height="2" fill="#d4d4d4"/><rect x="687" y="174" width="1" height="14" fill="#ff3a3a"/>
+<text x="696" y="186" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">9.8 ms (-36%)</text>
+<text x="656" y="218" text-anchor="end" font-size="12" font-weight="700" fill="#e8e8e8">s4-u35</text>
+<rect x="666" y="192" width="61" height="14" fill="#c2c2c2"/><rect x="666" y="196" width="61" height="2" fill="#8a8a8a"/><rect x="666" y="200" width="61" height="2" fill="#8a8a8a"/><rect x="666" y="192" width="61" height="2" fill="#f4f4f4"/><rect x="666" y="204" width="61" height="2" fill="#242424"/><rect x="726" y="192" width="1" height="14" fill="#f4f4f4"/>
+<text x="735" y="204" text-anchor="start" font-size="12" font-weight="600" fill="#c8c8c8">27.0 ms</text>
+<rect x="666" y="208" width="48" height="14" fill="#d01212"/><rect x="666" y="212" width="48" height="2" fill="#8a0a0a"/><rect x="666" y="216" width="48" height="2" fill="#8a0a0a"/><rect x="666" y="208" width="48" height="2" fill="#ff3a3a"/><rect x="666" y="220" width="48" height="2" fill="#d4d4d4"/><rect x="713" y="208" width="1" height="14" fill="#ff3a3a"/>
+<text x="722" y="220" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">21.1 ms (-22%)</text>
+<text x="656" y="252" text-anchor="end" font-size="12" font-weight="700" fill="#e8e8e8">s4-u45</text>
+<rect x="666" y="226" width="131" height="14" fill="#c2c2c2"/><rect x="666" y="230" width="131" height="2" fill="#8a8a8a"/><rect x="666" y="234" width="131" height="2" fill="#8a8a8a"/><rect x="666" y="226" width="131" height="2" fill="#f4f4f4"/><rect x="666" y="238" width="131" height="2" fill="#242424"/><rect x="796" y="226" width="1" height="14" fill="#f4f4f4"/>
+<text x="805" y="238" text-anchor="start" font-size="12" font-weight="600" fill="#c8c8c8">58.0 ms</text>
+<rect x="666" y="242" width="116" height="14" fill="#d01212"/><rect x="666" y="246" width="116" height="2" fill="#8a0a0a"/><rect x="666" y="250" width="116" height="2" fill="#8a0a0a"/><rect x="666" y="242" width="116" height="2" fill="#ff3a3a"/><rect x="666" y="254" width="116" height="2" fill="#d4d4d4"/><rect x="781" y="242" width="1" height="14" fill="#ff3a3a"/>
+<text x="790" y="254" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">51.1 ms (-12%)</text>
+<text x="656" y="286" text-anchor="end" font-size="12" font-weight="700" fill="#e8e8e8">s12-u15</text>
+<rect x="666" y="260" width="92" height="14" fill="#c2c2c2"/><rect x="666" y="264" width="92" height="2" fill="#8a8a8a"/><rect x="666" y="268" width="92" height="2" fill="#8a8a8a"/><rect x="666" y="260" width="92" height="2" fill="#f4f4f4"/><rect x="666" y="272" width="92" height="2" fill="#242424"/><rect x="757" y="260" width="1" height="14" fill="#f4f4f4"/>
+<text x="766" y="272" text-anchor="start" font-size="12" font-weight="600" fill="#c8c8c8">40.6 ms</text>
+<rect x="666" y="276" width="73" height="14" fill="#d01212"/><rect x="666" y="280" width="73" height="2" fill="#8a0a0a"/><rect x="666" y="284" width="73" height="2" fill="#8a0a0a"/><rect x="666" y="276" width="73" height="2" fill="#ff3a3a"/><rect x="666" y="288" width="73" height="2" fill="#d4d4d4"/><rect x="738" y="276" width="1" height="14" fill="#ff3a3a"/>
+<text x="747" y="288" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">32.5 ms (-20%)</text>
+<text x="656" y="320" text-anchor="end" font-size="12" font-weight="700" fill="#e8e8e8">s12-u35</text>
+<rect x="666" y="294" width="190" height="14" fill="#c2c2c2"/><rect x="666" y="298" width="190" height="2" fill="#8a8a8a"/><rect x="666" y="302" width="190" height="2" fill="#8a8a8a"/><rect x="666" y="294" width="190" height="2" fill="#f4f4f4"/><rect x="666" y="306" width="190" height="2" fill="#242424"/><rect x="855" y="294" width="1" height="14" fill="#f4f4f4"/>
+<text x="864" y="306" text-anchor="start" font-size="12" font-weight="600" fill="#c8c8c8">84.0 ms</text>
+<rect x="666" y="310" width="126" height="14" fill="#d01212"/><rect x="666" y="314" width="126" height="2" fill="#8a0a0a"/><rect x="666" y="318" width="126" height="2" fill="#8a0a0a"/><rect x="666" y="310" width="126" height="2" fill="#ff3a3a"/><rect x="666" y="322" width="126" height="2" fill="#d4d4d4"/><rect x="791" y="310" width="1" height="14" fill="#ff3a3a"/>
+<text x="800" y="322" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">55.8 ms (-34%)</text>
+<line x1="588" y1="336" x2="1072" y2="336" stroke="#2a2a2a" stroke-width="1"/>
+<text x="588" y="356" text-anchor="start" font-size="11" font-weight="700" fill="#ff3a3a">Under capacity: p99 -25% latency, -15% balanced; p50 -39%</text>
+<text x="588" y="374" text-anchor="start" font-size="11" font-weight="500" fill="#c8c8c8">Batch CPU under capacity: 0.998x of wake=0</text>
+<text x="588" y="392" text-anchor="start" font-size="11" font-weight="600" fill="#d0d0d0">Overload s4-u65: p99 +1–3%, p50 +7–19%, batch −3–4%</text>
+<text x="588" y="410" text-anchor="start" font-size="10" font-weight="500" fill="#8d8d8d">(latency profile, both seeds; not a win when latency work saturates)</text>
 </svg>

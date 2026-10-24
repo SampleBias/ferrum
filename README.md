@@ -1,10 +1,74 @@
+<p align="center">
+  <img src="docs/brand/ferrum-logo.png" alt="FERRUM" width="869">
+</p>
+
 # Ferrum
 
-Ferrum is a [Hermit](https://github.com/hermit-os)-based Rust unikernel whose resource-management policies are selected by an external controller (heuristic, threshold classifier, or [Laya](https://github.com/NandhaKishorM/laya) System 1 inference) while the Rust kernel retains hardware control, safety invariants, lease expiration, and autonomous fallback.
+**The future of sensors is AI adaptive.**
+
+Ferrum is an adaptive kernel for autonomous AI systems. A decision model reads live telemetry and selects a resource policy. A Rust unikernel, built on [Hermit](https://github.com/hermit-os), applies that policy to the CPU, the managed cache, and admission, and it keeps a safe profile in force when the model is late, absent, or wrong.
+
+The model chooses one named profile from a fixed catalog (heuristic, frozen threshold, distilled joint policy, or [Laya](https://github.com/NandhaKishorM/laya)). The kernel schedules threads, accounts memory, checks the lease, and falls back to `balanced` on its own. Inference never becomes the interrupt handler, the allocator, or a source of kernel code.
+
+On a sensor, that split is what extends battery life, lengthens the time the core stays asleep, and puts compute on the measurement that changes the result.
+
+- **Battery.** Patrol runs at a low duty cycle. Tickless idle coalesces timer wakes so the core can sit in hardware sleep between samples. On the joint-ABI patrol check that residency is **98.8%** (10 timer wakes against 110).
+- **Wake interval.** Quiet patrol stretches the time between timer interrupts. Wake mode 3 still bounds the cost of coming back: a waking class reclaims at most four slices it missed, and in-class turns stay FIFO at 4 ms. Under the latency profile that cuts real-payload RPC p99 from **18.5 ms to 12.1 ms**.
+- **Sensitivity, specificity, and speed.** The same core is reweighted per regime. A capture deadline takes latency share. Interferent rejection takes batch share. A full sample ring takes maintenance share and a lower cache target. On the sealed RPC workload, moving from `balanced` (1:1:1) to `latency` (6:2:2) cuts p99 from **46.9 ms to 18.2 ms** (2.58×) and holds batch HMAC throughput at **101.4%**.
+
+`deployments/air-biosensor` is the worked example: clean-air patrol, plume capture, clutter confirmation, and ring reclaim, each with an expected profile. Analytical sensitivity and specificity there are phase objectives of that deployment. The latency and sleep numbers above are unikernel measurements, not a wet-lab assay.
+
+## Use cases
+
+The kernel is domain-agnostic. A deployment supplies the sensor and the phase model. The same policy catalog covers:
+
+- **Bioaerosol and biosensors.** Low-rate optical or immunoassay patrol, a latency-weighted capture before the valve or filter deadline, then a batch-weighted confirmation that separates analyte from pollen, dust, and other interferents.
+- **Temperature, humidity, and pressure.** Duty cycle lengthens in a stable air mass and shortens when the gradient steepens.
+- **Gas.** Electrochemical and NDIR cells for CO₂, CO, O₃, NOₓ, and VOCs. Heater and sample-pump energy run when the model calls for a measurement or a zero, and stay off on patrol.
+- **Particles and turbidity.** Sparse counts in clean media. A fast acquisition window when a plume or a bloom crosses the threshold.
+- **Aircraft and drones.** Payload computers on a propulsion-limited bus. Detect and control stay latency-weighted. Spectral or mapping work takes batch weight only while the contact is in view.
+- **Satellites and small spacecraft.** Orbit-averaged energy and thermal caps. Onboard triage stays cheap. Downlink and heavy reduction run only for frames the policy promotes. The payload sleeps between passes.
+- **Water.** Conductivity, dissolved oxygen, pH, and turbidity on buoys and sondes. A threshold crossing opens a burst. Reclaim runs before the sample ring overwrites a positive.
+
+## Hardware
+
+Two different machines show up in this repository. The development host builds and boots the unikernel. A field node would be the machine that runs it next to a sensor. The recorded results are from the first.
+
+### Development host
+
+| Requirement | What this tree uses |
+| --- | --- |
+| Host | Linux x86-64 |
+| Hypervisor | `qemu-system-x86_64`, machine `pc`, serial console, `isa-debug-exit` |
+| Guest CPU | 1 vCPU. KVM boots with `-cpu host`. TCG boots with `qemu64` plus `apic`, `fsgsbase`, `fxsr`, `rdrand`, `rdtscp`, `xsave`, `xsaveopt` |
+| Guest RAM | 512 MiB (`-m 512M` in `tools/run-qemu.sh`) |
+| Network | virtio-net, static `10.0.2.15`, when a controller is attached |
+| Rust | `1.94.0` with `rust-std` for `x86_64-unknown-hermit`. Kernel pin `nightly-2026-02-01` |
+| Loader | `hermit-loader-x86_64` v0.5.6 |
+| Controller | Python 3. Heuristic, threshold, and distilled policies are small. A live Laya checkpoint is the large one |
+| Host RAM | 16 GB is the planning figure for a Laya session. The 421 M-weight checkpoint is about 1.7 GB at fp32 before activations, runtime, and copies ([docs/05](docs/05-laya-controller.md)) |
+| KVM | Required for the timing numbers (`/dev/kvm`, `kvm_amd` or `kvm_intel`). Functional boots run under TCG |
+
+Hermit requires the `FSGSBASE` and `RDTSCP` CPU features to boot ([Hermit QEMU notes](https://github.com/hermit-os/hermit-rs/wiki/Running-HermitOS)). The lab hosts behind the published numbers are an AMD Ryzen 5 1600 and an Intel Core i7-10750H, both on QEMU 11.1.1. Those are the measurement machines, not a minimum spec.
+
+The guest's 512 MiB planning envelope is 128 MiB for the image, kernel, stacks, control, and network, 256 MiB of managed arenas, and 128 MiB of headroom ([docs/03](docs/03-kernel-mechanisms-and-policies.md)). An emergency reclaim fires when unreserved headroom falls below 64 MiB.
+
+### Sensor node
+
+Ferrum targets an application processor with an MMU. The guest, the loader pin, and every measured result in this tree are x86-64. Upstream Hermit also builds for aarch64 and riscv64; the [loader README](https://github.com/hermit-os/loader) shows an x86-64 example at 1 CPU and 128 MiB, and an aarch64 example on a `virt` machine with GICv3 at 512 MiB. Those are Hermit boot examples. They are not a Ferrum port.
+
+A node running this image needs:
+
+- An MMU-class core. x86-64 for the current guest.
+- DRAM on the order of the 512 MiB arena budget above.
+- A programmable timer and a hardware idle state. Coalesced wakes save energy only when the core can actually sleep.
+- The sensor on a bus the deployment owns. ADC, I2C, and SPI drivers are not in this tree. `deployments/air-biosensor` is a phase model on `hermit-policy-abi`.
+- A link to the controller while inference stays off the node. Moving the Laya checkpoint into the guest is a separate memory budget ([docs/13](docs/13-in-guest-evolution.md)). The planning footprint of that checkpoint does not fit in 512 MiB.
+- A power limit worth managing: a battery, a flight bus, or a spacecraft energy cap. The kernel accounts CPU time and wake frequency. It does not integrate current.
 
 ## How It Works
 
-The system runs as two paired artifacts over QEMU `virtio-net`:
+The prototype is two paired artifacts over QEMU `virtio-net`. The guest is the kernel. The host is the decision model.
 
 1. **Hermit Unikernel Guest (`apps/policy-guest` + `vendor/hermit-rs`):**
    - Implements an opt-in hierarchical fair-share scheduler (`ai-policy` feature) across three workload classes (`latency`, `batch`, `maintenance`) plus a reserved `system` budget, with tickless idle and single-runnable quantum coalescing for constrained devices. An opt-in wake mode (`sys_policy_set_wake`, off at boot) adds bounded wake credit and in-class FIFO order; see [docs/03](docs/03-kernel-mechanisms-and-policies.md) and the [wake-mode results](#3-scheduler-wake-mode-sys_policy_set_wake-kvm-ab).
