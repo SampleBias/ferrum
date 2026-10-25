@@ -42,23 +42,45 @@ struct HeuristicFile {
     evictable_backlog_bytes: u64,
 }
 
+#[derive(Deserialize)]
+struct HeuristicV1File {
+    id: String,
+    base: String,
+    catalog: String,
+    reference_profile: String,
+    #[serde(flatten)]
+    thresholds: HeuristicFile,
+    contended_bp: u64,
+    saturated_bp: u64,
+    release_bp: u64,
+    batch_floor_bp: u64,
+    stall_wait_us: u64,
+}
+
 fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let root = manifest.join("../..");
     let cpu_path = root.join("configs/catalog-cpu-v1.json");
     let joint_path = root.join("configs/catalog-joint-v1.json");
     let heuristic_path = root.join("configs/heuristic-v0.json");
-    for path in [&cpu_path, &joint_path, &heuristic_path] {
+    let v1_path = root.join("configs/heuristic-v1.json");
+    for path in [&cpu_path, &joint_path, &heuristic_path, &v1_path] {
         println!("cargo:rerun-if-changed={}", path.display());
     }
 
     let cpu_bytes = fs::read(&cpu_path).expect("read cpu catalog");
     let joint_bytes = fs::read(&joint_path).expect("read joint catalog");
     let heuristic_bytes = fs::read(&heuristic_path).expect("read heuristic");
+    let v1_bytes = fs::read(&v1_path).expect("read heuristic-v1");
     let cpu: CatalogFile = serde_json::from_slice(&cpu_bytes).expect("parse cpu catalog");
     let joint: CatalogFile = serde_json::from_slice(&joint_bytes).expect("parse joint catalog");
     let heuristic: HeuristicFile =
         serde_json::from_slice(&heuristic_bytes).expect("parse heuristic");
+    let v1: HeuristicV1File = serde_json::from_slice(&v1_bytes).expect("parse heuristic-v1");
+    assert_eq!(v1.id, "heuristic-v1");
+    assert_eq!(v1.base, "heuristic-v0");
+    assert!(v1.release_bp < v1.saturated_bp, "release must sit under saturation");
+    assert!(v1.stall_wait_us > 0, "stall_wait_us is derived from training");
 
     assert_eq!(cpu.catalog_id, "cpu-v1");
     assert_eq!(joint.catalog_id, "joint-v1");
@@ -114,21 +136,62 @@ pub const HEURISTIC_V0: crate::heuristic::HeuristicThresholds = crate::heuristic
         mp = heuristic.memory_pressure_bp,
         eb = heuristic.evictable_backlog_bytes,
     ));
+    let t = &v1.thresholds;
+    out.push_str(&format!(
+        r#"
+pub const HEURISTIC_V1: crate::heuristic::HeuristicV1 = crate::heuristic::HeuristicV1 {{
+    base: crate::heuristic::HeuristicThresholds {{
+        latency_queue_high: {lq},
+        latency_wait_us_high: {lw},
+        batch_queue_high: {bq},
+        memory_pressure_bp: {mp},
+        evictable_backlog_bytes: {eb},
+    }},
+    catalog: policy_types::CatalogId::{catalog},
+    reference: policy_types::ProfileId::{reference},
+    contended_bp: {contended},
+    saturated_bp: {saturated},
+    release_bp: {release},
+    batch_floor_bp: {floor},
+    stall_wait_us: {stall},
+}};
+"#,
+        lq = t.latency_queue_high,
+        lw = t.latency_wait_us_high,
+        bq = t.batch_queue_high,
+        mp = t.memory_pressure_bp,
+        eb = t.evictable_backlog_bytes,
+        catalog = match v1.catalog.as_str() {
+            "cpu-v1" => "CpuV1",
+            "joint-v1" => "JointV1",
+            other => panic!("unknown catalog {other}"),
+        },
+        reference = profile_variant(&v1.reference_profile),
+        contended = v1.contended_bp,
+        saturated = v1.saturated_bp,
+        release = v1.release_bp,
+        floor = v1.batch_floor_bp,
+        stall = v1.stall_wait_us,
+    ));
 
     let dest = PathBuf::from(env::var("OUT_DIR").unwrap()).join("catalog_gen.rs");
     fs::write(dest, out).unwrap();
 }
 
+fn profile_variant(id: &str) -> &'static str {
+    match id {
+        "balanced" => "Balanced",
+        "latency" => "Latency",
+        "throughput" => "Throughput",
+        "reclaim" => "Reclaim",
+        other => panic!("unknown profile {other}"),
+    }
+}
+
 fn emit_spec(const_name: &str, variant: &str, caps: u32, file: &CatalogFile, hash: &[u8]) -> String {
     let mut profiles = String::new();
     for profile in &file.profiles {
-        let id = match profile.id.as_str() {
-            "balanced" => "Balanced",
-            "latency" => "Latency",
-            "throughput" => "Throughput",
-            "reclaim" => "Reclaim",
-            other => panic!("unknown profile {other}"),
-        };
+        let id = profile_variant(&profile.id);
         profiles.push_str(&format!(
             "ProfileParams {{ id: policy_types::ProfileId::{id}, weight_latency: {wl}, weight_batch: {wb}, weight_maintenance: {wm}, cache_soft_target_bytes: {cache}, inflight_latency: {il}, inflight_batch: {ib} }},",
             wl = profile.cpu_weights.latency,

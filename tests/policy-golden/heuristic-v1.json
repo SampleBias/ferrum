@@ -1,0 +1,1415 @@
+{
+ "id": "heuristic-v1-vectors",
+ "config": "heuristic-v1",
+ "stall_wait_us": 303756,
+ "cases": [
+  {
+   "name": "training r5-1600 s4-u35/101 under capacity",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 2,
+      "runnable": 2,
+      "cpu_service_us": 357673,
+      "max_wait_us": 71302,
+      "wait_samples": 86,
+      "completions": 86,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 642300,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 1243,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "latency",
+    "rule": "latency_queue_or_wait_high",
+    "regime": "normal",
+    "latency_load_bp": 7153,
+    "batch_retained_bp": 12846
+   }
+  },
+  {
+   "name": "training r5-1600 s12-u80/103 overload",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 53,
+      "runnable": 3,
+      "cpu_service_us": 500243,
+      "max_wait_us": 926680,
+      "wait_samples": 39,
+      "completions": 39,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 499716,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 987,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "balanced",
+    "rule": "latency_overload",
+    "regime": "overload",
+    "latency_load_bp": 10004,
+    "batch_retained_bp": 9994
+   }
+  },
+  {
+   "name": "training i7-10750h s12-u65/103 slowest overload backlog",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 29,
+      "runnable": 3,
+      "cpu_service_us": 500431,
+      "max_wait_us": 473907,
+      "wait_samples": 41,
+      "completions": 41,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 499695,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 982,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "balanced",
+    "rule": "latency_overload",
+    "regime": "overload",
+    "latency_load_bp": 10008,
+    "batch_retained_bp": 9993
+   }
+  },
+  {
+   "name": "training i7-10750h s12-u35/103 longest under-capacity wait",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 398104,
+      "max_wait_us": 155696,
+      "wait_samples": 35,
+      "completions": 35,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 601873,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 1207,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "latency",
+    "rule": "latency_queue_or_wait_high",
+    "regime": "normal",
+    "latency_load_bp": 7962,
+    "batch_retained_bp": 12037
+   }
+  },
+  {
+   "name": "saturated without a stalled backlog keeps the latency rule",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 8,
+      "runnable": 3,
+      "cpu_service_us": 500000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 500000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "latency",
+    "rule": "latency_queue_or_wait_high",
+    "regime": "normal",
+    "latency_load_bp": 10000,
+    "batch_retained_bp": 10000
+   }
+  },
+  {
+   "name": "stalled backlog below saturation keeps the latency rule",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 9,
+      "runnable": 3,
+      "cpu_service_us": 466000,
+      "max_wait_us": 371000,
+      "wait_samples": 10,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 534000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "latency",
+    "rule": "latency_queue_or_wait_high",
+    "regime": "normal",
+    "latency_load_bp": 9320,
+    "batch_retained_bp": 10680
+   }
+  },
+  {
+   "name": "saturation and stall at their thresholds enter overload",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 1,
+      "runnable": 1,
+      "cpu_service_us": 475000,
+      "max_wait_us": 303756,
+      "wait_samples": 10,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 525000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "balanced",
+    "rule": "latency_overload",
+    "regime": "overload",
+    "latency_load_bp": 9500,
+    "batch_retained_bp": 10500
+   }
+  },
+  {
+   "name": "one basis point under saturation stays normal",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 30,
+      "runnable": 3,
+      "cpu_service_us": 474999,
+      "max_wait_us": 900000,
+      "wait_samples": 10,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 525001,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "latency",
+    "rule": "latency_queue_or_wait_high",
+    "regime": "normal",
+    "latency_load_bp": 9499,
+    "batch_retained_bp": 10500
+   }
+  },
+  {
+   "name": "wait one microsecond under the stall cut stays normal",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 30,
+      "runnable": 3,
+      "cpu_service_us": 500000,
+      "max_wait_us": 303755,
+      "wait_samples": 10,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 500000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "latency",
+    "rule": "latency_queue_or_wait_high",
+    "regime": "normal",
+    "latency_load_bp": 10000,
+    "batch_retained_bp": 10000
+   }
+  },
+  {
+   "name": "boosted latency over its share cuts batch to half",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "latency",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 30,
+      "runnable": 3,
+      "cpu_service_us": 750000,
+      "max_wait_us": 100000,
+      "wait_samples": 10,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 250000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "balanced",
+    "rule": "batch_floor",
+    "regime": "overload",
+    "latency_load_bp": 15000,
+    "batch_retained_bp": 5000
+   }
+  },
+  {
+   "name": "boosted latency with batch exactly at the floor stays",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "latency",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 2,
+      "runnable": 2,
+      "cpu_service_us": 525000,
+      "max_wait_us": 30000,
+      "wait_samples": 10,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 475000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "latency",
+    "rule": "latency_queue_or_wait_high",
+    "regime": "normal",
+    "latency_load_bp": 10500,
+    "batch_retained_bp": 9500
+   }
+  },
+  {
+   "name": "boosted latency under capacity keeps the boost",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "latency",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 2,
+      "runnable": 2,
+      "cpu_service_us": 400000,
+      "max_wait_us": 30000,
+      "wait_samples": 10,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 600000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "latency",
+    "rule": "latency_queue_or_wait_high",
+    "regime": "normal",
+    "latency_load_bp": 8000,
+    "batch_retained_bp": 12000
+   }
+  },
+  {
+   "name": "throughput starving latency measures at the reference",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "throughput",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 6,
+      "runnable": 3,
+      "cpu_service_us": 250000,
+      "max_wait_us": 100000,
+      "wait_samples": 10,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 750000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "balanced",
+    "rule": "measure_at_reference",
+    "regime": "normal",
+    "latency_load_bp": 5000,
+    "batch_retained_bp": 15000
+   }
+  },
+  {
+   "name": "overload holds while latency stays above release",
+   "regime": "overload",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 450000,
+      "max_wait_us": 20000,
+      "wait_samples": 10,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 550000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "balanced",
+    "rule": "overload_hold",
+    "regime": "overload",
+    "latency_load_bp": 9000,
+    "batch_retained_bp": 11000
+   }
+  },
+  {
+   "name": "overload releases under release_bp",
+   "regime": "overload",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 400000,
+      "max_wait_us": 20000,
+      "wait_samples": 10,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 600000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "latency",
+    "rule": "latency_queue_or_wait_high",
+    "regime": "normal",
+    "latency_load_bp": 8000,
+    "batch_retained_bp": 12000
+   }
+  },
+  {
+   "name": "overload releases when batch stops wanting CPU",
+   "regime": "overload",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 30,
+      "runnable": 3,
+      "cpu_service_us": 500000,
+      "max_wait_us": 900000,
+      "wait_samples": 10,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "latency",
+    "rule": "latency_queue_or_wait_high",
+    "regime": "normal",
+    "latency_load_bp": 5000,
+    "batch_retained_bp": null
+   }
+  },
+  {
+   "name": "overload releases when the CPU had idle time",
+   "regime": "overload",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 30,
+      "runnable": 3,
+      "cpu_service_us": 500000,
+      "max_wait_us": 900000,
+      "wait_samples": 10,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 400000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "latency",
+    "rule": "latency_queue_or_wait_high",
+    "regime": "normal",
+    "latency_load_bp": 10000,
+    "batch_retained_bp": 8000
+   }
+  },
+  {
+   "name": "three active classes use a one-third reference share",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 20,
+      "runnable": 3,
+      "cpu_service_us": 340000,
+      "max_wait_us": 500000,
+      "wait_samples": 10,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 330000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 2,
+      "runnable": 2,
+      "cpu_service_us": 330000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "balanced",
+    "rule": "latency_overload",
+    "regime": "overload",
+    "latency_load_bp": 10200,
+    "batch_retained_bp": 9900
+   }
+  },
+  {
+   "name": "memory emergency preempts and keeps the regime",
+   "regime": "overload",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 30,
+      "runnable": 3,
+      "cpu_service_us": 500000,
+      "max_wait_us": 900000,
+      "wait_samples": 10,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 3,
+      "runnable": 3,
+      "cpu_service_us": 500000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": true
+    }
+   },
+   "expect": {
+    "profile": "reclaim",
+    "rule": "memory_pressure_or_emergency",
+    "regime": "overload",
+    "latency_load_bp": 10000,
+    "batch_retained_bp": 10000
+   }
+  },
+  {
+   "name": "quiet window falls back to balanced",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "balanced",
+    "rule": "default_balanced_fallback",
+    "regime": "normal",
+    "latency_load_bp": 0,
+    "batch_retained_bp": null
+   }
+  },
+  {
+   "name": "batch demand with no latency queue picks throughput",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 8,
+      "runnable": 8,
+      "cpu_service_us": 1000000,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "throughput",
+    "rule": "sustained_batch_demand",
+    "regime": "normal",
+    "latency_load_bp": 0,
+    "batch_retained_bp": 20000
+   }
+  },
+  {
+   "name": "fault-matrix stand-in snapshot keeps the latency rule",
+   "regime": "normal",
+   "snapshot": {
+    "current_profile": "balanced",
+    "window_us": 1000000,
+    "groups": [
+     {
+      "class": "latency",
+      "queue_len": 4,
+      "runnable": 3,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 10,
+      "managed_bytes": 0
+     },
+     {
+      "class": "batch",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "maintenance",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     },
+     {
+      "class": "system",
+      "queue_len": 0,
+      "runnable": 0,
+      "cpu_service_us": 0,
+      "max_wait_us": 0,
+      "wait_samples": 0,
+      "completions": 0,
+      "managed_bytes": 0
+     }
+    ],
+    "pressure": {
+     "managed_used_bytes": 0,
+     "managed_cap_bytes": 268435456,
+     "headroom_bytes": 134217728,
+     "evictable_backlog_bytes": 0,
+     "emergency": false
+    }
+   },
+   "expect": {
+    "profile": "latency",
+    "rule": "latency_queue_or_wait_high",
+    "regime": "normal",
+    "latency_load_bp": 0,
+    "batch_retained_bp": null
+   }
+  }
+ ]
+}

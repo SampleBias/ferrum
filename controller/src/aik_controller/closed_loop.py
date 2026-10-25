@@ -14,6 +14,10 @@ for this candidate. `score` places each unit's closed-loop repeats beside the
 same unit's forced branches under the frozen objective. The controller hits a
 unit when its own repeats are feasible against balanced and reach the best
 profile's range on the ranking metric.
+
+`--candidate` is a frozen candidate-v0 file or configs/heuristic-v1.json.
+heuristic-v1 is not fitted to one host, so it runs on any host, but only on
+units of a holdout manifest that pins its hash and was committed first.
 """
 
 import argparse
@@ -24,9 +28,10 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from aik_controller import branches, fit, splits
+from aik_controller import branches, fit, holdout, splits
+from aik_controller.heuristic import evaluate_v1, load_v1
 
-CONTROLLERS = {"threshold": "pending-threshold"}
+CONTROLLERS = {"threshold": "pending-threshold", "heuristic-v1": "heuristic-v1"}
 
 
 class ClosedLoopError(ValueError):
@@ -48,16 +53,76 @@ def host_cpu() -> str:
     return "unknown"
 
 
+def load_candidate(root: Path, path: Path, manifest: str | None = None) -> dict:
+    """A frozen candidate-v0, or heuristic-v1 bound to the holdout manifest it runs on."""
+    doc = json.loads(path.read_text())
+    if doc.get("id") != "heuristic-v1":
+        candidate = fit._candidate(root, path)
+        if manifest not in (None, candidate["manifest"]):
+            raise ClosedLoopError(f"{path.name} was frozen under {candidate['manifest']}, not {manifest}")
+        return candidate
+    if manifest not in holdout.HOLDOUTS:
+        raise ClosedLoopError("heuristic-v1 runs on a holdout manifest; pass --manifest")
+    pinned = holdout.controller_sha256(holdout.load(root, manifest), path.name)
+    if pinned != _sha256(path):
+        raise ClosedLoopError(f"{path.name} is not the file {manifest} pins")
+    return {
+        "id": "heuristic-v1",
+        "selected": "heuristic-v1",
+        "kind": "heuristic-v1",
+        "params": load_v1(root, path.stem),
+        "manifest": manifest,
+        "manifest_sha256": splits.manifest_sha256(holdout.path(root, manifest)),
+        "host_cpu": None,
+        "kvm_module": None,
+    }
+
+
+def offline_choice(candidate: dict, snapshot: dict) -> str:
+    if candidate["kind"] == "heuristic-v1":
+        return evaluate_v1(snapshot, candidate["params"])["profile"]
+    return fit.threshold_choice(candidate["params"], snapshot)
+
+
 def guest_args(candidate: dict) -> str:
     """The guest arguments that carry a frozen candidate in place of --profile."""
     kind = candidate["kind"]
     if kind not in CONTROLLERS:
         raise ClosedLoopError(f"a {kind} candidate has no guest rule; the guest runs {', '.join(CONTROLLERS)}")
+    if kind == "heuristic-v1":
+        return "--candidate=heuristic-v1"
     params = candidate["params"]
     return (
         f"--candidate={CONTROLLERS[kind]} --cut={float(params['cut'])!r} "
         f"--below={params['below']} --above={params['above']}"
     )
+
+
+def _check_heuristic(record: dict, decision: dict, config: dict) -> str:
+    state = record["state"]
+    if decision["controller"] != "heuristic-v1":
+        raise ClosedLoopError(f"{_key(record)} ran a different candidate")
+    if (decision["pending"], decision["max_wait_us"]) != (state["latency_queue"], state["latency_max_wait_us"]):
+        raise ClosedLoopError(f"{_key(record)} decided on a state other than the one it printed")
+    offline = evaluate_v1(branches.snapshot(record), config)
+    batch = offline["signals"]["batch_retained_bp"]
+    expect = (
+        offline["profile"],
+        offline["rule"],
+        offline["regime"],
+        offline["signals"]["latency_load_bp"],
+        "none" if batch is None else batch,
+    )
+    ran = (
+        decision["choice"],
+        decision["rule"],
+        decision["regime"],
+        decision["latency_load_bp"],
+        decision["batch_retained_bp"],
+    )
+    if ran != expect:
+        raise ClosedLoopError(f"{_key(record)} ran {ran}; the offline rule gives {expect}")
+    return decision["choice"]
 
 
 def check_decision(record: dict, candidate: dict) -> str:
@@ -66,6 +131,8 @@ def check_decision(record: dict, candidate: dict) -> str:
     if record.get("profile") != branches.CANDIDATE_PROFILE or decision is None:
         raise ClosedLoopError(f"{_key(record)} is not a candidate branch")
     params = candidate["params"]
+    if candidate["kind"] == "heuristic-v1":
+        return _check_heuristic(record, decision, params)
     ran = (decision["controller"], float(decision["cut"]), decision["below"], decision["above"])
     if ran != (CONTROLLERS[candidate["kind"]], float(params["cut"]), params["below"], params["above"]):
         raise ClosedLoopError(f"{_key(record)} ran a different candidate")
@@ -87,10 +154,17 @@ def _ready(
     split: str,
     calibration_path: Path | None,
     committed,
+    manifest: str | None = None,
 ) -> None:
     """A closed loop reads a committed candidate. A sealed one also needs its committed calibration."""
     if not committed(root, candidate_path):
         raise ClosedLoopError(f"{candidate_path.name} must be committed before its closed loop runs")
+    if manifest in holdout.HOLDOUTS:
+        try:
+            holdout.require_committed(root, manifest, committed)
+        except holdout.HoldoutError as err:
+            raise ClosedLoopError(str(err)) from err
+        return
     if split not in splits.SEALED:
         return
     if calibration_path is None:
@@ -118,13 +192,20 @@ def collect(
     this_host=host_cpu,
 ) -> int:
     candidate_path = Path(args.candidate)
-    candidate = fit._candidate(root, candidate_path)
+    candidate = load_candidate(root, candidate_path, getattr(args, "manifest", None))
     choice = guest_args(candidate)
-    _ready(root, candidate_path, args.split, args.calibration_report and Path(args.calibration_report), committed)
-    if this_host() != candidate["host_cpu"]:
+    _ready(
+        root,
+        candidate_path,
+        args.split,
+        args.calibration_report and Path(args.calibration_report),
+        committed,
+        candidate["manifest"],
+    )
+    if candidate["host_cpu"] is not None and this_host() != candidate["host_cpu"]:
         raise ClosedLoopError(f"this host is not {candidate['host_cpu']}, which froze the candidate")
     doc, family, _, objective, manifest_sha = branches._frozen(root, candidate["manifest"])
-    selected = splits.units(doc, args.split, sealed_evaluation=args.sealed_evaluation)
+    selected = branches.manifest_units(doc, args.split, sealed_evaluation=args.sealed_evaluation)
     if args.scenario:
         selected = [unit for unit in selected if unit["scenario"] in args.scenario]
     if args.seed:
@@ -166,7 +247,9 @@ def collect(
                 record = branches.parse_boot(text)
                 entry.update(record)
                 entry["flags"] = branches.comparability_flags(record, family, objective)
-                if (record["host"]["host_cpu"], record["host"]["kvm_module"]) != _host(candidate):
+                if candidate["host_cpu"] is not None and (
+                    record["host"]["host_cpu"], record["host"]["kvm_module"]
+                ) != _host(candidate):
                     stop = ClosedLoopError(f"{_key(entry)} ran on a host other than the candidate's")
                 else:
                     entry["choice"] = check_decision(entry, candidate)
@@ -204,7 +287,7 @@ def _restore(summary: dict) -> dict:
     return {key: (branches.INF if value is None and key.startswith("p99") else value) for key, value in summary.items()}
 
 
-def score_unit(unit: dict, records: list[dict], objective: dict, params: dict) -> dict:
+def score_unit(unit: dict, records: list[dict], objective: dict, candidate: dict) -> dict:
     """One unit's closed-loop repeats against its own forced branches under the objective."""
     kept = records[: objective["repeats"]]
     row = {
@@ -215,7 +298,7 @@ def score_unit(unit: dict, records: list[dict], objective: dict, params: dict) -
         "best": unit["best"],
         "choices": dict(Counter(record["decision"]["choice"] for record in kept)),
         "choices_in_label": sum(record["decision"]["choice"] in unit["label"] for record in kept),
-        "offline_choices": dict(Counter(fit.threshold_choice(params, b["snapshot"]) for b in unit["branches"])),
+        "offline_choices": dict(Counter(offline_choice(candidate, b["snapshot"]) for b in unit["branches"])),
         "pending": [record["state"]["latency_queue"] for record in kept],
         "decide_us": [record["decision"]["decide_us"] for record in kept],
     }
@@ -233,9 +316,15 @@ def score_unit(unit: dict, records: list[dict], objective: dict, params: dict) -
     return {**row, "closed_loop": verdict, "summary": branches._jsonable(summary)}
 
 
-def score(root: Path, candidate_path: Path, labels: list[Path], records_paths: list[Path]) -> dict:
+def score(
+    root: Path,
+    candidate_path: Path,
+    labels: list[Path],
+    records_paths: list[Path],
+    manifest: str | None = None,
+) -> dict:
     """Every scored unit's closed-loop verdict, beside the same candidate's offline score."""
-    candidate = fit._candidate(root, candidate_path)
+    candidate = load_candidate(root, candidate_path, manifest)
     guest_args(candidate)
     records = [record for path in records_paths for record in branches._read_records(path)]
     if not records:
@@ -248,15 +337,20 @@ def score(root: Path, candidate_path: Path, labels: list[Path], records_paths: l
         raise ClosedLoopError("records were collected for a different candidate")
     if {record.get("manifest_sha256") for record in records} != {candidate["manifest_sha256"]}:
         raise ClosedLoopError("records were collected under a different split manifest")
-    docs = fit._gather(root, labels, split)
-    if fit._host(docs) != _host(candidate):
+    if candidate["manifest"] in holdout.HOLDOUTS:
+        docs = [holdout.load_labels(root, path, candidate["manifest"]) for path in labels]
+        branches.wake_mode(docs)
+    else:
+        docs = fit._gather(root, labels, split)
+    host = fit._host(docs)
+    if candidate["host_cpu"] is not None and host != _host(candidate):
         raise ClosedLoopError("labels come from a different host than the candidate's fit")
     branches.wake_mode(records + docs)
     usable = [record for record in records if not record.get("error") and not record.get("flags")]
     grouped: dict[tuple[str, int], list[dict]] = {}
     for record in sorted(usable, key=lambda r: (r["repeat"], r["attempt"])):
-        if (record["host"]["host_cpu"], record["host"]["kvm_module"]) != _host(candidate):
-            raise ClosedLoopError(f"{_key(record)} ran on a host other than the candidate's")
+        if (record["host"]["host_cpu"], record["host"]["kvm_module"]) != host:
+            raise ClosedLoopError(f"{_key(record)} ran on a host other than the labels'")
         check_decision(record, candidate)
         grouped.setdefault((record["scenario"], record["seed"]), []).append(record)
     units = {(unit["scenario"], unit["seed"]): unit for doc in docs for unit in doc["units"]}
@@ -271,20 +365,21 @@ def score(root: Path, candidate_path: Path, labels: list[Path], records_paths: l
         if unit["status"] not in config["scored_status"]:
             left.append({"scenario": key[0], "seed": key[1], "status": unit["status"]})
             continue
-        rows.append(score_unit(unit, grouped.get(key, []), objective, candidate["params"]))
+        rows.append(score_unit(unit, grouped.get(key, []), objective, candidate))
     complete = [row for row in rows if row["closed_loop"] != "incomplete"]
     hits = sum(row["closed_loop"] == "hit" for row in complete)
     feasible = sum(row["closed_loop"] != "infeasible" for row in complete)
     scored, _ = fit.decisions(docs, config)
-    offline = fit.score([(unit, fit.threshold_choice(candidate["params"], b["snapshot"]), False) for unit, b in scored])
+    offline = fit.score([(unit, offline_choice(candidate, b["snapshot"]), False) for unit, b in scored])
     decide = [record["decision"]["decide_us"] for row in rows for record in grouped.get((row["scenario"], row["seed"]), [])]
     return {
         "candidate": candidate["id"],
         "selected": candidate["selected"],
         "candidate_file": candidate_path.name,
         "candidate_sha256": _sha256(candidate_path),
-        "host_cpu": candidate["host_cpu"],
-        "kvm_module": candidate["kvm_module"],
+        "manifest": candidate["manifest"],
+        "host_cpu": host[0],
+        "kvm_module": host[1],
         "split": split,
         "labels": [{key: doc[key] for key in ("labels", "labels_sha256")} for doc in docs],
         "records": [{"records": path.name, "records_sha256": _sha256(path)} for path in records_paths],
@@ -308,6 +403,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("collect")
     run.add_argument("--candidate", required=True)
+    run.add_argument("--manifest", choices=sorted(holdout.HOLDOUTS))
     run.add_argument("--split", required=True)
     run.add_argument("--scenario", action="append")
     run.add_argument("--seed", action="append", type=int)
@@ -320,6 +416,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--out", required=True)
     rate = sub.add_parser("score")
     rate.add_argument("--candidate", required=True, type=Path)
+    rate.add_argument("--manifest", choices=sorted(holdout.HOLDOUTS))
     rate.add_argument("--labels", action="append", required=True, type=Path)
     rate.add_argument("--records", action="append", required=True, type=Path)
     rate.add_argument("--out", required=True, type=Path)
@@ -330,10 +427,10 @@ def main(argv: list[str] | None = None) -> int:
             return collect(args, root)
         if args.out.exists():
             raise ClosedLoopError(f"{args.out} exists; a closed-loop score is written once")
-        report = score(root, args.candidate, args.labels, args.records)
+        report = score(root, args.candidate, args.labels, args.records, args.manifest)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(report, indent=1, sort_keys=True) + "\n")
-    except (ClosedLoopError, fit.FitError, branches.BranchError, splits.SplitError) as err:
+    except (ClosedLoopError, fit.FitError, branches.BranchError, splits.SplitError, holdout.HoldoutError) as err:
         print(f"CLOSED_LOOP_REFUSED {err}", file=sys.stderr)
         return 2
     for row in report["rows"]:

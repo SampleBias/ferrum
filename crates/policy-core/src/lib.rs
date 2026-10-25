@@ -24,6 +24,10 @@ pub use engine::{
     Ack, AckKind, ActivateOutcome, Capture, EngineConfig, PolicyEngine, PolicyError, PolicyStatus,
     ProposalOutcome,
 };
-pub use heuristic::{choose_heuristic, HeuristicThresholds, HEURISTIC_V0};
+pub use heuristic::{
+    choose_heuristic, evaluate_heuristic_v1, heuristic_v1_signals, HeuristicDecision, HeuristicRule,
+    HeuristicSession, HeuristicSignals, HeuristicThresholds, HeuristicV1, Regime, HEURISTIC_V0,
+    HEURISTIC_V1,
+};
 pub use threshold::{choose_pending_threshold, PendingThreshold, PENDING_THRESHOLD_V0};
 pub use sched::{FairScheduler, SchedError};

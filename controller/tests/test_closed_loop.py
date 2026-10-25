@@ -130,7 +130,7 @@ class ScoreTests(unittest.TestCase):
 
     def test_repeats_inside_the_best_range_hit(self):
         rows = [chosen(21_500, 2_990_000, repeat=r) for r in range(3)]
-        row = score_unit(self.unit, rows, OBJECTIVE, CANDIDATE["params"])
+        row = score_unit(self.unit, rows, OBJECTIVE, CANDIDATE)
         self.assertEqual(row["closed_loop"], "hit")
         self.assertEqual(row["choices"], {"latency": 3})
         self.assertEqual(row["choices_in_label"], 3)
@@ -138,11 +138,11 @@ class ScoreTests(unittest.TestCase):
 
     def test_repeats_outside_the_best_range_miss(self):
         rows = [chosen(30_000, 2_990_000, repeat=r) for r in range(3)]
-        self.assertEqual(score_unit(self.unit, rows, OBJECTIVE, CANDIDATE["params"])["closed_loop"], "miss")
+        self.assertEqual(score_unit(self.unit, rows, OBJECTIVE, CANDIDATE)["closed_loop"], "miss")
 
     def test_feasibility_is_against_the_units_own_balanced_branches(self):
         rows = [chosen(20_000, 2_000_000, repeat=r) for r in range(3)]
-        row = score_unit(self.unit, rows, OBJECTIVE, CANDIDATE["params"])
+        row = score_unit(self.unit, rows, OBJECTIVE, CANDIDATE)
         self.assertEqual(row["closed_loop"], "infeasible")
         self.assertEqual(row["summary"]["batch_retained_bp"], 6667)
 
@@ -154,13 +154,13 @@ class ScoreTests(unittest.TestCase):
             "reclaim": [(None, 2_000_000)] * 3,
         })
         rows = [chosen(None, 3_000_000, pending=20, repeat=r) for r in range(3)]
-        row = score_unit(unit, rows, OBJECTIVE, CANDIDATE["params"])
+        row = score_unit(unit, rows, OBJECTIVE, CANDIDATE)
         self.assertEqual(row["closed_loop"], "hit")
         self.assertIsNone(row["summary"]["p99_median"])
 
     def test_fewer_repeats_than_the_objective_are_incomplete(self):
         rows = [chosen(21_500, 2_990_000, repeat=r) for r in range(2)]
-        self.assertEqual(score_unit(self.unit, rows, OBJECTIVE, CANDIDATE["params"])["closed_loop"], "incomplete")
+        self.assertEqual(score_unit(self.unit, rows, OBJECTIVE, CANDIDATE)["closed_loop"], "incomplete")
 
 
 def _args(out, **extra):
@@ -246,6 +246,72 @@ class CollectTests(unittest.TestCase):
             with self.assertRaises(ClosedLoopError):
                 closed_loop.collect(args, ROOT, boot=boot, committed=lambda root, path: True, this_host=lambda: INTEL)
             self.assertFalse(out.exists())
+
+
+HEURISTIC_PATH = ROOT / "configs" / "heuristic-v1.json"
+HOLDOUT = json.loads((ROOT / "configs" / "holdout-v1.json").read_text())
+HOLDOUT_DIGEST = next(u["schedule_fnv64"] for u in HOLDOUT["holdout"] if u["scenario"] == "s12-u65")
+# The same real state, decided by heuristic-v1, on the holdout seed of that scenario.
+HEURISTIC_BOOT = (
+    BOOT.replace(
+        "FERRUM_BRANCH_DECISION controller=pending-threshold cut=14 below=latency above=balanced pending=20 choice=balanced decide_us=26",
+        "FERRUM_BRANCH_DECISION controller=heuristic-v1 rule=latency_overload regime=overload pending=20 "
+        "max_wait_us=576461 latency_load_bp=10004 batch_retained_bp=9994 busy_bp=9999 stalled=true choice=balanced decide_us=31",
+    )
+    .replace("seed=151", "seed=501")
+    .replace("schedule_fnv64=0xbcce088c4a318853", f"schedule_fnv64={HOLDOUT_DIGEST}")
+)
+
+
+class HeuristicV1Tests(unittest.TestCase):
+    def candidate(self):
+        return closed_loop.load_candidate(ROOT, HEURISTIC_PATH, "holdout-v1")
+
+    def test_heuristic_v1_runs_only_on_a_holdout_that_pins_it(self):
+        with self.assertRaises(ClosedLoopError):
+            closed_loop.load_candidate(ROOT, HEURISTIC_PATH)
+        candidate = self.candidate()
+        self.assertEqual(guest_args(candidate), "--candidate=heuristic-v1")
+        self.assertIsNone(candidate["host_cpu"])
+        with self.assertRaises(ClosedLoopError):
+            closed_loop.load_candidate(ROOT, CANDIDATE_PATH, "holdout-v1")
+
+    def test_the_guest_decision_matches_the_offline_rule_field_by_field(self):
+        record = parse_boot(HEURISTIC_BOOT) | {"repeat": 0, "attempt": 0}
+        self.assertEqual(check_decision(record, self.candidate()), "balanced")
+        for field, value in (("choice", "latency"), ("rule", "batch_floor"), ("latency_load_bp", 9_000), ("regime", "normal")):
+            wrong = copy.deepcopy(record)
+            wrong["decision"][field] = value
+            with self.assertRaises(ClosedLoopError, msg=field):
+                check_decision(wrong, self.candidate())
+        moved = copy.deepcopy(record)
+        moved["state"]["latency_max_wait_us"] = 100_000
+        with self.assertRaises(ClosedLoopError):
+            check_decision(moved, self.candidate())
+
+    def test_holdout_boots_wait_for_the_commit_and_run_on_any_host(self):
+        calls = []
+
+        def boot(root, family, unit, profile, timeout_s, serial, choice):
+            calls.append((unit["scenario"], unit["seed"], choice))
+            return HEURISTIC_BOOT
+
+        def refuse(*args):
+            raise AssertionError("booted")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "closed.jsonl"
+            args = _args(out, candidate=str(HEURISTIC_PATH), manifest="holdout-v1", split="holdout", seed=[501])
+            only_config = lambda root, path: path.name == "heuristic-v1.json"
+            with self.assertRaises(ClosedLoopError):
+                closed_loop.collect(args, ROOT, boot=refuse, committed=only_config, this_host=lambda: INTEL)
+            self.assertFalse(out.exists())
+            ryzen = "AMD Ryzen 5 1600 Six-Core Processor"
+            closed_loop.collect(args, ROOT, boot=boot, committed=lambda root, path: True, this_host=lambda: ryzen)
+            entries = [json.loads(line) for line in out.read_text().splitlines()]
+        self.assertEqual([e["choice"] for e in entries], ["balanced", "balanced"])
+        self.assertEqual({e["manifest"] for e in entries}, {"holdout-v1"})
+        self.assertEqual(calls[0], ("s12-u65", 501, "--candidate=heuristic-v1"))
 
 
 class ReportTests(unittest.TestCase):

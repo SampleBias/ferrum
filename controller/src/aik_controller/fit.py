@@ -210,13 +210,18 @@ def load_labels(root: Path, path: Path, split: str) -> dict:
     if split not in LABEL_CHECKS:
         raise FitError(f"{split} is not a split of {splits.CURRENT}")
     LABEL_CHECKS[split](doc, root)
+    manifest = splits.load_branched(root)
+    family = jobs.load_family(splits.family_path(root, manifest))
+    objective = json.loads(splits.objective_path(root, manifest).read_text())
+    return reproduce(path, doc, split, family, objective)
+
+
+def reproduce(path: Path, doc: dict, split: str, family: dict, objective: dict) -> dict:
+    """A checked labels file, once every unit's label reproduces from its records."""
     records_path = path.parent / doc["records"]
     if not records_path.is_file() or _sha256(records_path) != doc["records_sha256"]:
         raise FitError(f"{records_path.name} does not match {path.name}")
     records = [json.loads(line) for line in records_path.read_text().splitlines() if line.strip()]
-    manifest = splits.load_branched(root)
-    family = jobs.load_family(splits.family_path(root, manifest))
-    objective = json.loads(splits.objective_path(root, manifest).read_text())
     groups = branches.usable_units(records, family, objective)
     units = []
     for unit in doc["units"]:

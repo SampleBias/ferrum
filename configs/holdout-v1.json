@@ -1,0 +1,29 @@
+{
+  "id": "holdout-v1",
+  "family": "jobs-v2",
+  "family_sha256": "8ece16acd2417995b4c230f29dcb8b039dadd0daef5b270538fc998f3421479f",
+  "objective": "objective-v2",
+  "objective_sha256": "1361b3ea433536a3920b46ad8f114065b5f29e4d1a8c7813e385285e3194f9bd",
+  "frozen_before_labels": true,
+  "controllers": [
+    {"config": "heuristic-v1.json", "sha256": "c6e7a84d5f9a52a66d0273a292f4921f70d4a1e704160917b9b650b7bb4d098b"}
+  ],
+  "holdout": [
+    {"scenario": "s4-u15", "seed": 501, "schedule_fnv64": "0x710161828b227366"},
+    {"scenario": "s4-u35", "seed": 501, "schedule_fnv64": "0xd047cc942706eaf5"},
+    {"scenario": "s4-u45", "seed": 501, "schedule_fnv64": "0xdaf930ab3a56a783"},
+    {"scenario": "s4-u65", "seed": 501, "schedule_fnv64": "0x81053ea6f73d3b7e"},
+    {"scenario": "s4-u72", "seed": 501, "schedule_fnv64": "0x086ef837c139f5a7"},
+    {"scenario": "s4-u80", "seed": 501, "schedule_fnv64": "0xde62c2e538cc6b09"},
+    {"scenario": "s4-u95", "seed": 501, "schedule_fnv64": "0x147d82ec280d75ec"},
+    {"scenario": "s12-u15", "seed": 501, "schedule_fnv64": "0xae152769a17772aa"},
+    {"scenario": "s12-u35", "seed": 501, "schedule_fnv64": "0x4746684b329d139d"},
+    {"scenario": "s12-u45", "seed": 501, "schedule_fnv64": "0x9d614cd92ecdbd7a"},
+    {"scenario": "s12-u65", "seed": 501, "schedule_fnv64": "0xa29169e22360c122"},
+    {"scenario": "s12-u72", "seed": 501, "schedule_fnv64": "0xb656b0f4565704cf"},
+    {"scenario": "s12-u80", "seed": 501, "schedule_fnv64": "0x4b15bfa1f16e813f"},
+    {"scenario": "s32-u35", "seed": 501, "schedule_fnv64": "0xa271809c19f9d3a0"},
+    {"scenario": "s32-u65", "seed": 501, "schedule_fnv64": "0x4c88c6215dbe8612"}
+  ],
+  "note": "Fresh jobs-v2 units for heuristic-v1, which was designed after splits-v2's sealed splits were opened for candidate-v0. One new seed on every jobs-v2 configuration, seven under the even split and eight over it, disjoint from every seed in splits-v1 and splits-v2. heuristic-v1.json is pinned by hash. This file is committed before any holdout unit is booted; forced branches label each unit and heuristic-v1 closed-loop branches run on the same units, once."
+}

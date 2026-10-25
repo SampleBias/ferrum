@@ -26,7 +26,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from aik_controller import jobs, splits
+from aik_controller import holdout, jobs, splits
 from aik_controller.heuristic import choose, load_thresholds
 
 LOADER = "artifacts/loader/hermit-loader-x86_64-v0.5.6"
@@ -354,19 +354,35 @@ def boot(
     return text + "\n" + done.stdout + done.stderr
 
 
+MANIFESTS = sorted(splits.BRANCHED) + sorted(holdout.HOLDOUTS)
+
+
 def _frozen(root: Path, name: str) -> tuple[dict, dict, Path, dict, str]:
     """Manifest, family, objective path, objective, and manifest hash, all checked."""
-    path = splits.branched_path(root, name)
-    doc = splits.load_branched(root, path)
+    if name in holdout.HOLDOUTS:
+        path = holdout.path(root, name)
+        doc = holdout.load(root, name)
+    else:
+        path = splits.branched_path(root, name)
+        doc = splits.load_branched(root, path)
     family = jobs.load_family(splits.family_path(root, doc))
     objective_file = splits.objective_path(root, doc)
     objective = json.loads(objective_file.read_text())
     return doc, family, objective_file, objective, splits.manifest_sha256(path)
 
 
-def collect(args: argparse.Namespace, root: Path) -> int:
+def manifest_units(doc: dict, split: str, sealed_evaluation: bool = False) -> list[dict]:
+    """A split's units from a branched or a holdout manifest."""
+    if doc["id"] in holdout.HOLDOUTS:
+        return holdout.units(doc, split)
+    return splits.units(doc, split, sealed_evaluation=sealed_evaluation)
+
+
+def collect(args: argparse.Namespace, root: Path, committed=None) -> int:
     doc, family, _, objective, manifest_sha = _frozen(root, args.manifest)
-    selected = splits.units(doc, args.split, sealed_evaluation=args.sealed_evaluation)
+    if doc["id"] in holdout.HOLDOUTS:
+        holdout.require_committed(root, doc["id"], committed)
+    selected = manifest_units(doc, args.split, sealed_evaluation=args.sealed_evaluation)
     if args.scenario:
         selected = [unit for unit in selected if unit["scenario"] in args.scenario]
     if args.seed:
@@ -490,7 +506,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="aik_controller.branches")
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("collect")
-    run.add_argument("--manifest", default=splits.CURRENT, choices=sorted(splits.BRANCHED))
+    run.add_argument("--manifest", default=splits.CURRENT, choices=MANIFESTS)
     run.add_argument("--split", default="training")
     run.add_argument("--scenario", action="append")
     run.add_argument("--seed", action="append", type=int)
@@ -503,14 +519,14 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--wake", type=int, default=0, choices=range(4))
     run.add_argument("--out", required=True)
     mark = sub.add_parser("label")
-    mark.add_argument("--manifest", choices=sorted(splits.BRANCHED))
+    mark.add_argument("--manifest", choices=MANIFESTS)
     mark.add_argument("--records", required=True)
     mark.add_argument("--out", required=True)
     args = parser.parse_args(argv)
     root = Path(__file__).resolve().parents[3]
     try:
         return collect(args, root) if args.command == "collect" else label(args, root)
-    except (BranchError, splits.SplitError) as err:
+    except (BranchError, splits.SplitError, holdout.HoldoutError) as err:
         print(f"BRANCH_REFUSED {err}", file=sys.stderr)
         return 2
 
