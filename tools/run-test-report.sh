@@ -686,6 +686,8 @@ t_bat = c_stats["pending-threshold"]["mean_overload_batch_retained_pct"]
 l_bat = c_stats["logistic-v0"]["mean_overload_batch_retained_pct"]
 b_bat = c_stats["fixed-balanced"]["mean_overload_batch_retained_pct"]
 h_bat = c_stats["heuristic-v0"]["mean_overload_batch_retained_pct"]
+v1_r5 = c_stats["heuristic-v1"]
+v1_i7 = summarize_real_data_benchmarks(root, "i7-10750h")["controllers"]["heuristic-v1"]
 
 save_svg_and_png(
     "real-data-benchmark",
@@ -888,11 +890,12 @@ Across all **21 sealed evaluation units** (252 individual QEMU KVM boots on Ryze
 
 | Controller | Sealed Units Hit (Ryzen / Intel) | Feasible Units (>=95% Batch & Completion) | Under-Capacity Mean p99 (15%–45% Load) | Overload Mean Batch CPU Retained (65%–95% Load) | Primary Failure Mode Explained |
 | --- | --- | --- | --- | --- | --- |
-| **`distilled-joint` (Work-Aware Boundary)** | **`21 / 21 (100.0%)` / `21 / 21 (100.0%)`** | **`21 / 21 (100.0%)` / `21 / 21 (100.0%)`** | **`{t_p99:.2f} ms`** | **`{t_bat:.2f}%`** | None across both hosts; combines `queue_len` (`14.5`) with `max_wait_us < 350 ms` transient spike absorption. |
+| **`distilled-joint` (Work-Aware Boundary, post hoc)** | **`21 / 21 (100.0%)` / `21 / 21 (100.0%)`** | **`21 / 21 (100.0%)` / `21 / 21 (100.0%)`** | **`{t_p99:.2f} ms`** | **`{t_bat:.2f}%`** | None across both hosts; combines `queue_len` (`14.5`) with `max_wait_us < 350 ms` transient spike absorption. Designed on Oct 23, after these units were opened, so this row is not a held-out score. |
 | **`pending-threshold` (`cut=14.5` / `14.0`)** | **`21 / 21 (100.0%)` / `20 / 21 (95.2%)`** | **`21 / 21 (100.0%)` / `21 / 21 (100.0%)`** | **`{t_p99:.2f} ms`** | **`{t_bat:.2f}%`** | Boundary is `pending` count alone; transient queue spike (`pending=17`, `wait=357ms`) on Intel `s12-u45/312` triggers shed. |
 | **`logistic-v0` (3 features)** | `20 / 21 (95.2%)` / `19 / 21 (90.5%)` | `21 / 21 (100.0%)` / `21 / 21 (100.0%)` | `{l_p99:.2f} ms` | `{l_bat:.2f}%` | At unseen 45% load (`s12-u45`), `latency_share=0.49` tips log-odds toward `reclaim`, losing 2.57x p99 speedup. |
 | **Zero-Shot Laya / `fixed-balanced`** | `12 / 21 (57.1%)` / `11 / 21 (52.4%)` | `21 / 21 (100.0%)` / `21 / 21 (100.0%)` | `{b_p99:.2f} ms` | `{b_bat:.2f}%` | Always selects `balanced`; misses every under-capacity opportunity to cut tail latency by 2.2x–3.8x. |
 | **`heuristic-v0` / `fixed-latency`** | `9 / 21 (42.9%)` / `9 / 21 (42.9%)` | `9 / 21 (42.9%)` / `9 / 21 (42.9%)` | `{h_p99:.2f} ms` | `{h_bat:.2f}%` (violates 95% floor) | Triggers on `max_wait_us >= 5 ms` even during overload, starving batch CPU down to ~51%. |
+| **`heuristic-v1` (overload regime, post hoc)** | `{v1_r5['hits']} / 21 ({v1_r5['hit_rate_pct']}%)` / `{v1_i7['hits']} / 21 ({v1_i7['hit_rate_pct']}%)` | `{v1_r5['feasible_units']} / 21 ({v1_r5['feasible_rate_pct']}%)` / `{v1_i7['feasible_units']} / 21 ({v1_i7['feasible_rate_pct']}%)` | `{v1_r5['mean_under_capacity_p99_ms']:.2f} ms` | `{v1_r5['mean_overload_batch_retained_pct']:.2f}%` | Keeps the reference profile once latency fills its reference share with a stalled backlog or a boost cuts batch under 95%, and holds it until latency load drops under 85%. Bursty 32 ms jobs (`s32-u35`) look stalled and get `balanced`. Designed after these units were opened; its held-out test is `holdout-v1`. |
 
 ### 3.3 Decision Explainability & Counterfactual Case Studies
 

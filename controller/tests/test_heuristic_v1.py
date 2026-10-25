@@ -1,10 +1,18 @@
+import contextlib
 import copy
 import hashlib
+import io
 import json
+import socket
+import struct
+import threading
 import unittest
 from pathlib import Path
 
 from aik_controller import fit, splits, tune
+from aik_controller.explain import explain_line
+from aik_controller.features import FeatureHistory, load_edges
+from aik_controller.framing import CONTROLLER_TO_GUEST, GUEST_TO_CONTROLLER, open_frame, seal, snapshot_hash
 from aik_controller.heuristic import (
     NORMAL,
     OVERLOAD,
@@ -124,6 +132,104 @@ class HeuristicV1Tests(unittest.TestCase):
         self.assertEqual(Session(load(ROOT, "heuristic-v1")).id, "heuristic-v1")
         with self.assertRaises(ValueError):
             load_v1(ROOT, "heuristic-v0")
+
+
+class ServerSessionTests(unittest.TestCase):
+    """The live server keeps one heuristic-v1 regime per connection."""
+
+    # Twenty latency jobs have waited 400 ms in every window, so v0 boosts
+    # latency each time. Latency load falls 10000 -> 9000 -> 8000.
+    WINDOWS = [(500_000, 500_000), (450_000, 540_000), (400_000, 590_000)]
+
+    def exchange(self, session: Session, windows: list[tuple[int, int]]) -> tuple[list[str], str]:
+        from aik_controller.server import catalog_hash, exchange_round, load_key
+
+        key = load_key(ROOT / "configs" / "lab-psk.hex")
+        base = json.loads((ROOT / "tests" / "protocol-vectors" / "snapshot.canonical.json").read_text())
+        catalog_path = ROOT / "configs" / "catalog-cpu-v1.json"
+        catalog = {"id": "cpu-v1", "hash": catalog_hash(catalog_path)}
+        identity = json.loads((ROOT / "configs" / "lab-identity.json").read_text())
+        edges = load_edges(ROOT / "configs" / "features-v0.json")
+        history = FeatureHistory()
+        server, client = socket.socketpair()
+        server.settimeout(5)
+        client.settimeout(5)
+        chosen = []
+
+        def guest():
+            for seq, (latency_us, batch_us) in enumerate(windows, start=1):
+                snap = copy.deepcopy(base)
+                snap["request_seq"] = seq
+                snap["groups"][0].update(
+                    queue_len=20, runnable=3, cpu_service_us=latency_us, max_wait_us=400_000, wait_samples=10
+                )
+                snap["groups"][1].update(queue_len=3, runnable=3, cpu_service_us=batch_us)
+                snap["snapshot_hash"] = snapshot_hash(snap)
+                client.sendall(seal(GUEST_TO_CONTROLLER, key, json.dumps(snap).encode()))
+                chosen.append(_controller_frame(client, key)["profile"])
+                report = {
+                    "protocol": 1,
+                    "kind": "reject",
+                    "boot_id": snap["boot_id"],
+                    "session_id": snap["session_id"],
+                    "request_seq": seq,
+                    "reason": "late",
+                }
+                client.sendall(seal(GUEST_TO_CONTROLLER, key, json.dumps(report).encode()))
+
+        thread = threading.Thread(target=guest)
+        thread.start()
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                for _ in windows:
+                    status = exchange_round(
+                        server, key, catalog, session, identity, {"boot_id": base["boot_id"]},
+                        base["session_id"], edges, history,
+                    )
+                    self.assertEqual(status, 0)
+        finally:
+            thread.join()
+            server.close()
+            client.close()
+        return chosen, out.getvalue()
+
+    def test_the_regime_carries_between_rounds_of_one_connection_only(self):
+        config = load_v1(ROOT)
+        chosen, log = self.exchange(Session(config), self.WINDOWS)
+        self.assertEqual(chosen, ["balanced", "balanced", "latency"])
+        self.assertIn("controller=heuristic-v1 choice=balanced rule=latency_overload regime=overload", log)
+        self.assertIn("controller=heuristic-v1 choice=balanced rule=overload_hold regime=overload", log)
+        self.assertIn("controller=heuristic-v1 choice=latency rule=latency_queue_or_wait_high regime=normal", log)
+        fresh, _ = self.exchange(Session(config), self.WINDOWS[1:2])
+        self.assertEqual(fresh, ["latency"])
+
+    def test_heuristic_v0_still_boosts_every_round(self):
+        chosen, log = self.exchange(Session(load(ROOT, "heuristic-v0")), self.WINDOWS)
+        self.assertEqual(chosen, ["latency"] * 3)
+        self.assertIn("heuristic=latency(latency_queue_or_wait_high)", log)
+
+    def test_the_explain_line_names_v0_unchanged(self):
+        snap = jobs_window(500_000, 500_000, 20, 400_000)
+        v0 = load_thresholds(ROOT / "configs" / "heuristic-v0.json")
+        self.assertEqual(
+            explain_line(snap, v0), f"EXPLAIN seq={snap.get('request_seq', 0)} heuristic=latency(latency_queue_or_wait_high)"
+        )
+
+
+def _controller_frame(conn: socket.socket, key: bytes) -> dict:
+    def exact(size: int) -> bytes:
+        buf = bytearray()
+        while len(buf) < size:
+            chunk = conn.recv(size - len(buf))
+            if not chunk:
+                raise ConnectionError("closed")
+            buf.extend(chunk)
+        return bytes(buf)
+
+    header = exact(4)
+    rest = exact(struct.unpack(">I", header)[0] + 32)
+    return json.loads(open_frame(CONTROLLER_TO_GUEST, key, header + rest))
 
 
 if __name__ == "__main__":

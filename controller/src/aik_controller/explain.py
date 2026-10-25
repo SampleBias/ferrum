@@ -1,7 +1,8 @@
 """Explainability and counterfactual analysis for Ferrum policy controllers.
 
 Provides:
-1. Rule-chain attribution for `heuristic-v0` (`explain_heuristic`).
+1. Rule-chain attribution for `heuristic-v0` (`explain_heuristic`) and for
+   `heuristic-v1`'s overload regime (`explain_heuristic_v1`).
 2. Boundary margin and regime attribution for `pending-threshold` (`explain_threshold`).
 3. Standardized feature z-scores and log-odds contributions for `logistic-v0` (`explain_logistic`).
 4. Real-data counterfactual outcome comparison on branched KVM trials (`explain_counterfactual`).
@@ -13,7 +14,7 @@ import json
 from pathlib import Path
 
 from aik_controller import fit
-from aik_controller.heuristic import choose, load_thresholds
+from aik_controller.heuristic import NORMAL, choose, evaluate_v1, load_thresholds, load_v1
 
 
 def _group(snapshot: dict, name: str) -> dict:
@@ -83,6 +84,56 @@ def explain_heuristic(snapshot: dict, thresholds: dict) -> dict:
             "latency_wait_threshold_us": thresholds["latency_wait_us_high"],
             "batch_queue_len": batch["queue_len"],
             "batch_queue_threshold": thresholds["batch_queue_high"],
+        },
+        "rationale": rationale,
+    }
+
+
+def explain_heuristic_v1(snapshot: dict, config: dict, regime: str = NORMAL) -> dict:
+    """The `heuristic-v1` rule that fired, from the regime the session was in, and its signals."""
+    decision = evaluate_v1(snapshot, config, regime)
+    s = decision["signals"]
+    rule = decision["rule"]
+    choice = decision["profile"]
+    latency = _group(snapshot, "latency")
+    load = s["latency_load_bp"]
+    batch = s["batch_retained_bp"]
+    if rule == "overload_hold":
+        rationale = (
+            f"overload holds: latency_load={load}bp >= release {config['release_bp']}bp with busy={s['busy_bp']}bp "
+            f"-> {choice} (a latency boost would only take CPU from batch)"
+        )
+    elif rule == "batch_floor":
+        rationale = (
+            f"latency_load={load}bp is over its reference share and batch_retained={batch}bp < floor "
+            f"{config['batch_floor_bp']}bp -> {choice} (enter overload)"
+        )
+    elif rule == "latency_overload":
+        rationale = (
+            f"latency_load={load}bp >= {config['saturated_bp']}bp and the backlog is stalled "
+            f"(queue={latency['queue_len']}, max_wait_us={latency['max_wait_us']} >= {config['stall_wait_us']}) "
+            f"-> {choice} (enter overload)"
+        )
+    elif rule == "measure_at_reference":
+        rationale = (
+            f"the current profile gives latency less than {choice} and latency used "
+            f"{s['latency_current_bp']}bp of that share -> {choice} to measure demand at the reference share"
+        )
+    else:
+        rationale = explain_heuristic(snapshot, config)["rationale"]
+    return {
+        "controller": "heuristic-v1",
+        "choice": choice,
+        "triggered_rule": rule,
+        "regime_in": regime,
+        "regime": decision["regime"],
+        "signals": {
+            **s,
+            "contended_bp": config["contended_bp"],
+            "saturated_bp": config["saturated_bp"],
+            "release_bp": config["release_bp"],
+            "batch_floor_bp": config["batch_floor_bp"],
+            "stall_wait_us": config["stall_wait_us"],
         },
         "rationale": rationale,
     }
@@ -311,13 +362,26 @@ def explain_line(
     thresholds: dict,
     candidate_params: dict | None = None,
     logistic_params: dict | None = None,
+    regime: str = NORMAL,
 ) -> str:
-    """Single-line structured explanation for `aik_controller.server` output."""
-    h = explain_heuristic(snapshot, thresholds)
-    parts = [
-        f"EXPLAIN seq={snapshot.get('request_seq', 0)}",
-        f"heuristic={h['choice']}({h['triggered_rule']})",
-    ]
+    """Single-line structured explanation for `aik_controller.server` output.
+
+    `thresholds` is either heuristic's config. For heuristic-v1, `regime` is the
+    session's regime before this snapshot.
+    """
+    parts = [f"EXPLAIN seq={snapshot.get('request_seq', 0)}"]
+    if thresholds.get("id") == "heuristic-v1":
+        h = explain_heuristic_v1(snapshot, thresholds, regime)
+        s = h["signals"]
+        batch = "none" if s["batch_retained_bp"] is None else s["batch_retained_bp"]
+        parts.append(
+            f"controller=heuristic-v1 choice={h['choice']} rule={h['triggered_rule']} regime={h['regime']} "
+            f"latency_load_bp={s['latency_load_bp']} batch_retained_bp={batch} busy_bp={s['busy_bp']} "
+            f"stalled={str(s['stalled']).lower()}"
+        )
+    else:
+        h = explain_heuristic(snapshot, thresholds)
+        parts.append(f"heuristic={h['choice']}({h['triggered_rule']})")
     if candidate_params is not None:
         t = explain_threshold(snapshot, candidate_params)
         parts.append(
@@ -331,12 +395,18 @@ def explain_line(
     return " ".join(parts)
 
 
+# Fixed before final_test and out_of_distribution were opened on Oct 7. The
+# other controllers were designed after, so those units are not their test.
+SEALED_BEFORE_OPENING = ("pending-threshold", "logistic-v0", "fixed-balanced", "heuristic-v0")
+
+
 def summarize_real_data_benchmarks(root: Path, host_tag: str = "r5-1600") -> dict:
     """Summarize real recorded KVM benchmarks and explainability case studies on `host_tag`."""
     eval_doc = json.loads((root / "data" / "jobs-v2" / f"evaluation-v0-{host_tag}.json").read_text())
     fit_doc = json.loads((root / "data" / "jobs-v2" / f"fit-v0-{host_tag}.json").read_text())
     candidate_doc = json.loads((root / "configs" / f"candidate-v0-{host_tag}.json").read_text())
     thresholds = load_thresholds(root / "configs" / "heuristic-v0.json")
+    heuristic_v1 = load_v1(root)
     cand_params = candidate_doc["params"]
     log_params = fit_doc["fitted"]["logistic-v0"]
 
@@ -360,6 +430,7 @@ def summarize_real_data_benchmarks(root: Path, host_tag: str = "r5-1600") -> dic
         "logistic-v0",
         "fixed-balanced",
         "heuristic-v0",
+        "heuristic-v1",
     ]
     agg = {
         name: {
@@ -382,6 +453,7 @@ def summarize_real_data_benchmarks(root: Path, host_tag: str = "r5-1600") -> dic
         t_exp = explain_threshold(snap, cand_params)
         l_exp = explain_logistic(snap, log_params)
         h_exp = explain_heuristic(snap, thresholds)
+        v1_exp = explain_heuristic_v1(snap, heuristic_v1)
 
         picks = {
             "distilled-joint": d_exp["choice"],
@@ -389,6 +461,7 @@ def summarize_real_data_benchmarks(root: Path, host_tag: str = "r5-1600") -> dic
             "logistic-v0": l_exp["choice"],
             "fixed-balanced": "balanced",
             "heuristic-v0": h_exp["choice"],
+            "heuristic-v1": v1_exp["choice"],
         }
 
         under_cap = t_exp["pending"] < cand_params["cut"]
@@ -408,6 +481,7 @@ def summarize_real_data_benchmarks(root: Path, host_tag: str = "r5-1600") -> dic
         cf_cand = explain_counterfactual(unit, t_exp["choice"])
         cf_bal = explain_counterfactual(unit, "balanced")
         cf_heur = explain_counterfactual(unit, h_exp["choice"])
+        cf_v1 = explain_counterfactual(unit, v1_exp["choice"])
         scenario_rows.append({
             "split": split_name,
             "scenario": unit["scenario"],
@@ -420,12 +494,15 @@ def summarize_real_data_benchmarks(root: Path, host_tag: str = "r5-1600") -> dic
             "logistic_choice": l_exp["choice"],
             "logistic_prob": l_exp["probability"],
             "heuristic_choice": h_exp["choice"],
+            "heuristic_v1_choice": v1_exp["choice"],
+            "heuristic_v1_rule": v1_exp["triggered_rule"],
             "label": unit["label"],
             "distilled_p99_ms": None if cf_dist["p99_median_us"] is None else round(cf_dist["p99_median_us"] / 1000.0, 2),
             "candidate_p99_ms": None if cf_cand["p99_median_us"] is None else round(cf_cand["p99_median_us"] / 1000.0, 2),
             "balanced_p99_ms": None if cf_bal["p99_median_us"] is None else round(cf_bal["p99_median_us"] / 1000.0, 2),
             "candidate_batch_pct": round(cf_cand["batch_retained_bp"] / 100.0, 2),
             "heuristic_batch_pct": round(cf_heur["batch_retained_bp"] / 100.0, 2),
+            "heuristic_v1_batch_pct": round(cf_v1["batch_retained_bp"] / 100.0, 2),
         })
 
         # Pick 4 representative case studies:
@@ -447,6 +524,7 @@ def summarize_real_data_benchmarks(root: Path, host_tag: str = "r5-1600") -> dic
                 "threshold": t_exp,
                 "logistic": l_exp,
                 "heuristic": h_exp,
+                "heuristic_v1": v1_exp,
                 "counterfactual": cf_dist,
             })
 
@@ -456,6 +534,7 @@ def summarize_real_data_benchmarks(root: Path, host_tag: str = "r5-1600") -> dic
         o_bat = st["overload_batch_retained_pct"]
         o_cmp = st["overload_completion_pct"]
         summary_controllers[cname] = {
+            "evidence": "sealed" if cname in SEALED_BEFORE_OPENING else "post_hoc",
             "units": st["units"],
             "hits": st["hits"],
             "hit_rate_pct": round(st["hits"] * 100.0 / max(st["units"], 1), 1),
@@ -490,7 +569,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"=== Real-Data Sealed KVM Benchmark & Explainability ({report['host_cpu']}) ===")
     for cname, stats in report["controllers"].items():
         print(
-            f"  {cname:<20} hits={stats['hits']}/{stats['units']} ({stats['hit_rate_pct']}%) "
+            f"  {cname:<20} {stats['evidence']:<8} hits={stats['hits']}/{stats['units']} ({stats['hit_rate_pct']}%) "
             f"feasible={stats['feasible_units']}/{stats['units']} ({stats['feasible_rate_pct']}%) "
             f"under_cap_p99={stats['mean_under_capacity_p99_ms']}ms "
             f"overload_batch={stats['mean_overload_batch_retained_pct']}%"

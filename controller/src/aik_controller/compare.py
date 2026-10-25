@@ -89,7 +89,7 @@ def laya_reports(root: Path) -> dict[tuple[str, str, str], dict]:
 def _docs(root: Path, split: str, host: str) -> list[dict]:
     data = root / "data" / "jobs-v2"
     if split == "holdout":
-        return [holdout.load_labels(root, path) for path in sorted(data.glob(f"labels-holdout-v1-{host}.json"))]
+        return [holdout.load_labels(root, path) for path in sorted(data.glob(f"labels-holdout-seed*-{host}.json"))]
     return [fit.load_labels(root, path, split) for path in sorted(data.glob(f"labels-{split}-seed*-{host}.json"))]
 
 

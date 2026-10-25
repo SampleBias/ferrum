@@ -131,7 +131,7 @@ class LiveDecisionTests(unittest.TestCase):
 
     def roundtrip(self, scored: dict, answer: bool = True) -> dict:
         from aik_controller.features import load_edges
-        from aik_controller.heuristic import load_thresholds
+        from aik_controller.heuristic import Session, load
         from aik_controller.server import catalog_hash, exchange_round, load_key
 
         snapshot = json.loads((ROOT / "tests" / "protocol-vectors" / "snapshot.canonical.json").read_text())
@@ -174,7 +174,7 @@ class LiveDecisionTests(unittest.TestCase):
                 server,
                 load_key(ROOT / "configs" / "lab-psk.hex"),
                 {"id": catalog_doc["catalog_id"], "hash": catalog_hash(catalog_path)},
-                load_thresholds(ROOT / "configs" / "heuristic-v0.json"),
+                Session(load(ROOT, "heuristic-v1")),
                 identity,
                 {"boot_id": snapshot["boot_id"]},
                 snapshot["session_id"],

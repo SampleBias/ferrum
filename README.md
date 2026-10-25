@@ -76,7 +76,7 @@ The prototype is two paired artifacts over QEMU `virtio-net`. The guest is the k
    - Enforces minimum dwell times, generation checks, acceptance deadlines, emergency hysteresis overrides, and automatic fallback to `balanced` if a lease expires or the controller disappears.
 2. **Host Policy Controllers (`controller/` & `apps/policy-controller/`):**
    - Speak the authenticated frame protocol (`HMAC-SHA256`), encode telemetry features (`features-v0`, `features-v1`), and reply with a catalog profile or explicit abstention.
-   - Support deterministic heuristics, frozen threshold/logistic candidates, the work-aware `distilled-joint` (`DISTILLED_JOINT_V1`) multi-regime policy, shadow scoring, and live Laya inference.
+   - Support deterministic heuristics (`heuristic-v1` by default, which holds `balanced` through overload so batch keeps its 95% floor), frozen threshold/logistic candidates, the work-aware `distilled-joint` (`DISTILLED_JOINT_V1`) multi-regime policy, shadow scoring, and live Laya inference.
 3. **Isolated Embedded Deployments (`deployments/`):**
    - Domain-specific freestanding applications (such as `deployments/air-biosensor`) link against `hermit-policy-abi` and `policy-core` without coupling domain logic into the base kernel or core crates.
 
@@ -91,7 +91,7 @@ The prototype is two paired artifacts over QEMU `virtio-net`. The guest is the k
 | `crates/hermit-policy-abi/` | Narrow C ABI definitions (`AbiStageJointIn`, `AbiJointStatus`, `AbiSnapshot`) between freestanding apps and the kernel |
 | `crates/workloads/` | Generic OS phase definitions (`mixed-v1`) and seeded open-loop job schedules (`jobs-v1`, `jobs-v2`) |
 | `apps/policy-guest/` | Unikernel guest binary and session driver for functional, fault, joint-ABI, branch, and soak modes |
-| `apps/policy-controller/` | Standalone Rust host controller supporting `pending-threshold`, `distilled-joint`, and `heuristic-v0` across `cpu-v1` and `joint-v1` |
+| `apps/policy-controller/` | Standalone Rust host controller supporting `pending-threshold`, `distilled-joint`, `heuristic-v0`, and `heuristic-v1` across `cpu-v1` and `joint-v1` |
 | `deployments/air-biosensor/` | Isolated embedded unikernel deployment for an Air Biological Sampling Sensor on top of `hermit-policy-abi` |
 | `controller/` | Python controller server, Laya adapter (`adapt-v0`, `adapt-v1`), branched label tooling, and explainability/evaluation suite |
 | `configs/` | Frozen catalogs, feature schemas (`features-v0`, `features-v1`), split manifests, and calibrated host candidates |
@@ -155,7 +155,7 @@ AIK_GUEST=target/x86_64-unknown-hermit/release/air-biosensor \
 Run a connected session with the host controller:
 
 ```bash
-# Terminal 1: start the controller
+# Terminal 1: start the controller (heuristic-v1; --heuristic heuristic-v0 for the old rule)
 PYTHONPATH=controller/src python3 -m aik_controller.server --once --bind 127.0.0.1:7777
 
 # Terminal 2: boot the guest with virtio-net enabled
@@ -196,7 +196,8 @@ Note: Hermit exits QEMU via `isa-debug-exit`, where raw exit status `3` indicate
 
 - **Live Real-Payload RPC & HMAC Benchmark (`--real-workload`):** Runs `168` open-loop RPC requests (`HMAC-SHA256` signing + verification + strict JSON schema decoding) alongside continuous `8 KiB` `HMAC-SHA256` batch workers inside the Hermit unikernel. Adaptive policy actuation (`balanced 1:1:1` $\to$ `latency 6:2:2`) cuts RPC **p99 latency from `46.9 ms` to `18.2 ms` (`2.58x` faster, `-61.3%`)** while retaining **`101.4%` batch throughput** (`1,036 MiB` verified per `2 s` window).
 - **Sealed KVM Evaluation (`jobs-v2`, `252` decisions across `21` units per host):**
-  - **`distilled-joint` (Work-Aware Boundary):** Combines `queue_len` (`14.5`) with `max_wait_us < 350 ms` transient spike absorption, hitting **`21 / 21 (100%)` of sealed units (`180/180` final-test and `72/72` OOD decisions) with `0` infeasible decisions on both Ryzen 5 1600 and Intel Core i7-10750H**.
+  - **`distilled-joint` (Work-Aware Boundary, post hoc):** Combines `queue_len` (`14.5`) with `max_wait_us < 350 ms` transient spike absorption, hitting `21 / 21 (100%)` of sealed units (`180/180` final-test and `72/72` OOD decisions) with `0` infeasible decisions on both Ryzen 5 1600 and Intel Core i7-10750H. It was designed after these units were opened, so this is development evidence. On the fresh `holdout-v1` units it hits `165/180` decisions, all feasible.
+  - **`heuristic-v1` (overload regime, frozen before `holdout-v1`):** Reads latency load against its reference share and a stalled oldest wait, not raw CPU, which is `~100%` busy in every state. It holds `balanced` through overload and releases only under `85%` load. On `15` fresh KVM units (Ryzen, seed `501`, frozen in `b0a5d2f` before the first boot) it hits **`180/180` offline decisions and `15/15` feasible closed-loop units (`13/15` hits)**, and every overload unit keeps **`99.67–99.80%` of balanced's batch CPU** (`heuristic-v0`: `50.0%`). Details in [docs/08](docs/08-data-and-learning.md#heuristic-v1-overload-keeps-the-reference-profile).
   - **`pending-threshold` (`cut=14.5` / `14.0`):** Hits `21 / 21 (100%)` on Ryzen and `20 / 21 (95.2%)` on Intel (`168/180` final-test, `72/72` OOD), achieving **`71.9 ms` mean under-capacity p99** (`2.35x` faster than `balanced`/Laya at `169.0 ms`) and **`100.0%` overload batch CPU retention** (whereas `heuristic-v0` drops batch CPU to `51.1%`, violating the `95%` floor).
 
 ### 3. Scheduler Wake Mode (`sys_policy_set_wake`, KVM A/B)

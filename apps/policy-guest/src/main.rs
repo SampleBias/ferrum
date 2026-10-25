@@ -2872,8 +2872,8 @@ fn mixed_v1_run(until_us: Option<u64>) -> Result<(), String> {
     use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
     use std::thread;
 
-    use policy_core::{catalog_spec, choose_heuristic, HEURISTIC_V0};
-    use policy_types::{CatalogId, ACCEPTANCE_DEADLINE_US, MIN_DWELL_US, PROFILE_LEASE_US};
+    use policy_core::{catalog_spec, HeuristicSession, HEURISTIC_V1};
+    use policy_types::{CatalogId, ProfileId, ACCEPTANCE_DEADLINE_US, MIN_DWELL_US, PROFILE_LEASE_US};
 
     const LATENCY: u8 = 1;
     const BATCH: u8 = 2;
@@ -3073,6 +3073,25 @@ fn mixed_v1_run(until_us: Option<u64>) -> Result<(), String> {
         let mut changed_us = 0u64;
         let mut lease_until_us = 0u64;
         let mut active_profile = 0u8;
+        // The controller's heuristic-v1 session sees every snapshot below,
+        // renewals included, so this copy carries the same regime.
+        let mut heuristic = HeuristicSession::new(HEURISTIC_V1);
+        let mut installed = ProfileId::Balanced;
+        let held = |heuristic: &mut HeuristicSession,
+                    observation: policy_types::Observation,
+                    reference: ProfileId,
+                    name: &str|
+         -> Result<policy_types::Observation, String> {
+            let decision = heuristic.decide(&observation, reference);
+            if decision.profile != reference {
+                return Err(format!(
+                    "{name} renewal reference moved to {} ({})",
+                    decision.profile.as_str(),
+                    decision.rule.as_str()
+                ));
+            }
+            Ok(observation)
+        };
         let mut rounds = 0u32;
         let mut passes = 0u32;
         loop {
@@ -3104,11 +3123,14 @@ fn mixed_v1_run(until_us: Option<u64>) -> Result<(), String> {
                 "FERRUM_SNAPSHOT name={} window_us={} latency={} batch={} maintenance={}",
                 phase.name, observation.window_us, seen[0], seen[1], seen[2]
             );
-            let reference = choose_heuristic(&observation, &HEURISTIC_V0);
+            let decision = heuristic.decide(&observation, installed);
+            let reference = decision.profile;
             println!(
-                "FERRUM_PHASE_BEGIN name={} reference={}",
+                "FERRUM_PHASE_BEGIN name={} reference={} rule={} regime={}",
                 phase.name,
-                reference.as_str()
+                reference.as_str(),
+                decision.rule.as_str(),
+                decision.regime.as_str()
             );
             let mut install = |observation| -> Result<PolicyAck, String> {
                 let mut kernel_generation = 0u64;
@@ -3168,6 +3190,7 @@ fn mixed_v1_run(until_us: Option<u64>) -> Result<(), String> {
                 Ok(ack)
             };
             let ack = install(observation)?;
+            installed = reference;
             rounds += 1;
             let first_guest_us = ack.guest_us;
             let first_lease_until = ack.lease_until_guest_us;
@@ -3192,7 +3215,8 @@ fn mixed_v1_run(until_us: Option<u64>) -> Result<(), String> {
                 }
                 let parked = sample_window(0)?;
                 let previous_lease = lease_until_us;
-                let ack = install(workloads::measured(*phase, workloads::SAMPLE_US, parked))?;
+                let observation = workloads::measured(*phase, workloads::SAMPLE_US, parked);
+                let ack = install(held(&mut heuristic, observation, reference, phase.name)?)?;
                 if ack.profile != active_profile || ack.lease_until_guest_us <= previous_lease {
                     return Err(format!(
                         "{} renewal profile {} lease {} did not extend {previous_lease}",
@@ -3213,7 +3237,8 @@ fn mixed_v1_run(until_us: Option<u64>) -> Result<(), String> {
             // fresh three seconds instead of whatever the hold left over.
             let parked = sample_window(0)?;
             let previous_lease = lease_until_us;
-            let ack = install(workloads::measured(*phase, workloads::SAMPLE_US, parked))?;
+            let observation = workloads::measured(*phase, workloads::SAMPLE_US, parked);
+            let ack = install(held(&mut heuristic, observation, reference, phase.name)?)?;
             if ack.profile != active_profile || ack.lease_until_guest_us <= previous_lease {
                 return Err(format!("{} final renewal did not extend the lease", phase.name));
             }
@@ -3269,7 +3294,8 @@ fn mixed_v1_run(until_us: Option<u64>) -> Result<(), String> {
             if catch_up > 0 {
                 let parked = sample_window(0)?;
                 let previous_lease = lease_until_us;
-                let ack = install(workloads::measured(*phase, workloads::SAMPLE_US, parked))?;
+                let observation = workloads::measured(*phase, workloads::SAMPLE_US, parked);
+                let ack = install(held(&mut heuristic, observation, reference, phase.name)?)?;
                 if ack.profile != active_profile || ack.lease_until_guest_us <= previous_lease {
                     return Err(format!("{} post-sample renewal did not extend the lease", phase.name));
                 }

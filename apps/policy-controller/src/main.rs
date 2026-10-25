@@ -2,6 +2,7 @@
 //!
 //! It speaks the same authenticated frames as the Python controller and
 //! proposes `latency` or `reclaim` from the latency queue length.
+//! `--policy=heuristic-v1` keeps one overload regime per connection.
 
 use std::env;
 use std::fs;
@@ -13,7 +14,7 @@ use std::time::Duration;
 
 use policy_core::{
     catalog_spec, choose_heuristic, choose_pending_threshold, evaluate_distilled,
-    DISTILLED_JOINT_V1, HEURISTIC_V0, PENDING_THRESHOLD_V0,
+    HeuristicSession, DISTILLED_JOINT_V1, HEURISTIC_V0, HEURISTIC_V1, PENDING_THRESHOLD_V0,
 };
 use policy_types::{
     Abstain, AbstainReason, CatalogId, GroupId, Hash32, Observation, Proposal,
@@ -30,6 +31,7 @@ enum ControllerPolicy {
     PendingThreshold,
     DistilledJoint,
     Heuristic,
+    HeuristicV1,
 }
 
 struct Lab {
@@ -76,7 +78,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
             policy = match value {
                 "pending-threshold" => ControllerPolicy::PendingThreshold,
                 "distilled-joint" => ControllerPolicy::DistilledJoint,
-                "heuristic" => ControllerPolicy::Heuristic,
+                "heuristic" | "heuristic-v0" => ControllerPolicy::Heuristic,
+                "heuristic-v1" => ControllerPolicy::HeuristicV1,
                 _ => return Err(format!("bad policy {value}")),
             };
         } else if let Some(value) = arg.strip_prefix("--rounds=") {
@@ -110,6 +113,16 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         ControllerPolicy::Heuristic => {
             println!("CONTROLLER heuristic-v0 catalog={}", catalog.as_str());
+        }
+        ControllerPolicy::HeuristicV1 => {
+            println!(
+                "CONTROLLER heuristic-v1 catalog={} saturated_bp={} release_bp={} batch_floor_bp={} stall_wait_us={}",
+                catalog.as_str(),
+                HEURISTIC_V1.saturated_bp,
+                HEURISTIC_V1.release_bp,
+                HEURISTIC_V1.batch_floor_bp,
+                HEURISTIC_V1.stall_wait_us
+            );
         }
     }
     if follow || rounds > 0 || once {
@@ -199,6 +212,7 @@ fn serve(stream: &mut TcpStream, lab: &Lab, rounds: u32) -> Result<(), String> {
         ready: true,
     };
     link.send(Direction::ControllerToGuest, &encode_hello_ack(&ack).map_err(wire)?)?;
+    let mut heuristic = HeuristicSession::new(HEURISTIC_V1);
     let mut done = 0u32;
     loop {
         let snapshot = match link.recv(Direction::GuestToController) {
@@ -229,6 +243,23 @@ fn serve(stream: &mut TcpStream, lab: &Lab, rounds: u32) -> Result<(), String> {
                 ReasonCode::Heuristic,
                 false,
             ),
+            ControllerPolicy::HeuristicV1 => {
+                let d = heuristic.decide(&obs, snapshot.current_profile);
+                let s = d.signals;
+                println!(
+                    "EXPLAIN seq={} controller=heuristic-v1 choice={} rule={} regime={} latency_load_bp={} batch_retained_bp={} busy_bp={} stalled={}",
+                    snapshot.request_seq,
+                    d.profile.as_str(),
+                    d.rule.as_str(),
+                    d.regime.as_str(),
+                    s.latency_load_bp,
+                    s.batch_retained_bp
+                        .map_or_else(|| "none".to_string(), |bp| bp.to_string()),
+                    s.busy_bp,
+                    s.stalled
+                );
+                (d.profile, 10_000, ReasonCode::Heuristic, false)
+            }
             ControllerPolicy::DistilledJoint => {
                 let d = evaluate_distilled(&obs, &DISTILLED_JOINT_V1);
                 println!(
@@ -509,6 +540,77 @@ mod tests {
             &key,
             &encode_applied(&report).unwrap(),
         );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn heuristic_v1_holds_the_reference_through_overload_and_releases_under_the_band() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let lab = Lab {
+            policy: ControllerPolicy::HeuristicV1,
+            ..lab()
+        };
+        let server = thread::spawn(move || {
+            let mut stream = accept(&listener).unwrap();
+            serve(&mut stream, &lab, 3).unwrap();
+        });
+        let mut client = TcpStream::connect(addr).unwrap();
+        let key = [0x11; 32];
+        let hello = Hello {
+            boot_id: BootId::new([0xab; 16]),
+            catalog_id: CatalogId::CpuV1,
+            catalog_hash: catalog_spec(CatalogId::CpuV1).hash,
+            mode: RunMode::Mock,
+            capabilities: 1,
+            max_workload_threads: 8,
+            guest_memory_bytes: 512 << 20,
+            telemetry_version: TELEMETRY_VERSION,
+        };
+        write_frame(&mut client, Direction::GuestToController, &key, &encode_hello(&hello).unwrap());
+        let Decoded::HelloAck(ack) = read_decoded(&mut client, Direction::ControllerToGuest, &key)
+        else {
+            panic!("hello ack")
+        };
+        // Twenty latency jobs pending for 400 ms in every round: v0 would boost
+        // latency each time. Latency load falls 10000 -> 9000 -> 8000.
+        let rounds = [
+            (500_000, 500_000, ProfileId::Balanced),
+            (450_000, 540_000, ProfileId::Balanced),
+            (400_000, 590_000, ProfileId::Latency),
+        ];
+        let mut generation = 1;
+        for (seq, (latency_us, batch_us, expected)) in (1u64..).zip(rounds) {
+            let mut snap = snapshot(ack.session_id, 20, seq);
+            snap.base_generation = generation;
+            snap.groups[0].runnable = 3;
+            snap.groups[0].cpu_service_us = latency_us;
+            snap.groups[0].max_wait_us = 400_000;
+            snap.groups[0].wait_samples = 10;
+            snap.groups[1].queue_len = 3;
+            snap.groups[1].runnable = 3;
+            snap.groups[1].cpu_service_us = batch_us;
+            write_frame(&mut client, Direction::GuestToController, &key, &encode_snapshot(&snap).unwrap());
+            let Decoded::Proposal(proposal) =
+                read_decoded(&mut client, Direction::ControllerToGuest, &key)
+            else {
+                panic!("proposal")
+            };
+            assert_eq!(proposal.profile, expected, "round {seq}");
+            let report = AppliedReport {
+                boot_id: hello.boot_id,
+                session_id: ack.session_id,
+                request_seq: seq,
+                previous_generation: generation,
+                new_generation: generation + 1,
+                profile: proposal.profile,
+                activated_guest_us: 1_100,
+                lease_until_guest_us: 4_100,
+                desired_matches_actual: true,
+            };
+            write_frame(&mut client, Direction::GuestToController, &key, &encode_applied(&report).unwrap());
+            generation += 1;
+        }
         server.join().unwrap();
     }
 
