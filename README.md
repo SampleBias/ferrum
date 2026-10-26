@@ -201,6 +201,10 @@ Note: Hermit exits QEMU via `isa-debug-exit`, where raw exit status `3` indicate
   - **`pending-threshold` (`cut=14.5` / `14.0`):** Hits `21 / 21 (100%)` on Ryzen and `20 / 21 (95.2%)` on Intel (`168/180` final-test, `72/72` OOD), with **`71.9 ms` mean under-capacity p99** (`2.35x` faster than `balanced`/Laya at `169.0 ms`) and **`100.0%` overload batch CPU retention**.
   - **`distilled-joint` (Work-Aware Boundary, post hoc):** Combines `queue_len` (`14.5`) with `max_wait_us < 350 ms` transient spike absorption, hitting `21 / 21 (100%)` of sealed units (`180/180` final-test and `72/72` OOD decisions) with `0` infeasible decisions on both Ryzen 5 1600 and Intel Core i7-10750H. It was designed after these units were opened, so this is development evidence. On the fresh `holdout-v1` units it hits `165/180` decisions, all feasible.
 
+![Held-out closed loop on the office host](docs/figures/holdout-closed-loop.png)
+
+- **Held-out closed loop (Ryzen 5 1600, `kvm_amd`):** The chart above stays the opened `21`-unit final test. These two seeds were frozen before their first boot, and Intel has not run them. `holdout-v1` is `heuristic-v1` on seed `501`: **`15/15` feasible, `13/15` hits**, overload batch **`99.67–99.80%`**. `holdout-v2` is `heuristic-v2` on seed `601`, frozen in `96cc911`: **`14/15` feasible, `11/15` hits**, overload batch **`99.73–99.80%`**. Both clear the `95%` batch floor on every overload unit. The unit that misses the floor is `s12-u80/601`, on completion, with batch still at `99.77%`. `heuristic-v2` is not the live default. Details in [docs/08](docs/08-data-and-learning.md#heuristic-v1-overload-keeps-the-reference-profile).
+
 ### 3. Scheduler Wake Mode (`sys_policy_set_wake`, KVM A/B)
 
 ![Scheduler Wake Mode A/B](docs/figures/wake-mode-ab.png)

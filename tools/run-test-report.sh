@@ -51,6 +51,7 @@ from figure_style import (
     cpu_profiles_svg,
     explain_svg,
     real_benchmark_svg,
+    holdout_closed_loop_svg,
     sealed_evaluation_svg,
     timing_svg,
 )
@@ -658,6 +659,7 @@ save_svg_and_png("cpu-profiles", cpu_profiles_svg(fair_windows))
 
 # Figure 2: Sealed Evaluation & Controller Comparison (jobs-v2)
 save_svg_and_png("sealed-evaluation", sealed_evaluation_svg())
+save_svg_and_png("holdout-closed-loop", holdout_closed_loop_svg())
 
 # Figure 3: Actuation Latency vs Target & Soak Reliability Summary
 save_svg_and_png(

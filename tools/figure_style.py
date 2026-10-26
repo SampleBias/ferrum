@@ -188,6 +188,53 @@ def sealed_evaluation_svg() -> str:
     return document(1120, 458, body)
 
 
+def holdout_closed_loop_svg() -> str:
+    """Office-host holdouts. Counts and batch ranges are the closed-loop scores."""
+    rows = [
+        ("heuristic-v1", "seed 501", 15, 13, 99.752, "99.67–99.80%"),
+        ("heuristic-v2", "seed 601", 14, 11, 99.762, "99.73–99.80%"),
+    ]
+    parts = [
+        heading(
+            "Held-out closed loop on the office host",
+            "Ryzen 5 1600, kvm_amd. Each seed was frozen before its first boot. Intel has not run these units.",
+        ),
+        swatch(28, 70, "silver", "Feasible units"),
+        swatch(220, 70, "red", "Hits"),
+        panel(24, 96, 620, 248),
+        text(44, 124, "A. Closed-loop units, N=15", size=14, fill="#f4f4f4", weight=800),
+        text(44, 144, "A hit is feasible and inside the best profile's range", size=11, fill="#a3a3a3", weight=500),
+    ]
+    bar_x, max_w = 250, 250
+    for idx, (name, seed, feasible, hits, _mean, _span) in enumerate(rows):
+        y = 164 + idx * 84
+        parts.append(text(bar_x - 14, y + 12, name, size=13, fill="#f0f0f0", weight=700, anchor="end"))
+        parts.append(text(bar_x - 14, y + 30, seed, size=11, fill="#8d8d8d", weight=500, anchor="end"))
+        w_f = round(max_w * feasible / 15)
+        w_h = round(max_w * hits / 15)
+        parts.append(bar(bar_x, y, w_f, 16, "silver"))
+        parts.append(text(bar_x + w_f + 8, y + 13, f"{feasible}/15 feasible", size=12, fill="#d0d0d0", weight=700))
+        parts.append(bar(bar_x, y + 22, w_h, 16, "red"))
+        parts.append(text(bar_x + w_h + 8, y + 35, f"{hits}/15 hits", size=12, fill="#ff3a3a", weight=700))
+    parts.extend([
+        panel(660, 96, 436, 248),
+        text(680, 124, "B. Overload batch CPU retained", size=14, fill="#f4f4f4", weight=800),
+        text(680, 144, "Eight overload units. Floor is 95%", size=11, fill="#a3a3a3", weight=500),
+    ])
+    scale = 340.0 / 100.0
+    origin_x = 680
+    floor_x = origin_x + round(95 * scale)
+    parts.append(f'<line x1="{floor_x}" y1="168" x2="{floor_x}" y2="292" stroke="#ff1a1a" stroke-width="1"/>')
+    parts.append(text(floor_x, 308, "95%", size=11, fill="#ff2a2a", weight=700, anchor="middle"))
+    for idx, (name, _seed, _feasible, _hits, mean, span) in enumerate(rows):
+        y = 168 + idx * 72
+        w = max(2, round(mean * scale))
+        parts.append(text(origin_x, y, name, size=12, fill="#e8e8e8", weight=700))
+        parts.append(bar(origin_x, y + 8, w, 16, "red"))
+        parts.append(text(origin_x, y + 42, f"{span}   PASS", size=12, fill="#f0f0f0", weight=700))
+    return document(1120, 368, "\n".join(parts))
+
+
 def timing_svg(stage_us, expiry_us, passed, total, rust_n, py_n) -> str:
     cards = [
         (28, "STAGE TO ACTIVATION", f"{stage_us} µs", "Target: <= 10,000 µs (10 ms)", f"Lease expiry ack: {expiry_us} µs", "PASS  >1000x margin"),
