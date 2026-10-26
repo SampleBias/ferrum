@@ -160,6 +160,7 @@ def sealed_evaluation_svg() -> str:
         ("Pending-jobs threshold (frozen candidate)", 180, 168, 0),
         ("Logistic regression (3 features)", 168, 156, 0),
         ("Zero-shot Laya / fixed balanced", 96, 96, 0),
+        ("Heuristic-v1 (post hoc on these units)", 180, 162, 0),
         ("Heuristic-v0 / fixed latency", 84, 84, 96),
     ]
     rows = []
@@ -178,13 +179,13 @@ def sealed_evaluation_svg() -> str:
     body = "\n".join([
         heading(
             "Sealed final-test policy accuracy across hosts",
-            "jobs-v2, 180 decisions. OOD holdout (72 decisions, 32 ms jobs, 95% load): distilled-joint and threshold hit 72/72 on both hosts.",
+            "jobs-v2 final test, 180 decisions per host. Heuristic-v1 was designed after these units opened; holdout-v1 is its held-out test.",
         ),
         swatch(430, 70, "red", "Ryzen 5 1600"),
         swatch(640, 70, "silver", "Intel i7-10750H"),
         *rows,
     ])
-    return document(1120, 400, body)
+    return document(1120, 458, body)
 
 
 def timing_svg(stage_us, expiry_us, passed, total, rust_n, py_n) -> str:
@@ -230,7 +231,7 @@ def real_benchmark_svg(
     bal_p50, bal_p95, bal_p99, bal_mib,
     adp_p50, adp_p95, adp_p99, adp_mib,
     t_p99, l_p99, b_p99,
-    t_bat, l_bat, h_bat,
+    t_bat, l_bat, h_bat, v1_bat,
 ) -> str:
     speedup = bal_p99 / max(adp_p99, 0.1)
     reduction = (bal_p99 - adp_p99) * 100.0 / max(bal_p99, 0.1)
@@ -262,7 +263,7 @@ def real_benchmark_svg(
     parts.append('<rect x="44" y="312" width="488" height="28" fill="#140404" stroke="#ff1a1a" stroke-width="1"/>')
     parts.append(text(56, 331, f"{reduction:.1f}% p99 reduction, batch HMAC throughput held", size=12, fill="#ff2a2a", weight=700))
 
-    parts.append(panel(568, 78, 528, 300))
+    parts.append(panel(568, 78, 528, 324))
     parts.append(text(588, 106, "B. Sealed KVM tradeoff, 21 units", size=14, fill="#f4f4f4", weight=800))
     parts.append(text(588, 126, "Under-capacity mean p99 vs overload batch CPU retained", size=11, fill="#a3a3a3", weight=500))
     parts.append(text(588, 154, "Under-capacity mean p99 (15%–45% load)", size=12, fill="#ff2a2a", weight=700))
@@ -281,15 +282,16 @@ def real_benchmark_svg(
     parts.append(text(588, 270, "Overload batch CPU retained (floor 95%)", size=12, fill="#ff2a2a", weight=700))
     retain = [
         (284, "pending-threshold", t_bat, "red", f"{t_bat:.1f}%  PASS"),
-        (308, "Laya / logistic-v0", l_bat, "silver", f"{l_bat:.1f}%  PASS"),
-        (332, "heuristic-v0", h_bat, "void", f"{h_bat:.1f}%  INFEASIBLE"),
+        (306, "heuristic-v1", v1_bat, "red", f"{v1_bat:.1f}%  PASS"),
+        (328, "Laya / logistic-v0", l_bat, "silver", f"{l_bat:.1f}%  PASS"),
+        (350, "heuristic-v0", h_bat, "void", f"{h_bat:.1f}%  INFEASIBLE"),
     ]
     for y, label, value, kind, caption in retain:
         w = max(2, round(180 * value / 100.0))
         parts.append(text(rx - 10, y + 13, label, size=12, fill="#e8e8e8", weight=700, anchor="end"))
         parts.append(bar(rx, y, w, 16, kind))
         parts.append(text(rx + w + 8, y + 13, caption, size=12, fill="#ff3a3a" if kind == "void" else "#f0f0f0", weight=700))
-    return document(1120, 400, "\n".join(parts))
+    return document(1120, 424, "\n".join(parts))
 
 
 def explain_svg(cards: list[dict]) -> str:

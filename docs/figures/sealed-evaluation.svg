@@ -1,25 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="400" viewBox="0 0 1120 400" font-family="'Noto Sans Mono', 'Liberation Mono', ui-monospace, monospace">
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="458" viewBox="0 0 1120 458" font-family="'Noto Sans Mono', 'Liberation Mono', ui-monospace, monospace">
   <defs>
     <pattern id="grid" width="8" height="8" patternUnits="userSpaceOnUse">
       <path d="M8 0 H0 V8" fill="none" stroke="#240808" stroke-width="1"/>
     </pattern>
   </defs>
-  <rect width="1120" height="400" fill="#050505"/>
-  <rect width="1120" height="400" fill="url(#grid)"/>
-  <rect x="2" y="2" width="1116" height="396" fill="none" stroke="#ff1a1a" stroke-width="3"/>
-  <rect x="8" y="8" width="1104" height="384" fill="none" stroke="#2a2a2a" stroke-width="1"/>
-  <rect x="10" y="391" width="1100" height="2" fill="#c8c8c8"/>
+  <rect width="1120" height="458" fill="#050505"/>
+  <rect width="1120" height="458" fill="url(#grid)"/>
+  <rect x="2" y="2" width="1116" height="454" fill="none" stroke="#ff1a1a" stroke-width="3"/>
+  <rect x="8" y="8" width="1104" height="442" fill="none" stroke="#2a2a2a" stroke-width="1"/>
+  <rect x="10" y="449" width="1100" height="2" fill="#c8c8c8"/>
   <g fill="#ffffff">
     <rect x="18" y="16" width="2" height="8"/>
     <rect x="15" y="19" width="8" height="2"/>
     <rect x="1100" y="16" width="2" height="8"/>
     <rect x="1097" y="19" width="8" height="2"/>
-    <rect x="18" y="372" width="2" height="8"/>
-    <rect x="15" y="375" width="8" height="2"/>
-    <rect x="1100" y="372" width="2" height="8"/>
-    <rect x="1097" y="375" width="8" height="2"/>
+    <rect x="18" y="430" width="2" height="8"/>
+    <rect x="15" y="433" width="8" height="2"/>
+    <rect x="1100" y="430" width="2" height="8"/>
+    <rect x="1097" y="433" width="8" height="2"/>
   </g>
-<text x="28" y="36" text-anchor="start" font-size="15" font-weight="800" fill="#ff2a2a">Sealed final-test policy accuracy across hosts</text><text x="28" y="56" text-anchor="start" font-size="11" font-weight="500" fill="#a3a3a3">jobs-v2, 180 decisions. OOD holdout (72 decisions, 32 ms jobs, 95% load): distilled-joint and threshold hit 72/72 on both hosts.</text>
+<text x="28" y="36" text-anchor="start" font-size="15" font-weight="800" fill="#ff2a2a">Sealed final-test policy accuracy across hosts</text><text x="28" y="56" text-anchor="start" font-size="11" font-weight="500" fill="#a3a3a3">jobs-v2 final test, 180 decisions per host. Heuristic-v1 was designed after these units opened; holdout-v1 is its held-out test.</text>
 <rect x="430" y="70" width="14" height="14" fill="#d01212"/><rect x="430" y="74" width="14" height="2" fill="#8a0a0a"/><rect x="430" y="78" width="14" height="2" fill="#8a0a0a"/><rect x="430" y="70" width="14" height="2" fill="#ff3a3a"/><rect x="430" y="82" width="14" height="2" fill="#d4d4d4"/><rect x="443" y="70" width="1" height="14" fill="#ff3a3a"/><text x="450" y="82" text-anchor="start" font-size="12" font-weight="600" fill="#d0d0d0">Ryzen 5 1600</text>
 <rect x="640" y="70" width="14" height="14" fill="#c2c2c2"/><rect x="640" y="74" width="14" height="2" fill="#8a8a8a"/><rect x="640" y="78" width="14" height="2" fill="#8a8a8a"/><rect x="640" y="70" width="14" height="2" fill="#f4f4f4"/><rect x="640" y="82" width="14" height="2" fill="#242424"/><rect x="653" y="70" width="1" height="14" fill="#f4f4f4"/><text x="660" y="82" text-anchor="start" font-size="12" font-weight="600" fill="#d0d0d0">Intel i7-10750H</text>
 <text x="414" y="110" text-anchor="end" font-size="13" font-weight="700" fill="#f0f0f0">distilled-joint (work-aware boundary)</text>
@@ -46,10 +46,16 @@
 <text x="651" y="283" text-anchor="start" font-size="12" font-weight="700" fill="#f2f2f2">Ryzen 5 1600: 96/180 (53.3%)</text>
 <rect x="430" y="290" width="213" height="16" fill="#c2c2c2"/><rect x="430" y="294" width="213" height="2" fill="#8a8a8a"/><rect x="430" y="298" width="213" height="2" fill="#8a8a8a"/><rect x="430" y="302" width="213" height="1" fill="#8a8a8a"/><rect x="430" y="290" width="213" height="2" fill="#f4f4f4"/><rect x="430" y="303" width="213" height="3" fill="#242424"/><rect x="642" y="290" width="1" height="16" fill="#f4f4f4"/>
 <text x="651" y="303" text-anchor="start" font-size="12" font-weight="600" fill="#d0d0d0">Intel i7-10750H: 96/180 (53.3%)</text>
-<text x="414" y="342" text-anchor="end" font-size="13" font-weight="700" fill="#f0f0f0">Heuristic-v0 / fixed latency</text>
-<text x="414" y="360" text-anchor="end" font-size="11" font-weight="500" fill="#8d8d8d">Final-test decisions, N=180 (96/180 infeasible)</text>
-<rect x="430" y="328" width="187" height="16" fill="#d01212"/><rect x="430" y="332" width="187" height="2" fill="#8a0a0a"/><rect x="430" y="336" width="187" height="2" fill="#8a0a0a"/><rect x="430" y="340" width="187" height="1" fill="#8a0a0a"/><rect x="430" y="328" width="187" height="2" fill="#ff3a3a"/><rect x="430" y="341" width="187" height="3" fill="#d4d4d4"/><rect x="616" y="328" width="1" height="16" fill="#ff3a3a"/>
-<text x="625" y="341" text-anchor="start" font-size="12" font-weight="700" fill="#f2f2f2">Ryzen 5 1600: 84/180 (46.7%)</text>
-<rect x="430" y="348" width="187" height="16" fill="#c2c2c2"/><rect x="430" y="352" width="187" height="2" fill="#8a8a8a"/><rect x="430" y="356" width="187" height="2" fill="#8a8a8a"/><rect x="430" y="360" width="187" height="1" fill="#8a8a8a"/><rect x="430" y="348" width="187" height="2" fill="#f4f4f4"/><rect x="430" y="361" width="187" height="3" fill="#242424"/><rect x="616" y="348" width="1" height="16" fill="#f4f4f4"/>
-<text x="625" y="361" text-anchor="start" font-size="12" font-weight="600" fill="#d0d0d0">Intel i7-10750H: 84/180 (46.7%)</text>
+<text x="414" y="342" text-anchor="end" font-size="13" font-weight="700" fill="#f0f0f0">Heuristic-v1 (post hoc on these units)</text>
+<text x="414" y="360" text-anchor="end" font-size="11" font-weight="500" fill="#8d8d8d">Final-test decisions, N=180 (0 infeasible)</text>
+<rect x="430" y="328" width="400" height="16" fill="#d01212"/><rect x="430" y="332" width="400" height="2" fill="#8a0a0a"/><rect x="430" y="336" width="400" height="2" fill="#8a0a0a"/><rect x="430" y="340" width="400" height="1" fill="#8a0a0a"/><rect x="430" y="328" width="400" height="2" fill="#ff3a3a"/><rect x="430" y="341" width="400" height="3" fill="#d4d4d4"/><rect x="829" y="328" width="1" height="16" fill="#ff3a3a"/>
+<text x="838" y="341" text-anchor="start" font-size="12" font-weight="700" fill="#f2f2f2">Ryzen 5 1600: 180/180 (100.0%)</text>
+<rect x="430" y="348" width="360" height="16" fill="#c2c2c2"/><rect x="430" y="352" width="360" height="2" fill="#8a8a8a"/><rect x="430" y="356" width="360" height="2" fill="#8a8a8a"/><rect x="430" y="360" width="360" height="1" fill="#8a8a8a"/><rect x="430" y="348" width="360" height="2" fill="#f4f4f4"/><rect x="430" y="361" width="360" height="3" fill="#242424"/><rect x="789" y="348" width="1" height="16" fill="#f4f4f4"/>
+<text x="798" y="361" text-anchor="start" font-size="12" font-weight="600" fill="#d0d0d0">Intel i7-10750H: 162/180 (90.0%)</text>
+<text x="414" y="400" text-anchor="end" font-size="13" font-weight="700" fill="#f0f0f0">Heuristic-v0 / fixed latency</text>
+<text x="414" y="418" text-anchor="end" font-size="11" font-weight="500" fill="#8d8d8d">Final-test decisions, N=180 (96/180 infeasible)</text>
+<rect x="430" y="386" width="187" height="16" fill="#d01212"/><rect x="430" y="390" width="187" height="2" fill="#8a0a0a"/><rect x="430" y="394" width="187" height="2" fill="#8a0a0a"/><rect x="430" y="398" width="187" height="1" fill="#8a0a0a"/><rect x="430" y="386" width="187" height="2" fill="#ff3a3a"/><rect x="430" y="399" width="187" height="3" fill="#d4d4d4"/><rect x="616" y="386" width="1" height="16" fill="#ff3a3a"/>
+<text x="625" y="399" text-anchor="start" font-size="12" font-weight="700" fill="#f2f2f2">Ryzen 5 1600: 84/180 (46.7%)</text>
+<rect x="430" y="406" width="187" height="16" fill="#c2c2c2"/><rect x="430" y="410" width="187" height="2" fill="#8a8a8a"/><rect x="430" y="414" width="187" height="2" fill="#8a8a8a"/><rect x="430" y="418" width="187" height="1" fill="#8a8a8a"/><rect x="430" y="406" width="187" height="2" fill="#f4f4f4"/><rect x="430" y="419" width="187" height="3" fill="#242424"/><rect x="616" y="406" width="1" height="16" fill="#f4f4f4"/>
+<text x="625" y="419" text-anchor="start" font-size="12" font-weight="600" fill="#d0d0d0">Intel i7-10750H: 84/180 (46.7%)</text>
 </svg>

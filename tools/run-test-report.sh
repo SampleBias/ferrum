@@ -530,12 +530,12 @@ rw_adp = {"p50_us": 8000, "p95_us": 15000, "p99_us": 18000, "batch_kib": 1050000
 rw_summary_str = "Real HMAC-SHA256 + JSON RPC benchmark passed"
 for l in flines:
     if l.startswith("FERRUM_REAL_WORKLOAD mode=balanced"):
-        for k in ("p50_us", "p95_us", "p99_us", "batch_kib", "batch_blocks"):
+        for k in ("p50_us", "p95_us", "p99_us", "batch_kib", "batch_blocks", "rpc_passes"):
             m = re.search(rf"{k}=(\d+)", l)
             if m:
                 rw_bal[k] = int(m.group(1))
     elif l.startswith("FERRUM_REAL_WORKLOAD mode=adaptive"):
-        for k in ("p50_us", "p95_us", "p99_us", "batch_kib", "batch_blocks"):
+        for k in ("p50_us", "p95_us", "p99_us", "batch_kib", "batch_blocks", "rpc_passes"):
             m = re.search(rf"{k}=(\d+)", l)
             if m:
                 rw_adp[k] = int(m.group(1))
@@ -695,7 +695,7 @@ save_svg_and_png(
         bal_p50_ms, bal_p95_ms, bal_p99_ms, rw_bal["batch_kib"] // 1024,
         adp_p50_ms, adp_p95_ms, adp_p99_ms, rw_adp["batch_kib"] // 1024,
         t_p99, l_p99, b_p99,
-        t_bat, l_bat, h_bat,
+        t_bat, l_bat, h_bat, v1_r5["mean_overload_batch_retained_pct"],
     ),
 )
 
