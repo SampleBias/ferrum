@@ -15,9 +15,10 @@ same unit's forced branches under the frozen objective. The controller hits a
 unit when its own repeats are feasible against balanced and reach the best
 profile's range on the ranking metric.
 
-`--candidate` is a frozen candidate-v0 file or configs/heuristic-v1.json.
-heuristic-v1 is not fitted to one host, so it runs on any host, but only on
-units of a holdout manifest that pins its hash and was committed first.
+`--candidate` is a frozen candidate-v0 file, configs/heuristic-v1.json, or
+configs/heuristic-v2.json. Neither heuristic is fitted to one host, so each
+runs on any host, but only on units of a holdout manifest that pins its hash
+and was committed first.
 """
 
 import argparse
@@ -31,7 +32,12 @@ from pathlib import Path
 from aik_controller import branches, fit, holdout, splits
 from aik_controller.heuristic import evaluate_v1, load_v1
 
-CONTROLLERS = {"threshold": "pending-threshold", "heuristic-v1": "heuristic-v1"}
+CONTROLLERS = {
+    "threshold": "pending-threshold",
+    "heuristic-v1": "heuristic-v1",
+    "heuristic-v2": "heuristic-v2",
+}
+HEURISTICS = {"heuristic-v1", "heuristic-v2"}
 
 
 class ClosedLoopError(ValueError):
@@ -56,20 +62,20 @@ def host_cpu() -> str:
 def load_candidate(root: Path, path: Path, manifest: str | None = None) -> dict:
     """A frozen candidate-v0, or heuristic-v1 bound to the holdout manifest it runs on."""
     doc = json.loads(path.read_text())
-    if doc.get("id") != "heuristic-v1":
+    if doc.get("id") not in HEURISTICS:
         candidate = fit._candidate(root, path)
         if manifest not in (None, candidate["manifest"]):
             raise ClosedLoopError(f"{path.name} was frozen under {candidate['manifest']}, not {manifest}")
         return candidate
     if manifest not in holdout.HOLDOUTS:
-        raise ClosedLoopError("heuristic-v1 runs on a holdout manifest; pass --manifest")
+        raise ClosedLoopError(f"{doc.get('id')} runs on a holdout manifest; pass --manifest")
     pinned = holdout.controller_sha256(holdout.load(root, manifest), path.name)
     if pinned != _sha256(path):
         raise ClosedLoopError(f"{path.name} is not the file {manifest} pins")
     return {
-        "id": "heuristic-v1",
-        "selected": "heuristic-v1",
-        "kind": "heuristic-v1",
+        "id": doc["id"],
+        "selected": doc["id"],
+        "kind": doc["id"],
         "params": load_v1(root, path.stem),
         "manifest": manifest,
         "manifest_sha256": splits.manifest_sha256(holdout.path(root, manifest)),
@@ -79,7 +85,7 @@ def load_candidate(root: Path, path: Path, manifest: str | None = None) -> dict:
 
 
 def offline_choice(candidate: dict, snapshot: dict) -> str:
-    if candidate["kind"] == "heuristic-v1":
+    if candidate["kind"] in HEURISTICS:
         return evaluate_v1(snapshot, candidate["params"])["profile"]
     return fit.threshold_choice(candidate["params"], snapshot)
 
@@ -89,8 +95,8 @@ def guest_args(candidate: dict) -> str:
     kind = candidate["kind"]
     if kind not in CONTROLLERS:
         raise ClosedLoopError(f"a {kind} candidate has no guest rule; the guest runs {', '.join(CONTROLLERS)}")
-    if kind == "heuristic-v1":
-        return "--candidate=heuristic-v1"
+    if kind in HEURISTICS:
+        return f"--candidate={kind}"
     params = candidate["params"]
     return (
         f"--candidate={CONTROLLERS[kind]} --cut={float(params['cut'])!r} "
@@ -100,7 +106,7 @@ def guest_args(candidate: dict) -> str:
 
 def _check_heuristic(record: dict, decision: dict, config: dict) -> str:
     state = record["state"]
-    if decision["controller"] != "heuristic-v1":
+    if decision["controller"] != config.get("id", "heuristic-v1"):
         raise ClosedLoopError(f"{_key(record)} ran a different candidate")
     if (decision["pending"], decision["max_wait_us"]) != (state["latency_queue"], state["latency_max_wait_us"]):
         raise ClosedLoopError(f"{_key(record)} decided on a state other than the one it printed")
@@ -131,7 +137,7 @@ def check_decision(record: dict, candidate: dict) -> str:
     if record.get("profile") != branches.CANDIDATE_PROFILE or decision is None:
         raise ClosedLoopError(f"{_key(record)} is not a candidate branch")
     params = candidate["params"]
-    if candidate["kind"] == "heuristic-v1":
+    if candidate["kind"] in HEURISTICS:
         return _check_heuristic(record, decision, params)
     ran = (decision["controller"], float(decision["cut"]), decision["below"], decision["above"])
     if ran != (CONTROLLERS[candidate["kind"]], float(params["cut"]), params["below"], params["above"]):

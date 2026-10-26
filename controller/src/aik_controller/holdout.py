@@ -13,7 +13,10 @@ from pathlib import Path
 
 from aik_controller import jobs, splits
 
-HOLDOUTS = {"holdout-v1": ("jobs-v2", "objective-v2")}
+HOLDOUTS = {
+    "holdout-v1": ("jobs-v2", "objective-v2"),
+    "holdout-v2": ("jobs-v2", "objective-v2"),
+}
 SPLIT = "holdout"
 
 
@@ -59,6 +62,14 @@ def load(root: Path, name: str = "holdout-v1") -> dict:
     family = jobs.load_family(splits.family_path(root, doc))
     names = {scenario["name"] for scenario in family["scenarios"]}
     used = _branched_seeds(root)
+    for other, _family in HOLDOUTS.items():
+        if other == name:
+            continue
+        other_path = root / "configs" / f"{other}.json"
+        if not other_path.is_file():
+            continue
+        for entry in json.loads(other_path.read_text()).get(SPLIT, []):
+            used.setdefault(entry["seed"], f"{other}")
     units = doc.get(SPLIT)
     if not isinstance(units, list) or not units:
         raise HoldoutError(f"{name} has no units")

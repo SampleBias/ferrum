@@ -11,7 +11,7 @@ pub struct HeuristicThresholds {
     pub evictable_backlog_bytes: u64,
 }
 
-pub use crate::catalog::{HEURISTIC_V0, HEURISTIC_V1};
+pub use crate::catalog::{HEURISTIC_V0, HEURISTIC_V1, HEURISTIC_V2};
 
 /// `configs/heuristic-v1.json`. Ratios are basis points of a class's share
 /// under a profile, over the classes that wanted CPU in the window.
@@ -25,6 +25,9 @@ pub struct HeuristicV1 {
     pub release_bp: u64,
     pub batch_floor_bp: u64,
     pub stall_wait_us: u64,
+    /// Pending jobs required, with the stall wait, before a queue counts as stalled.
+    /// heuristic-v1 uses 1, so any waiting job can stall. heuristic-v2 raises it.
+    pub backlog_min: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -177,7 +180,8 @@ pub fn heuristic_v1_signals(
         batch_retained_bp: batch_active.then(|| share_bp(batch.cpu_service_us, ref_sum, reference[1])),
         busy_bp: busy.saturating_mul(10_000) / window,
         latency_below_reference: u64::from(now[0]) * ref_sum < u64::from(reference[0]) * cur_sum,
-        stalled: latency.queue_len > 0 && latency.max_wait_us >= config.stall_wait_us,
+        stalled: latency.queue_len >= config.backlog_min
+            && latency.max_wait_us >= config.stall_wait_us,
     }
 }
 
@@ -223,6 +227,100 @@ pub fn evaluate_heuristic_v1(
     }
     let (profile, rule) = base_rule(obs, &config.base);
     out(profile, rule, Regime::Normal)
+}
+
+fn active_classes(obs: &Observation) -> [bool; 3] {
+    let mut active = [false; 3];
+    for (i, class) in CLASSES.into_iter().enumerate() {
+        let sample = group(obs, class);
+        active[i] = class == GroupId::Latency
+            || sample.runnable > 0
+            || sample.queue_len > 0
+            || sample.cpu_service_us > 0;
+    }
+    active
+}
+
+fn weight_share_bp(weights: [u32; 3], active: [bool; 3], index: usize) -> Option<u64> {
+    if !active[index] {
+        return None;
+    }
+    let sum = weights
+        .iter()
+        .zip(active)
+        .filter(|(_, on)| *on)
+        .fold(0u64, |sum, (weight, _)| sum.saturating_add(u64::from(*weight)));
+    if sum == 0 {
+        return None;
+    }
+    Some(u64::from(weights[index]).saturating_mul(10_000) / sum)
+}
+
+/// A profile cuts batch to fund latency when, over the classes that wanted
+/// CPU, it gives latency more than the reference share and leaves batch under
+/// `floor_bp` of the reference batch share. Reclaim moves weight to
+/// maintenance, so a memory response is not this cut.
+pub fn cuts_batch_floor(obs: &Observation, proposed: ProfileId, config: &HeuristicV1) -> bool {
+    let spec = catalog_spec(config.catalog);
+    let active = active_classes(obs);
+    let reference = spec.profile(config.reference).weights();
+    let proposed_weights = spec.profile(proposed).weights();
+    let Some(reference_batch) = weight_share_bp(reference, active, 1) else {
+        return false;
+    };
+    let Some(proposed_batch) = weight_share_bp(proposed_weights, active, 1) else {
+        return false;
+    };
+    let Some(reference_latency) = weight_share_bp(reference, active, 0) else {
+        return false;
+    };
+    let Some(proposed_latency) = weight_share_bp(proposed_weights, active, 0) else {
+        return false;
+    };
+    if reference_batch == 0 {
+        return false;
+    }
+    proposed_latency > reference_latency
+        && proposed_batch.saturating_mul(10_000) / reference_batch < config.batch_floor_bp
+}
+
+/// Carry a batch-floor hold across proposals.
+///
+/// The hold is set and cleared only from a measurement taken at a profile that
+/// does not already give latency more than its reference share. A latency boost
+/// inflates the load reading, so those snapshots leave the hold as it was.
+/// Saturation sets it. Falling under `release_bp`, or losing the contention
+/// that makes batch worth protecting, clears it.
+pub fn update_batch_floor_hold(
+    hold: bool,
+    obs: &Observation,
+    current: ProfileId,
+    config: &HeuristicV1,
+) -> bool {
+    let spec = catalog_spec(config.catalog);
+    let reference = spec.profile(config.reference).weights();
+    let now = spec.profile(current).weights();
+    let active = active_classes(obs);
+    let sum = |weights: [u32; 3]| {
+        weights
+            .iter()
+            .zip(active)
+            .filter(|(_, on)| *on)
+            .fold(0u64, |total, (weight, _)| total.saturating_add(u64::from(*weight)))
+    };
+    let boosted = u64::from(now[0]) * sum(reference) > u64::from(reference[0]) * sum(now);
+    if boosted {
+        return hold;
+    }
+    let signals = heuristic_v1_signals(obs, current, config);
+    let protect = signals.batch_retained_bp.is_some() && signals.busy_bp >= config.contended_bp;
+    if protect && signals.latency_load_bp >= config.saturated_bp {
+        return true;
+    }
+    if !protect || signals.latency_load_bp < config.release_bp {
+        return false;
+    }
+    hold
 }
 
 /// One controller session's v1 heuristic. The regime carries between rounds.
@@ -438,6 +536,48 @@ mod tests {
             (decision.profile, decision.rule, decision.regime),
             (ProfileId::Balanced, HeuristicRule::MeasureAtReference, Regime::Normal)
         );
+    }
+
+    #[test]
+    fn a_short_queue_with_a_long_wait_keeps_the_latency_boost() {
+        let burst = jobs_window(500_000, 500_000, 3, 400_000);
+        let v1 = evaluate_heuristic_v1(&burst, ProfileId::Balanced, Regime::Normal, &HEURISTIC_V1);
+        let v2 = evaluate_heuristic_v1(&burst, ProfileId::Balanced, Regime::Normal, &HEURISTIC_V2);
+        assert_eq!(v1.profile, ProfileId::Balanced);
+        assert!(v1.signals.stalled);
+        assert_eq!(v2.profile, ProfileId::Latency);
+        assert!(!v2.signals.stalled);
+
+        let backlog = jobs_window(500_000, 500_000, 26, 500_000);
+        let held = evaluate_heuristic_v1(&backlog, ProfileId::Balanced, Regime::Normal, &HEURISTIC_V2);
+        assert_eq!(held.profile, ProfileId::Balanced);
+        assert!(held.signals.stalled);
+    }
+
+    #[test]
+    fn the_kernel_floor_rejects_a_latency_cut_only_while_the_reference_is_saturated() {
+        let under = jobs_window(200_000, 800_000, 2, 40_000);
+        let mut hold = update_batch_floor_hold(false, &under, ProfileId::Balanced, &HEURISTIC_V1);
+        assert!(!hold);
+
+        let over = jobs_window(500_000, 500_000, 40, 500_000);
+        hold = update_batch_floor_hold(hold, &over, ProfileId::Balanced, &HEURISTIC_V1);
+        assert!(hold);
+        assert!(cuts_batch_floor(&over, ProfileId::Latency, &HEURISTIC_V1));
+        assert!(!cuts_batch_floor(&over, ProfileId::Balanced, &HEURISTIC_V1));
+        assert!(!cuts_batch_floor(&over, ProfileId::Throughput, &HEURISTIC_V1));
+        assert!(!cuts_batch_floor(&over, ProfileId::Reclaim, &HEURISTIC_V1));
+
+        let mid = jobs_window(450_000, 550_000, 40, 500_000);
+        hold = update_batch_floor_hold(hold, &mid, ProfileId::Balanced, &HEURISTIC_V1);
+        assert!(hold, "a load inside the release band keeps the floor");
+
+        hold = update_batch_floor_hold(hold, &under, ProfileId::Balanced, &HEURISTIC_V1);
+        assert!(!hold);
+
+        let boosted = jobs_window(750_000, 250_000, 2, 40_000);
+        let kept = update_batch_floor_hold(false, &boosted, ProfileId::Latency, &HEURISTIC_V1);
+        assert!(!kept, "a boost is not a measurement of demand");
     }
 
     #[test]

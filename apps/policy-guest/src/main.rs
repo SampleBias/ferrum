@@ -742,7 +742,11 @@ fn live_run(trace: bool) -> Result<(), String> {
                 );
                 if !matches!(
                     reason,
-                    RejectReason::Late | RejectReason::Dwell | RejectReason::StaleGeneration | RejectReason::Emergency
+                    RejectReason::Late
+                        | RejectReason::Dwell
+                        | RejectReason::StaleGeneration
+                        | RejectReason::Emergency
+                        | RejectReason::BatchFloor
                 ) {
                     return Err(format!("{} proposal rejected: {}", phase.name, reason.as_str()));
                 }

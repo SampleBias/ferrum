@@ -1,0 +1,92 @@
+{
+  "id": "holdout-v2",
+  "family": "jobs-v2",
+  "family_sha256": "8ece16acd2417995b4c230f29dcb8b039dadd0daef5b270538fc998f3421479f",
+  "objective": "objective-v2",
+  "objective_sha256": "1361b3ea433536a3920b46ad8f114065b5f29e4d1a8c7813e385285e3194f9bd",
+  "frozen_before_labels": true,
+  "controllers": [
+    {
+      "config": "heuristic-v2.json",
+      "sha256": "c58107cdefbd4b65f2e70bc01e6208ba99b675065fb5be865f7df7bdddcaf4ea"
+    }
+  ],
+  "holdout": [
+    {
+      "scenario": "s4-u15",
+      "seed": 601,
+      "schedule_fnv64": "0x86ccb5f00944f395"
+    },
+    {
+      "scenario": "s4-u35",
+      "seed": 601,
+      "schedule_fnv64": "0xd9cefc4164091b41"
+    },
+    {
+      "scenario": "s4-u45",
+      "seed": 601,
+      "schedule_fnv64": "0x401fe1411b218156"
+    },
+    {
+      "scenario": "s4-u65",
+      "seed": 601,
+      "schedule_fnv64": "0xda0786b4f896ffe9"
+    },
+    {
+      "scenario": "s4-u72",
+      "seed": 601,
+      "schedule_fnv64": "0x59a19f77259136a9"
+    },
+    {
+      "scenario": "s4-u80",
+      "seed": 601,
+      "schedule_fnv64": "0x5cf46dbed6764fe8"
+    },
+    {
+      "scenario": "s4-u95",
+      "seed": 601,
+      "schedule_fnv64": "0x7de20e45d3e5aebf"
+    },
+    {
+      "scenario": "s12-u15",
+      "seed": 601,
+      "schedule_fnv64": "0x7f38f200d44c69ba"
+    },
+    {
+      "scenario": "s12-u35",
+      "seed": 601,
+      "schedule_fnv64": "0xe98cd12ddb5acae9"
+    },
+    {
+      "scenario": "s12-u45",
+      "seed": 601,
+      "schedule_fnv64": "0xfaf8454bb9bf6b67"
+    },
+    {
+      "scenario": "s12-u65",
+      "seed": 601,
+      "schedule_fnv64": "0x071d711af7568521"
+    },
+    {
+      "scenario": "s12-u72",
+      "seed": 601,
+      "schedule_fnv64": "0xe9302ad3b4231029"
+    },
+    {
+      "scenario": "s12-u80",
+      "seed": 601,
+      "schedule_fnv64": "0xfb835f6173d3f97a"
+    },
+    {
+      "scenario": "s32-u35",
+      "seed": 601,
+      "schedule_fnv64": "0x885fcefe04807642"
+    },
+    {
+      "scenario": "s32-u65",
+      "seed": 601,
+      "schedule_fnv64": "0xc9a64514cc0e3fa2"
+    }
+  ],
+  "note": "Fresh jobs-v2 units for heuristic-v2. One new seed on every jobs-v2 configuration, disjoint from splits-v1, splits-v2, and holdout-v1 seed 501. heuristic-v2.json is pinned by hash. This file is committed before any holdout unit is booted."
+}

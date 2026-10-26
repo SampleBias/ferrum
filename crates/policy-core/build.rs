@@ -55,6 +55,12 @@ struct HeuristicV1File {
     release_bp: u64,
     batch_floor_bp: u64,
     stall_wait_us: u64,
+    #[serde(default = "default_backlog_min")]
+    backlog_min: u32,
+}
+
+fn default_backlog_min() -> u32 {
+    1
 }
 
 fn main() {
@@ -64,7 +70,8 @@ fn main() {
     let joint_path = root.join("configs/catalog-joint-v1.json");
     let heuristic_path = root.join("configs/heuristic-v0.json");
     let v1_path = root.join("configs/heuristic-v1.json");
-    for path in [&cpu_path, &joint_path, &heuristic_path, &v1_path] {
+    let v2_path = root.join("configs/heuristic-v2.json");
+    for path in [&cpu_path, &joint_path, &heuristic_path, &v1_path, &v2_path] {
         println!("cargo:rerun-if-changed={}", path.display());
     }
 
@@ -72,15 +79,23 @@ fn main() {
     let joint_bytes = fs::read(&joint_path).expect("read joint catalog");
     let heuristic_bytes = fs::read(&heuristic_path).expect("read heuristic");
     let v1_bytes = fs::read(&v1_path).expect("read heuristic-v1");
+    let v2_bytes = fs::read(&v2_path).expect("read heuristic-v2");
     let cpu: CatalogFile = serde_json::from_slice(&cpu_bytes).expect("parse cpu catalog");
     let joint: CatalogFile = serde_json::from_slice(&joint_bytes).expect("parse joint catalog");
     let heuristic: HeuristicFile =
         serde_json::from_slice(&heuristic_bytes).expect("parse heuristic");
     let v1: HeuristicV1File = serde_json::from_slice(&v1_bytes).expect("parse heuristic-v1");
+    let v2: HeuristicV1File = serde_json::from_slice(&v2_bytes).expect("parse heuristic-v2");
     assert_eq!(v1.id, "heuristic-v1");
     assert_eq!(v1.base, "heuristic-v0");
-    assert!(v1.release_bp < v1.saturated_bp, "release must sit under saturation");
-    assert!(v1.stall_wait_us > 0, "stall_wait_us is derived from training");
+    assert_eq!(v1.backlog_min, 1, "heuristic-v1 stalls on any waiting job");
+    assert_eq!(v2.id, "heuristic-v2");
+    assert_eq!(v2.base, "heuristic-v1");
+    assert!(v2.backlog_min > 1, "heuristic-v2 requires a real backlog");
+    for file in [&v1, &v2] {
+        assert!(file.release_bp < file.saturated_bp, "release must sit under saturation");
+        assert!(file.stall_wait_us > 0, "stall_wait_us is derived from training");
+    }
 
     assert_eq!(cpu.catalog_id, "cpu-v1");
     assert_eq!(joint.catalog_id, "joint-v1");
@@ -136,10 +151,18 @@ pub const HEURISTIC_V0: crate::heuristic::HeuristicThresholds = crate::heuristic
         mp = heuristic.memory_pressure_bp,
         eb = heuristic.evictable_backlog_bytes,
     ));
-    let t = &v1.thresholds;
-    out.push_str(&format!(
+    out.push_str(&emit_heuristic("HEURISTIC_V1", &v1));
+    out.push_str(&emit_heuristic("HEURISTIC_V2", &v2));
+
+    let dest = PathBuf::from(env::var("OUT_DIR").unwrap()).join("catalog_gen.rs");
+    fs::write(dest, out).unwrap();
+}
+
+fn emit_heuristic(const_name: &str, file: &HeuristicV1File) -> String {
+    let t = &file.thresholds;
+    format!(
         r#"
-pub const HEURISTIC_V1: crate::heuristic::HeuristicV1 = crate::heuristic::HeuristicV1 {{
+pub const {const_name}: crate::heuristic::HeuristicV1 = crate::heuristic::HeuristicV1 {{
     base: crate::heuristic::HeuristicThresholds {{
         latency_queue_high: {lq},
         latency_wait_us_high: {lw},
@@ -154,6 +177,7 @@ pub const HEURISTIC_V1: crate::heuristic::HeuristicV1 = crate::heuristic::Heuris
     release_bp: {release},
     batch_floor_bp: {floor},
     stall_wait_us: {stall},
+    backlog_min: {backlog},
 }};
 "#,
         lq = t.latency_queue_high,
@@ -161,21 +185,19 @@ pub const HEURISTIC_V1: crate::heuristic::HeuristicV1 = crate::heuristic::Heuris
         bq = t.batch_queue_high,
         mp = t.memory_pressure_bp,
         eb = t.evictable_backlog_bytes,
-        catalog = match v1.catalog.as_str() {
+        catalog = match file.catalog.as_str() {
             "cpu-v1" => "CpuV1",
             "joint-v1" => "JointV1",
             other => panic!("unknown catalog {other}"),
         },
-        reference = profile_variant(&v1.reference_profile),
-        contended = v1.contended_bp,
-        saturated = v1.saturated_bp,
-        release = v1.release_bp,
-        floor = v1.batch_floor_bp,
-        stall = v1.stall_wait_us,
-    ));
-
-    let dest = PathBuf::from(env::var("OUT_DIR").unwrap()).join("catalog_gen.rs");
-    fs::write(dest, out).unwrap();
+        reference = profile_variant(&file.reference_profile),
+        contended = file.contended_bp,
+        saturated = file.saturated_bp,
+        release = file.release_bp,
+        floor = file.batch_floor_bp,
+        stall = file.stall_wait_us,
+        backlog = file.backlog_min,
+    )
 }
 
 fn profile_variant(id: &str) -> &'static str {

@@ -25,7 +25,8 @@ use std::env;
 use std::process::ExitCode;
 
 use policy_core::{
-    evaluate_distilled, evaluate_heuristic_v1, Regime, DISTILLED_JOINT_V1, HEURISTIC_V1,
+    evaluate_distilled, evaluate_heuristic_v1, HeuristicV1, Regime, DISTILLED_JOINT_V1, HEURISTIC_V1,
+    HEURISTIC_V2,
 };
 use policy_types::{Observation, ProfileId};
 use workloads::jobs::{self, JobFamily, JobScenario};
@@ -57,6 +58,8 @@ enum Choice {
     DistilledJoint,
     /// `HEURISTIC_V1`, one round from the prefix's balanced profile.
     HeuristicV1,
+    /// `HEURISTIC_V2`, the same rule with a training-derived backlog.
+    HeuristicV2,
 }
 
 impl Choice {
@@ -64,9 +67,10 @@ impl Choice {
     fn name(&self) -> &'static str {
         match self {
             Choice::Forced(profile) => profile.as_str(),
-            Choice::PendingThreshold { .. } | Choice::DistilledJoint | Choice::HeuristicV1 => {
-                "candidate"
-            }
+            Choice::PendingThreshold { .. }
+            | Choice::DistilledJoint
+            | Choice::HeuristicV1
+            | Choice::HeuristicV2 => "candidate",
         }
     }
 
@@ -80,7 +84,7 @@ impl Choice {
                     below
                 }
             }
-            Choice::DistilledJoint | Choice::HeuristicV1 => {
+            Choice::DistilledJoint | Choice::HeuristicV1 | Choice::HeuristicV2 => {
                 let mut obs = Observation::quiet(1_000_000);
                 obs.groups[0].queue_len = pending;
                 self.decide_observation(&obs)
@@ -94,6 +98,9 @@ impl Choice {
             Choice::HeuristicV1 => {
                 evaluate_heuristic_v1(obs, ProfileId::Balanced, Regime::Normal, &HEURISTIC_V1).profile
             }
+            Choice::HeuristicV2 => {
+                evaluate_heuristic_v1(obs, ProfileId::Balanced, Regime::Normal, &HEURISTIC_V2).profile
+            }
             _ => self.decide(obs.groups[0].queue_len),
         }
     }
@@ -106,6 +113,14 @@ struct Request {
     choice: Choice,
     spins_per_ms: Option<u64>,
     wake: u8,
+}
+
+fn heuristic_candidate(choice: Choice) -> Option<(&'static str, &'static HeuristicV1)> {
+    match choice {
+        Choice::HeuristicV1 => Some(("heuristic-v1", &HEURISTIC_V1)),
+        Choice::HeuristicV2 => Some(("heuristic-v2", &HEURISTIC_V2)),
+        _ => None,
+    }
 }
 
 fn calibrate_only() -> bool {
@@ -175,6 +190,7 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Request, String> {
         },
         (None, Some("distilled-joint")) => Choice::DistilledJoint,
         (None, Some("heuristic-v1")) => Choice::HeuristicV1,
+        (None, Some("heuristic-v2")) => Choice::HeuristicV2,
         (None, Some(other)) => return Err(format!("unknown candidate {other}")),
         (Some(_), Some(_)) => return Err("--profile and --candidate are exclusive".to_string()),
         (None, None) => return Err("--profile or --candidate is required".to_string()),
@@ -554,14 +570,16 @@ fn run() -> Result<(), String> {
             d.confidence_bp,
             profile.as_str()
         );
-    } else if let (Choice::HeuristicV1, Some((profile, decide_us))) = (request.choice, decided) {
-        let d = evaluate_heuristic_v1(&obs, ProfileId::Balanced, Regime::Normal, &HEURISTIC_V1);
+    } else if let (Some((name, config)), Some((profile, decide_us))) =
+        (heuristic_candidate(request.choice), decided)
+    {
+        let d = evaluate_heuristic_v1(&obs, ProfileId::Balanced, Regime::Normal, config);
         let s = d.signals;
         let batch_bp = s
             .batch_retained_bp
             .map_or_else(|| "none".to_string(), |bp| bp.to_string());
         println!(
-            "FERRUM_BRANCH_DECISION controller=heuristic-v1 rule={} regime={} pending={} max_wait_us={} latency_load_bp={} batch_retained_bp={batch_bp} busy_bp={} stalled={} choice={} decide_us={decide_us}",
+            "FERRUM_BRANCH_DECISION controller={name} rule={} regime={} pending={} max_wait_us={} latency_load_bp={} batch_retained_bp={batch_bp} busy_bp={} stalled={} choice={} decide_us={decide_us}",
             d.rule.as_str(),
             d.regime.as_str(),
             latency.queue_len,
@@ -572,14 +590,14 @@ fn run() -> Result<(), String> {
             profile.as_str()
         );
         println!(
-            "FERRUM_EXPLAIN controller=heuristic-v1 rule={} regime={} latency_load_bp={} saturated_bp={} max_wait_us={} stall_wait_us={} batch_retained_bp={batch_bp} batch_floor_bp={} choice={}",
+            "FERRUM_EXPLAIN controller={name} rule={} regime={} latency_load_bp={} saturated_bp={} max_wait_us={} stall_wait_us={} batch_retained_bp={batch_bp} batch_floor_bp={} choice={}",
             d.rule.as_str(),
             d.regime.as_str(),
             s.latency_load_bp,
-            HEURISTIC_V1.saturated_bp,
+            config.saturated_bp,
             latency.max_wait_us,
-            HEURISTIC_V1.stall_wait_us,
-            HEURISTIC_V1.batch_floor_bp,
+            config.stall_wait_us,
+            config.batch_floor_bp,
             profile.as_str()
         );
     }
@@ -721,6 +739,24 @@ mod tests {
         assert_eq!(request.choice.decide_observation(&state(2, 350_000, 40_000)), ProfileId::Latency);
         assert_eq!(request.choice.decide_observation(&state(60, 500_000, 700_000)), ProfileId::Balanced);
         assert_eq!(request.choice.decide_observation(&state(9, 466_000, 371_000)), ProfileId::Latency);
+    }
+
+    #[test]
+    fn heuristic_v2_candidate_keeps_a_short_queue_on_the_latency_boost() {
+        let request = args(&format!("{UNIT} --candidate=heuristic-v2")).unwrap();
+        assert_eq!(request.choice, Choice::HeuristicV2);
+        assert_eq!(heuristic_candidate(request.choice).unwrap().0, "heuristic-v2");
+        let state = |pending: u32, wait_us: u64| {
+            let state = jobs::PrefixJobs {
+                pending,
+                completed_in_window: 20,
+                oldest_pending_us: wait_us,
+                max_latency_in_window_us: wait_us / 2,
+            };
+            jobs::pre_decision(state, [500_000, 500_000, 0, 0], 1_000)
+        };
+        assert_eq!(request.choice.decide_observation(&state(3, 400_000)), ProfileId::Latency);
+        assert_eq!(request.choice.decide_observation(&state(26, 500_000)), ProfileId::Balanced);
     }
 
     #[test]

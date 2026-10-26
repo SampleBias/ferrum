@@ -59,9 +59,13 @@ def _base_rule(snapshot: dict, thresholds: dict) -> tuple[str, str]:
 
 def load_v1(root: Path, name: str = "heuristic-v1") -> dict:
     """A v1 config with its catalog's CPU weights attached under `weights`."""
+    if name not in ("heuristic-v1", "heuristic-v2"):
+        raise ValueError(f"unknown heuristic {name}")
     config = json.loads((root / "configs" / f"{name}.json").read_text())
-    if config.get("id") != "heuristic-v1":
-        raise ValueError(f"configs/{name}.json is not a heuristic-v1 config")
+    if config.get("id") != name:
+        raise ValueError(f"configs/{name}.json does not declare {name}")
+    if name == "heuristic-v2" and "backlog_min" not in config:
+        raise ValueError("heuristic-v2 requires backlog_min")
     catalog = json.loads((root / "configs" / f"catalog-{config['catalog']}.json").read_text())
     weights = {
         profile["id"]: tuple(profile["cpu_weights"][name] for name in CLASSES)
@@ -105,7 +109,8 @@ def signals_v1(snapshot: dict, config: dict) -> dict:
         ),
         "busy_bp": busy * 10_000 // window,
         "latency_below_reference": current[0] * ref_sum < reference[0] * cur_sum,
-        "stalled": latency["queue_len"] > 0 and latency["max_wait_us"] >= config["stall_wait_us"],
+        "stalled": latency["queue_len"] >= config.get("backlog_min", 1)
+        and latency["max_wait_us"] >= config["stall_wait_us"],
     }
 
 
@@ -145,7 +150,7 @@ class Session:
     """One controller session's heuristic. v1 carries its regime between rounds."""
 
     def __init__(self, config: dict) -> None:
-        if config.get("id") not in ("heuristic-v0", "heuristic-v1"):
+        if config.get("id") not in ("heuristic-v0", "heuristic-v1", "heuristic-v2"):
             raise ValueError(f"unknown heuristic {config.get('id')}")
         self.config = config
         self.regime = NORMAL
@@ -165,7 +170,7 @@ class Session:
 
 def load(root: Path, name: str) -> dict:
     """Either heuristic by config name, ready for `Session`."""
-    if name == "heuristic-v1":
+    if name in ("heuristic-v1", "heuristic-v2"):
         return load_v1(root, name)
     config = load_thresholds(root / "configs" / f"{name}.json")
     if config.get("id") != name:

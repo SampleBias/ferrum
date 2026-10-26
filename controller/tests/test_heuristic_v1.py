@@ -130,8 +130,27 @@ class HeuristicV1Tests(unittest.TestCase):
     def test_load_names_either_heuristic(self):
         self.assertEqual(Session(load(ROOT, "heuristic-v0")).id, "heuristic-v0")
         self.assertEqual(Session(load(ROOT, "heuristic-v1")).id, "heuristic-v1")
+        self.assertEqual(Session(load(ROOT, "heuristic-v2")).id, "heuristic-v2")
         with self.assertRaises(ValueError):
             load_v1(ROOT, "heuristic-v0")
+
+    def test_a_short_queue_needs_fourteen_jobs_before_v2_calls_it_stalled(self):
+        v2 = load_v1(ROOT, "heuristic-v2")
+        derived = tune.check_backlog(ROOT, v2)
+        self.assertEqual(derived["backlog_min"], 14)
+        self.assertEqual(derived["under_capacity_max_queue"], 2)
+        self.assertEqual(derived["overload_min_queue"], 26)
+        short = jobs_window(500_000, 500_000, 3, 400_000)
+        long = jobs_window(500_000, 500_000, 26, 500_000)
+        self.assertEqual(evaluate_v1(short, self.config)["profile"], "balanced")
+        self.assertEqual(evaluate_v1(short, v2)["profile"], "latency")
+        self.assertEqual(evaluate_v1(long, v2)["profile"], "balanced")
+        for split in ("training", "development"):
+            for host in HOSTS:
+                docs = [fit.load_labels(ROOT, path, split) for path in sorted(DATA.glob(f"labels-{split}-seed*-{host}.json"))]
+                scored, _ = fit.decisions(docs, fit.load_config(ROOT))
+                result = fit.score([(unit, evaluate_v1(b["snapshot"], v2)["profile"], False) for unit, b in scored])
+                self.assertEqual(result["infeasible"], 0, f"{split} {host}")
 
 
 class ServerSessionTests(unittest.TestCase):

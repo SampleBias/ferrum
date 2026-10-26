@@ -1,0 +1,33 @@
+{
+  "id": "heuristic-v2",
+  "base": "heuristic-v1",
+  "catalog": "cpu-v1",
+  "reference_profile": "balanced",
+  "latency_queue_high": 4,
+  "latency_wait_us_high": 5000,
+  "batch_queue_high": 4,
+  "memory_pressure_bp": 8000,
+  "evictable_backlog_bytes": 33554432,
+  "contended_bp": 9500,
+  "saturated_bp": 9500,
+  "release_bp": 8500,
+  "batch_floor_bp": 9500,
+  "stall_wait_us": 303756,
+  "backlog_min": 14,
+  "derivation": {
+    "reads": "training",
+    "branches": 576,
+    "under_capacity_max_queue": 2,
+    "overload_min_queue": 26,
+    "backlog_min": 14,
+    "labels": [
+      {"labels": "labels-training-seed101-r5-1600.json", "labels_sha256": "52b40b0da1f900057aa6922b9b928402ab0105c62cb8b13b045f5ebd6a5eba42"},
+      {"labels": "labels-training-seed101-i7-10750h.json", "labels_sha256": "ced6256227e54b99e30729c7b0aec5a9ed9628cd9d6061a54583bc00877bc67e"},
+      {"labels": "labels-training-seed102-r5-1600.json", "labels_sha256": "c86e6750805763f8d360e9de616c2cd58d6ebec43eb945d92c42ada53e936d32"},
+      {"labels": "labels-training-seed102-i7-10750h.json", "labels_sha256": "4840600fc37f5a4aac2f82057b0ff70d0c9f85be7412d3a601ef39b4c5727dba"},
+      {"labels": "labels-training-seed103-r5-1600.json", "labels_sha256": "2cedd834f4b5f0ee93a5d70a70155360093cca705ca43ed9b58d3310db136ef7"},
+      {"labels": "labels-training-seed103-i7-10750h.json", "labels_sha256": "379661735d38253a83cf4ef5769c1f9a37da595cfe3dcea650f1c2aa30185924"}
+    ]
+  },
+  "note": "heuristic-v1, plus a backlog. A queue is stalled only when it holds at least backlog_min jobs and the oldest has waited stall_wait_us. backlog_min is the midpoint of the training queue gap: at most 2 pending under an even split, at least 26 over it. stall_wait_us is heuristic-v1's training cut and is not refit. A long wait with only a few jobs, such as a burst of 32 ms work, stays on the latency boost. Development, calibration, and the sealed splits were not read to set the cut."
+}

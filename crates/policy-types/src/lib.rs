@@ -302,6 +302,9 @@ pub enum RejectReason {
     Capability,
     Dwell,
     Emergency,
+    /// The proposal would give batch less than 95% of its reference share while
+    /// latency has already filled that share and the CPU is contended.
+    BatchFloor,
     InactiveMode,
     Busy,
     Duplicate,
@@ -325,6 +328,7 @@ impl RejectReason {
             Self::Capability => "capability",
             Self::Dwell => "dwell",
             Self::Emergency => "emergency",
+            Self::BatchFloor => "batch_floor",
             Self::InactiveMode => "inactive_mode",
             Self::Busy => "busy",
             Self::Duplicate => "duplicate",
@@ -348,6 +352,7 @@ impl RejectReason {
             "capability" => Some(Self::Capability),
             "dwell" => Some(Self::Dwell),
             "emergency" => Some(Self::Emergency),
+            "batch_floor" => Some(Self::BatchFloor),
             "inactive_mode" => Some(Self::InactiveMode),
             "busy" => Some(Self::Busy),
             "duplicate" => Some(Self::Duplicate),

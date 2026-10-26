@@ -180,6 +180,8 @@ pub struct PolicyEngine {
     ack_len: usize,
     acks_dropped: u64,
     acceptance_us: u64,
+    /// Set while a reference-profile measurement shows latency saturating its share.
+    batch_floor_hold: bool,
 }
 
 impl PolicyEngine {
@@ -214,6 +216,7 @@ impl PolicyEngine {
             ack_len: 0,
             acks_dropped: 0,
             acceptance_us: ACCEPTANCE_DEADLINE_US,
+            batch_floor_hold: false,
         };
         engine.actuate(
             ProfileId::Balanced,
@@ -282,6 +285,7 @@ impl PolicyEngine {
         }
         let reconnect = self.session.is_some() && self.session != Some(ack.session_id);
         self.session = Some(ack.session_id);
+        self.batch_floor_hold = false;
         self.inflight = None;
         self.unsent = None;
         self.shadow_streak = 0;
@@ -774,7 +778,7 @@ impl PolicyEngine {
         Ok(pending)
     }
 
-    fn semantic_reason(&self, now_us: u64, proposal: &Proposal, pending: Pending) -> Option<RejectReason> {
+    fn semantic_reason(&mut self, now_us: u64, proposal: &Proposal, pending: Pending) -> Option<RejectReason> {
         if proposal.base_generation != pending.snapshot.base_generation {
             return Some(RejectReason::StaleGeneration);
         }
@@ -800,6 +804,22 @@ impl PolicyEngine {
         }
         if let Err(reason) = self.dwell_ok(now_us, proposal.profile) {
             return Some(reason);
+        }
+        let obs = Observation {
+            window_us: pending.snapshot.window_us,
+            groups: pending.snapshot.groups,
+            pressure: pending.snapshot.pressure,
+        };
+        self.batch_floor_hold = crate::heuristic::update_batch_floor_hold(
+            self.batch_floor_hold,
+            &obs,
+            pending.snapshot.current_profile,
+            &crate::HEURISTIC_V1,
+        );
+        if self.batch_floor_hold
+            && crate::heuristic::cuts_batch_floor(&obs, proposal.profile, &crate::HEURISTIC_V1)
+        {
+            return Some(RejectReason::BatchFloor);
         }
         None
     }
@@ -1067,6 +1087,76 @@ mod tests {
             ProposalOutcome::Rejected(RejectReason::Dwell)
         );
         assert_eq!(engine.status().profile, ProfileId::Latency);
+    }
+
+    fn contended(latency_us: u64, batch_us: u64, queue: u32) -> Observation {
+        let mut observation = Observation::quiet(1_000_000);
+        observation.groups[0].cpu_service_us = latency_us;
+        observation.groups[0].queue_len = queue;
+        observation.groups[0].max_wait_us = 500_000;
+        observation.groups[0].wait_samples = 1;
+        observation.groups[1].cpu_service_us = batch_us;
+        observation.groups[1].runnable = 1;
+        observation
+    }
+
+    fn proposal_observed(
+        engine: &mut PolicyEngine,
+        now: u64,
+        observation: Observation,
+        profile: ProfileId,
+    ) -> Proposal {
+        let Capture::Send { snapshot, hash } = engine.capture(now, observation).unwrap() else {
+            panic!("snapshot should be sent");
+        };
+        let mut proposal = proposal_from(&snapshot, hash);
+        proposal.profile = profile;
+        proposal
+    }
+
+    #[test]
+    fn overload_rejects_a_latency_proposal_and_under_capacity_keeps_it() {
+        let mut boosted = engine(RunMode::Mock, CatalogId::CpuV1);
+        let mut overloaded = engine(RunMode::Mock, CatalogId::CpuV1);
+        arm(&mut boosted);
+        let at = MIN_DWELL_US;
+        let proposal = proposal_observed(&mut boosted, at, contended(200_000, 800_000, 2), ProfileId::Latency);
+        assert_eq!(boosted.on_proposal(at, &proposal), ProposalOutcome::Staged);
+        assert!(matches!(boosted.activate(at), ActivateOutcome::Applied(_)));
+        assert_eq!(boosted.status().profile, ProfileId::Latency);
+
+        let renew_at = at + 500_000;
+        let renewal = proposal_observed(
+            &mut boosted,
+            renew_at,
+            contended(750_000, 250_000, 2),
+            ProfileId::Latency,
+        );
+        assert_eq!(boosted.on_proposal(renew_at, &renewal), ProposalOutcome::Staged);
+        arm(&mut overloaded);
+        let cut = proposal_observed(&mut overloaded, at, contended(500_000, 500_000, 40), ProfileId::Latency);
+        assert_eq!(
+            overloaded.on_proposal(at, &cut),
+            ProposalOutcome::Rejected(RejectReason::BatchFloor)
+        );
+        assert_eq!(overloaded.status().profile, ProfileId::Balanced);
+        let mid = proposal_observed(
+            &mut overloaded,
+            at + 1_000,
+            contended(450_000, 550_000, 40),
+            ProfileId::Latency,
+        );
+        assert_eq!(
+            overloaded.on_proposal(at + 1_000, &mid),
+            ProposalOutcome::Rejected(RejectReason::BatchFloor)
+        );
+        let released = proposal_observed(
+            &mut overloaded,
+            at + 2_000,
+            contended(200_000, 800_000, 2),
+            ProfileId::Latency,
+        );
+        assert_eq!(overloaded.on_proposal(at + 2_000, &released), ProposalOutcome::Staged);
     }
 
     #[test]

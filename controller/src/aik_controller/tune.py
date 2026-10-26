@@ -86,6 +86,50 @@ def check(root: Path, config: dict) -> dict:
     return derived
 
 
+def derive_backlog(root: Path, paths: list[Path], config: dict) -> dict:
+    """heuristic-v2's backlog cut: the midpoint of the training queue gap."""
+    docs = [fit.load_labels(root, path, "training") for path in paths]
+    branches.wake_mode(docs)
+    manifest = splits.load_branched(root)
+    family = jobs.load_family(splits.family_path(root, manifest))
+    offered = {scenario["name"]: scenario["offered_bp"] for scenario in family["scenarios"]}
+    share = reference_share_bp(family, config["weights"][config["reference_profile"]])
+    under, over = [], []
+    for doc in docs:
+        for unit in doc["units"]:
+            if offered[unit["scenario"]] == share:
+                continue
+            side = under if offered[unit["scenario"]] < share else over
+            for branch in unit["branches"]:
+                latency = next(group for group in branch["snapshot"]["groups"] if group["class"] == "latency")
+                side.append(latency["queue_len"])
+    if not under or not over:
+        raise fit.FitError("training needs branches on both sides of the reference share")
+    low, high = max(under), min(over)
+    if low >= high:
+        raise fit.FitError(f"no training gap in pending jobs ({low} >= {high})")
+    return {
+        "reads": "training",
+        "branches": len(under) + len(over),
+        "under_capacity_max_queue": low,
+        "overload_min_queue": high,
+        "backlog_min": (low + high) // 2,
+        "labels": [{"labels": doc["labels"], "labels_sha256": doc["labels_sha256"]} for doc in docs],
+    }
+
+
+def check_backlog(root: Path, config: dict) -> dict:
+    """Re-derive heuristic-v2's backlog. The committed value must match."""
+    declared = config["derivation"]
+    paths = [root / "data" / "jobs-v2" / item["labels"] for item in declared["labels"]]
+    derived = derive_backlog(root, paths, config)
+    if derived != declared:
+        raise fit.FitError("configs/heuristic-v2.json does not match its training derivation")
+    if config["backlog_min"] != derived["backlog_min"]:
+        raise fit.FitError("backlog_min is not the derived value")
+    return derived
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="aik_controller.tune")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[3])
