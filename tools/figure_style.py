@@ -284,7 +284,7 @@ def real_benchmark_svg(
         (284, "pending-threshold", t_bat, "red", f"{t_bat:.1f}%  PASS"),
         (306, "heuristic-v1", v1_bat, "red", f"{v1_bat:.1f}%  PASS"),
         (328, "Laya / logistic-v0", l_bat, "silver", f"{l_bat:.1f}%  PASS"),
-        (350, "heuristic-v0", h_bat, "void", f"{h_bat:.1f}%  INFEASIBLE"),
+        (350, "heuristic-v0 (old rule)", h_bat, "void", f"{h_bat:.1f}%  INFEASIBLE"),
     ]
     for y, label, value, kind, caption in retain:
         w = max(2, round(180 * value / 100.0))

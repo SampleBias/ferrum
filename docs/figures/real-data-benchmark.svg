@@ -60,7 +60,7 @@
 <text x="750" y="341" text-anchor="end" font-size="12" font-weight="700" fill="#e8e8e8">Laya / logistic-v0</text>
 <rect x="760" y="328" width="180" height="16" fill="#c2c2c2"/><rect x="760" y="332" width="180" height="2" fill="#8a8a8a"/><rect x="760" y="336" width="180" height="2" fill="#8a8a8a"/><rect x="760" y="340" width="180" height="1" fill="#8a8a8a"/><rect x="760" y="328" width="180" height="2" fill="#f4f4f4"/><rect x="760" y="341" width="180" height="3" fill="#242424"/><rect x="939" y="328" width="1" height="16" fill="#f4f4f4"/>
 <text x="948" y="341" text-anchor="start" font-size="12" font-weight="700" fill="#f0f0f0">100.0%  PASS</text>
-<text x="750" y="363" text-anchor="end" font-size="12" font-weight="700" fill="#e8e8e8">heuristic-v0</text>
+<text x="750" y="363" text-anchor="end" font-size="12" font-weight="700" fill="#e8e8e8">heuristic-v0 (old rule)</text>
 <rect x="760" y="350" width="92" height="16" fill="#160606"/><rect x="760" y="354" width="92" height="2" fill="#0a0a0a"/><rect x="760" y="358" width="92" height="2" fill="#0a0a0a"/><rect x="760" y="362" width="92" height="1" fill="#0a0a0a"/><rect x="760" y="350" width="92" height="2" fill="#ff1c1c"/><rect x="760" y="363" width="92" height="3" fill="#6a6a6a"/><rect x="851" y="350" width="1" height="16" fill="#ff1c1c"/>
 <text x="860" y="363" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">51.1%  INFEASIBLE</text>
 </svg>
