@@ -29,9 +29,9 @@ def geo(values):
     return math.exp(sum(math.log(v) for v in values) / len(values))
 
 
-def load_branches():
+def load_branches(path: Path):
     cells = defaultdict(list)
-    for line in (DATA / "branches-r5-1600.jsonl").read_text().splitlines():
+    for line in path.read_text().splitlines():
         r = json.loads(line)
         if r["build"] != "wake-mode" or "error" in r:
             continue
@@ -53,9 +53,9 @@ def ratios(cells, scenarios, profile, key):
     ]
 
 
-def load_real():
+def load_real(path: Path):
     runs = defaultdict(list)
-    for line in (DATA / "real-workload-r5-1600.jsonl").read_text().splitlines():
+    for line in path.read_text().splitlines():
         r = json.loads(line)
         runs[(r["mode"], r["wake"])].append(r)
     return {key: {k: statistics.median(r[k] for r in rs) for k in ("p50_us", "p99_us", "batch_kib")} | {"n": len(rs)}
@@ -66,9 +66,23 @@ def pct(new, old, places=0):
     return f"{(new / old - 1) * 100:+.{places}f}%"
 
 
-def main() -> int:
-    cells = load_branches()
-    real = load_real()
+HOSTS = (
+    (
+        "r5-1600",
+        "wake-mode-ab",
+        "Same guest binary on AMD Ryzen 5 1600 (kvm_amd). wake=0 is the scheduler behind every label and sealed result.",
+    ),
+    (
+        "i7-10750h",
+        "wake-mode-ab-i7",
+        "Same release guest on Intel Core i7-10750H (kvm_intel). wake=0 is the scheduler behind every label and sealed result.",
+    ),
+)
+
+
+def draw(tag: str, stem: str, host_line: str) -> None:
+    cells = load_branches(DATA / f"branches-{tag}.jsonl")
+    real = load_real(DATA / f"real-workload-{tag}.jsonl")
 
     rpc_rows = []
     entries = [
@@ -113,16 +127,22 @@ def main() -> int:
         batch_cpu_line=f"Batch CPU under capacity: {batch:.3f}x of wake=0",
         overload_line=f"Overload {OVERLOAD}: p99 {span(over_p99)}, p50 {span(over_p50)}, batch {span(over_batch)}",
         overload_note="(latency profile, both seeds; not a win when latency work saturates)",
+        host_line=host_line,
     )
     FIGURES.mkdir(parents=True, exist_ok=True)
-    svg_path = FIGURES / "wake-mode-ab.svg"
-    png_path = FIGURES / "wake-mode-ab.png"
+    svg_path = FIGURES / f"{stem}.svg"
+    png_path = FIGURES / f"{stem}.png"
     svg_path.write_text(svg)
     subprocess.run(
         ["rsvg-convert", "-f", "png", "-d", "192", "-p", "192", str(svg_path), "-o", str(png_path)],
         check=True,
     )
     print(f"wrote {svg_path.relative_to(ROOT)} and {png_path.relative_to(ROOT)}")
+
+
+def main() -> int:
+    for tag, stem, host_line in HOSTS:
+        draw(tag, stem, host_line)
     return 0
 
 

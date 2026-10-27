@@ -189,50 +189,53 @@ def sealed_evaluation_svg() -> str:
 
 
 def holdout_closed_loop_svg() -> str:
-    """Office-host holdouts. Counts and batch ranges are the closed-loop scores."""
+    """Both lab hosts. Counts and batch ranges are the closed-loop scores."""
     rows = [
-        ("heuristic-v1", "seed 501", 15, 13, 99.752, "99.67–99.80%"),
-        ("heuristic-v2", "seed 601", 14, 11, 99.762, "99.73–99.80%"),
+        ("Ryzen v1", "seed 501", 15, 13, 99.752, "99.67–99.80%", "15/15 feasible"),
+        ("Intel v1", "seed 501", 14, 12, 99.845, "99.83–99.87%", "14 feasible, 1 diverged"),
+        ("Ryzen v2", "seed 601", 14, 11, 99.762, "99.73–99.80%", "14/15 feasible"),
+        ("Intel v2", "seed 601", 15, 13, 99.869, "99.84–99.90%", "15/15 feasible"),
     ]
     parts = [
         heading(
-            "Held-out closed loop on the office host",
-            "Ryzen 5 1600, kvm_amd. Each seed was frozen before its first boot. Intel has not run these units.",
+            "Held-out closed loop on both lab hosts",
+            "Each seed was frozen before its first boot. Intel heuristic-v1 left s4-u45/501 diverged and unscored.",
         ),
         swatch(28, 70, "silver", "Feasible units"),
         swatch(220, 70, "red", "Hits"),
-        panel(24, 96, 620, 248),
+        panel(24, 96, 620, 360),
         text(44, 124, "A. Closed-loop units, N=15", size=14, fill="#f4f4f4", weight=800),
         text(44, 144, "A hit is feasible and inside the best profile's range", size=11, fill="#a3a3a3", weight=500),
     ]
     bar_x, max_w = 250, 250
-    for idx, (name, seed, feasible, hits, _mean, _span) in enumerate(rows):
-        y = 164 + idx * 84
+    for idx, (name, seed, feasible, hits, _mean, _span, feasible_note) in enumerate(rows):
+        y = 164 + idx * 70
         parts.append(text(bar_x - 14, y + 12, name, size=13, fill="#f0f0f0", weight=700, anchor="end"))
         parts.append(text(bar_x - 14, y + 30, seed, size=11, fill="#8d8d8d", weight=500, anchor="end"))
         w_f = round(max_w * feasible / 15)
         w_h = round(max_w * hits / 15)
         parts.append(bar(bar_x, y, w_f, 16, "silver"))
-        parts.append(text(bar_x + w_f + 8, y + 13, f"{feasible}/15 feasible", size=12, fill="#d0d0d0", weight=700))
+        parts.append(text(bar_x + w_f + 8, y + 13, feasible_note, size=12, fill="#d0d0d0", weight=700))
         parts.append(bar(bar_x, y + 22, w_h, 16, "red"))
-        parts.append(text(bar_x + w_h + 8, y + 35, f"{hits}/15 hits", size=12, fill="#ff3a3a", weight=700))
+        hits_note = f"{hits}/14 hits" if "diverged" in feasible_note else f"{hits}/15 hits"
+        parts.append(text(bar_x + w_h + 8, y + 35, hits_note, size=12, fill="#ff3a3a", weight=700))
     parts.extend([
-        panel(660, 96, 436, 248),
+        panel(660, 96, 436, 360),
         text(680, 124, "B. Overload batch CPU retained", size=14, fill="#f4f4f4", weight=800),
         text(680, 144, "Eight overload units. Floor is 95%", size=11, fill="#a3a3a3", weight=500),
     ])
     scale = 340.0 / 100.0
     origin_x = 680
     floor_x = origin_x + round(95 * scale)
-    parts.append(f'<line x1="{floor_x}" y1="168" x2="{floor_x}" y2="292" stroke="#ff1a1a" stroke-width="1"/>')
-    parts.append(text(floor_x, 308, "95%", size=11, fill="#ff2a2a", weight=700, anchor="middle"))
-    for idx, (name, _seed, _feasible, _hits, mean, span) in enumerate(rows):
-        y = 168 + idx * 72
+    parts.append(f'<line x1="{floor_x}" y1="168" x2="{floor_x}" y2="420" stroke="#ff1a1a" stroke-width="1"/>')
+    parts.append(text(floor_x, 436, "95%", size=11, fill="#ff2a2a", weight=700, anchor="middle"))
+    for idx, (name, _seed, _feasible, _hits, mean, span, _note) in enumerate(rows):
+        y = 168 + idx * 64
         w = max(2, round(mean * scale))
         parts.append(text(origin_x, y, name, size=12, fill="#e8e8e8", weight=700))
         parts.append(bar(origin_x, y + 8, w, 16, "red"))
-        parts.append(text(origin_x, y + 42, f"{span}   PASS", size=12, fill="#f0f0f0", weight=700))
-    return document(1120, 368, "\n".join(parts))
+        parts.append(text(origin_x, y + 40, f"{span}   PASS", size=12, fill="#f0f0f0", weight=700))
+    return document(1120, 480, "\n".join(parts))
 
 
 def timing_svg(stage_us, expiry_us, passed, total, rust_n, py_n) -> str:
@@ -377,13 +380,14 @@ def wake_ab_svg(
     batch_cpu_line: str,
     overload_line: str,
     overload_note: str,
+    host_line: str,
 ) -> str:
     rpc_max = max(old for _, old, _ in rpc_rows)
     scen_max = max(old for _, old, _ in scenarios)
     parts = [
         heading(
             "Scheduler wake mode A/B: bounded wake credit + in-class FIFO",
-            "Same guest binary on AMD Ryzen 5 1600 (kvm_amd). wake=0 is the scheduler behind every label and sealed result.",
+            host_line,
         ),
         swatch(700, 68, "silver", "wake=0 (default)"),
         swatch(920, 68, "red", "wake=3"),

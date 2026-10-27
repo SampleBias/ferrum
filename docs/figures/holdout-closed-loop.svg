@@ -1,51 +1,69 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="368" viewBox="0 0 1120 368" font-family="'Noto Sans Mono', 'Liberation Mono', ui-monospace, monospace">
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="480" viewBox="0 0 1120 480" font-family="'Noto Sans Mono', 'Liberation Mono', ui-monospace, monospace">
   <defs>
     <pattern id="grid" width="8" height="8" patternUnits="userSpaceOnUse">
       <path d="M8 0 H0 V8" fill="none" stroke="#240808" stroke-width="1"/>
     </pattern>
   </defs>
-  <rect width="1120" height="368" fill="#050505"/>
-  <rect width="1120" height="368" fill="url(#grid)"/>
-  <rect x="2" y="2" width="1116" height="364" fill="none" stroke="#ff1a1a" stroke-width="3"/>
-  <rect x="8" y="8" width="1104" height="352" fill="none" stroke="#2a2a2a" stroke-width="1"/>
-  <rect x="10" y="359" width="1100" height="2" fill="#c8c8c8"/>
+  <rect width="1120" height="480" fill="#050505"/>
+  <rect width="1120" height="480" fill="url(#grid)"/>
+  <rect x="2" y="2" width="1116" height="476" fill="none" stroke="#ff1a1a" stroke-width="3"/>
+  <rect x="8" y="8" width="1104" height="464" fill="none" stroke="#2a2a2a" stroke-width="1"/>
+  <rect x="10" y="471" width="1100" height="2" fill="#c8c8c8"/>
   <g fill="#ffffff">
     <rect x="18" y="16" width="2" height="8"/>
     <rect x="15" y="19" width="8" height="2"/>
     <rect x="1100" y="16" width="2" height="8"/>
     <rect x="1097" y="19" width="8" height="2"/>
-    <rect x="18" y="340" width="2" height="8"/>
-    <rect x="15" y="343" width="8" height="2"/>
-    <rect x="1100" y="340" width="2" height="8"/>
-    <rect x="1097" y="343" width="8" height="2"/>
+    <rect x="18" y="452" width="2" height="8"/>
+    <rect x="15" y="455" width="8" height="2"/>
+    <rect x="1100" y="452" width="2" height="8"/>
+    <rect x="1097" y="455" width="8" height="2"/>
   </g>
-<text x="28" y="36" text-anchor="start" font-size="15" font-weight="800" fill="#ff2a2a">Held-out closed loop on the office host</text><text x="28" y="56" text-anchor="start" font-size="11" font-weight="500" fill="#a3a3a3">Ryzen 5 1600, kvm_amd. Each seed was frozen before its first boot. Intel has not run these units.</text>
+<text x="28" y="36" text-anchor="start" font-size="15" font-weight="800" fill="#ff2a2a">Held-out closed loop on both lab hosts</text><text x="28" y="56" text-anchor="start" font-size="11" font-weight="500" fill="#a3a3a3">Each seed was frozen before its first boot. Intel heuristic-v1 left s4-u45/501 diverged and unscored.</text>
 <rect x="28" y="70" width="14" height="14" fill="#c2c2c2"/><rect x="28" y="74" width="14" height="2" fill="#8a8a8a"/><rect x="28" y="78" width="14" height="2" fill="#8a8a8a"/><rect x="28" y="70" width="14" height="2" fill="#f4f4f4"/><rect x="28" y="82" width="14" height="2" fill="#242424"/><rect x="41" y="70" width="1" height="14" fill="#f4f4f4"/><text x="48" y="82" text-anchor="start" font-size="12" font-weight="600" fill="#d0d0d0">Feasible units</text>
 <rect x="220" y="70" width="14" height="14" fill="#d01212"/><rect x="220" y="74" width="14" height="2" fill="#8a0a0a"/><rect x="220" y="78" width="14" height="2" fill="#8a0a0a"/><rect x="220" y="70" width="14" height="2" fill="#ff3a3a"/><rect x="220" y="82" width="14" height="2" fill="#d4d4d4"/><rect x="233" y="70" width="1" height="14" fill="#ff3a3a"/><text x="240" y="82" text-anchor="start" font-size="12" font-weight="600" fill="#d0d0d0">Hits</text>
-<rect x="24" y="96" width="620" height="248" fill="#070707" stroke="#e10600" stroke-width="1.5"/><rect x="24" y="341" width="620" height="3" fill="#c8c8c8"/><rect x="24" y="96" width="3" height="248" fill="#ff1a1a"/>
+<rect x="24" y="96" width="620" height="360" fill="#070707" stroke="#e10600" stroke-width="1.5"/><rect x="24" y="453" width="620" height="3" fill="#c8c8c8"/><rect x="24" y="96" width="3" height="360" fill="#ff1a1a"/>
 <text x="44" y="124" text-anchor="start" font-size="14" font-weight="800" fill="#f4f4f4">A. Closed-loop units, N=15</text>
 <text x="44" y="144" text-anchor="start" font-size="11" font-weight="500" fill="#a3a3a3">A hit is feasible and inside the best profile's range</text>
-<text x="236" y="176" text-anchor="end" font-size="13" font-weight="700" fill="#f0f0f0">heuristic-v1</text>
+<text x="236" y="176" text-anchor="end" font-size="13" font-weight="700" fill="#f0f0f0">Ryzen v1</text>
 <text x="236" y="194" text-anchor="end" font-size="11" font-weight="500" fill="#8d8d8d">seed 501</text>
 <rect x="250" y="164" width="250" height="16" fill="#c2c2c2"/><rect x="250" y="168" width="250" height="2" fill="#8a8a8a"/><rect x="250" y="172" width="250" height="2" fill="#8a8a8a"/><rect x="250" y="176" width="250" height="1" fill="#8a8a8a"/><rect x="250" y="164" width="250" height="2" fill="#f4f4f4"/><rect x="250" y="177" width="250" height="3" fill="#242424"/><rect x="499" y="164" width="1" height="16" fill="#f4f4f4"/>
 <text x="508" y="177" text-anchor="start" font-size="12" font-weight="700" fill="#d0d0d0">15/15 feasible</text>
 <rect x="250" y="186" width="217" height="16" fill="#d01212"/><rect x="250" y="190" width="217" height="2" fill="#8a0a0a"/><rect x="250" y="194" width="217" height="2" fill="#8a0a0a"/><rect x="250" y="198" width="217" height="1" fill="#8a0a0a"/><rect x="250" y="186" width="217" height="2" fill="#ff3a3a"/><rect x="250" y="199" width="217" height="3" fill="#d4d4d4"/><rect x="466" y="186" width="1" height="16" fill="#ff3a3a"/>
 <text x="475" y="199" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">13/15 hits</text>
-<text x="236" y="260" text-anchor="end" font-size="13" font-weight="700" fill="#f0f0f0">heuristic-v2</text>
-<text x="236" y="278" text-anchor="end" font-size="11" font-weight="500" fill="#8d8d8d">seed 601</text>
-<rect x="250" y="248" width="233" height="16" fill="#c2c2c2"/><rect x="250" y="252" width="233" height="2" fill="#8a8a8a"/><rect x="250" y="256" width="233" height="2" fill="#8a8a8a"/><rect x="250" y="260" width="233" height="1" fill="#8a8a8a"/><rect x="250" y="248" width="233" height="2" fill="#f4f4f4"/><rect x="250" y="261" width="233" height="3" fill="#242424"/><rect x="482" y="248" width="1" height="16" fill="#f4f4f4"/>
-<text x="491" y="261" text-anchor="start" font-size="12" font-weight="700" fill="#d0d0d0">14/15 feasible</text>
-<rect x="250" y="270" width="183" height="16" fill="#d01212"/><rect x="250" y="274" width="183" height="2" fill="#8a0a0a"/><rect x="250" y="278" width="183" height="2" fill="#8a0a0a"/><rect x="250" y="282" width="183" height="1" fill="#8a0a0a"/><rect x="250" y="270" width="183" height="2" fill="#ff3a3a"/><rect x="250" y="283" width="183" height="3" fill="#d4d4d4"/><rect x="432" y="270" width="1" height="16" fill="#ff3a3a"/>
-<text x="441" y="283" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">11/15 hits</text>
-<rect x="660" y="96" width="436" height="248" fill="#070707" stroke="#e10600" stroke-width="1.5"/><rect x="660" y="341" width="436" height="3" fill="#c8c8c8"/><rect x="660" y="96" width="3" height="248" fill="#ff1a1a"/>
+<text x="236" y="246" text-anchor="end" font-size="13" font-weight="700" fill="#f0f0f0">Intel v1</text>
+<text x="236" y="264" text-anchor="end" font-size="11" font-weight="500" fill="#8d8d8d">seed 501</text>
+<rect x="250" y="234" width="233" height="16" fill="#c2c2c2"/><rect x="250" y="238" width="233" height="2" fill="#8a8a8a"/><rect x="250" y="242" width="233" height="2" fill="#8a8a8a"/><rect x="250" y="246" width="233" height="1" fill="#8a8a8a"/><rect x="250" y="234" width="233" height="2" fill="#f4f4f4"/><rect x="250" y="247" width="233" height="3" fill="#242424"/><rect x="482" y="234" width="1" height="16" fill="#f4f4f4"/>
+<text x="491" y="247" text-anchor="start" font-size="12" font-weight="700" fill="#d0d0d0">14 feasible, 1 diverged</text>
+<rect x="250" y="256" width="200" height="16" fill="#d01212"/><rect x="250" y="260" width="200" height="2" fill="#8a0a0a"/><rect x="250" y="264" width="200" height="2" fill="#8a0a0a"/><rect x="250" y="268" width="200" height="1" fill="#8a0a0a"/><rect x="250" y="256" width="200" height="2" fill="#ff3a3a"/><rect x="250" y="269" width="200" height="3" fill="#d4d4d4"/><rect x="449" y="256" width="1" height="16" fill="#ff3a3a"/>
+<text x="458" y="269" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">12/14 hits</text>
+<text x="236" y="316" text-anchor="end" font-size="13" font-weight="700" fill="#f0f0f0">Ryzen v2</text>
+<text x="236" y="334" text-anchor="end" font-size="11" font-weight="500" fill="#8d8d8d">seed 601</text>
+<rect x="250" y="304" width="233" height="16" fill="#c2c2c2"/><rect x="250" y="308" width="233" height="2" fill="#8a8a8a"/><rect x="250" y="312" width="233" height="2" fill="#8a8a8a"/><rect x="250" y="316" width="233" height="1" fill="#8a8a8a"/><rect x="250" y="304" width="233" height="2" fill="#f4f4f4"/><rect x="250" y="317" width="233" height="3" fill="#242424"/><rect x="482" y="304" width="1" height="16" fill="#f4f4f4"/>
+<text x="491" y="317" text-anchor="start" font-size="12" font-weight="700" fill="#d0d0d0">14/15 feasible</text>
+<rect x="250" y="326" width="183" height="16" fill="#d01212"/><rect x="250" y="330" width="183" height="2" fill="#8a0a0a"/><rect x="250" y="334" width="183" height="2" fill="#8a0a0a"/><rect x="250" y="338" width="183" height="1" fill="#8a0a0a"/><rect x="250" y="326" width="183" height="2" fill="#ff3a3a"/><rect x="250" y="339" width="183" height="3" fill="#d4d4d4"/><rect x="432" y="326" width="1" height="16" fill="#ff3a3a"/>
+<text x="441" y="339" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">11/15 hits</text>
+<text x="236" y="386" text-anchor="end" font-size="13" font-weight="700" fill="#f0f0f0">Intel v2</text>
+<text x="236" y="404" text-anchor="end" font-size="11" font-weight="500" fill="#8d8d8d">seed 601</text>
+<rect x="250" y="374" width="250" height="16" fill="#c2c2c2"/><rect x="250" y="378" width="250" height="2" fill="#8a8a8a"/><rect x="250" y="382" width="250" height="2" fill="#8a8a8a"/><rect x="250" y="386" width="250" height="1" fill="#8a8a8a"/><rect x="250" y="374" width="250" height="2" fill="#f4f4f4"/><rect x="250" y="387" width="250" height="3" fill="#242424"/><rect x="499" y="374" width="1" height="16" fill="#f4f4f4"/>
+<text x="508" y="387" text-anchor="start" font-size="12" font-weight="700" fill="#d0d0d0">15/15 feasible</text>
+<rect x="250" y="396" width="217" height="16" fill="#d01212"/><rect x="250" y="400" width="217" height="2" fill="#8a0a0a"/><rect x="250" y="404" width="217" height="2" fill="#8a0a0a"/><rect x="250" y="408" width="217" height="1" fill="#8a0a0a"/><rect x="250" y="396" width="217" height="2" fill="#ff3a3a"/><rect x="250" y="409" width="217" height="3" fill="#d4d4d4"/><rect x="466" y="396" width="1" height="16" fill="#ff3a3a"/>
+<text x="475" y="409" text-anchor="start" font-size="12" font-weight="700" fill="#ff3a3a">13/15 hits</text>
+<rect x="660" y="96" width="436" height="360" fill="#070707" stroke="#e10600" stroke-width="1.5"/><rect x="660" y="453" width="436" height="3" fill="#c8c8c8"/><rect x="660" y="96" width="3" height="360" fill="#ff1a1a"/>
 <text x="680" y="124" text-anchor="start" font-size="14" font-weight="800" fill="#f4f4f4">B. Overload batch CPU retained</text>
 <text x="680" y="144" text-anchor="start" font-size="11" font-weight="500" fill="#a3a3a3">Eight overload units. Floor is 95%</text>
-<line x1="1003" y1="168" x2="1003" y2="292" stroke="#ff1a1a" stroke-width="1"/>
-<text x="1003" y="308" text-anchor="middle" font-size="11" font-weight="700" fill="#ff2a2a">95%</text>
-<text x="680" y="168" text-anchor="start" font-size="12" font-weight="700" fill="#e8e8e8">heuristic-v1</text>
+<line x1="1003" y1="168" x2="1003" y2="420" stroke="#ff1a1a" stroke-width="1"/>
+<text x="1003" y="436" text-anchor="middle" font-size="11" font-weight="700" fill="#ff2a2a">95%</text>
+<text x="680" y="168" text-anchor="start" font-size="12" font-weight="700" fill="#e8e8e8">Ryzen v1</text>
 <rect x="680" y="176" width="339" height="16" fill="#d01212"/><rect x="680" y="180" width="339" height="2" fill="#8a0a0a"/><rect x="680" y="184" width="339" height="2" fill="#8a0a0a"/><rect x="680" y="188" width="339" height="1" fill="#8a0a0a"/><rect x="680" y="176" width="339" height="2" fill="#ff3a3a"/><rect x="680" y="189" width="339" height="3" fill="#d4d4d4"/><rect x="1018" y="176" width="1" height="16" fill="#ff3a3a"/>
-<text x="680" y="210" text-anchor="start" font-size="12" font-weight="700" fill="#f0f0f0">99.67–99.80%   PASS</text>
-<text x="680" y="240" text-anchor="start" font-size="12" font-weight="700" fill="#e8e8e8">heuristic-v2</text>
-<rect x="680" y="248" width="339" height="16" fill="#d01212"/><rect x="680" y="252" width="339" height="2" fill="#8a0a0a"/><rect x="680" y="256" width="339" height="2" fill="#8a0a0a"/><rect x="680" y="260" width="339" height="1" fill="#8a0a0a"/><rect x="680" y="248" width="339" height="2" fill="#ff3a3a"/><rect x="680" y="261" width="339" height="3" fill="#d4d4d4"/><rect x="1018" y="248" width="1" height="16" fill="#ff3a3a"/>
-<text x="680" y="282" text-anchor="start" font-size="12" font-weight="700" fill="#f0f0f0">99.73–99.80%   PASS</text>
+<text x="680" y="208" text-anchor="start" font-size="12" font-weight="700" fill="#f0f0f0">99.67–99.80%   PASS</text>
+<text x="680" y="232" text-anchor="start" font-size="12" font-weight="700" fill="#e8e8e8">Intel v1</text>
+<rect x="680" y="240" width="339" height="16" fill="#d01212"/><rect x="680" y="244" width="339" height="2" fill="#8a0a0a"/><rect x="680" y="248" width="339" height="2" fill="#8a0a0a"/><rect x="680" y="252" width="339" height="1" fill="#8a0a0a"/><rect x="680" y="240" width="339" height="2" fill="#ff3a3a"/><rect x="680" y="253" width="339" height="3" fill="#d4d4d4"/><rect x="1018" y="240" width="1" height="16" fill="#ff3a3a"/>
+<text x="680" y="272" text-anchor="start" font-size="12" font-weight="700" fill="#f0f0f0">99.83–99.87%   PASS</text>
+<text x="680" y="296" text-anchor="start" font-size="12" font-weight="700" fill="#e8e8e8">Ryzen v2</text>
+<rect x="680" y="304" width="339" height="16" fill="#d01212"/><rect x="680" y="308" width="339" height="2" fill="#8a0a0a"/><rect x="680" y="312" width="339" height="2" fill="#8a0a0a"/><rect x="680" y="316" width="339" height="1" fill="#8a0a0a"/><rect x="680" y="304" width="339" height="2" fill="#ff3a3a"/><rect x="680" y="317" width="339" height="3" fill="#d4d4d4"/><rect x="1018" y="304" width="1" height="16" fill="#ff3a3a"/>
+<text x="680" y="336" text-anchor="start" font-size="12" font-weight="700" fill="#f0f0f0">99.73–99.80%   PASS</text>
+<text x="680" y="360" text-anchor="start" font-size="12" font-weight="700" fill="#e8e8e8">Intel v2</text>
+<rect x="680" y="368" width="340" height="16" fill="#d01212"/><rect x="680" y="372" width="340" height="2" fill="#8a0a0a"/><rect x="680" y="376" width="340" height="2" fill="#8a0a0a"/><rect x="680" y="380" width="340" height="1" fill="#8a0a0a"/><rect x="680" y="368" width="340" height="2" fill="#ff3a3a"/><rect x="680" y="381" width="340" height="3" fill="#d4d4d4"/><rect x="1019" y="368" width="1" height="16" fill="#ff3a3a"/>
+<text x="680" y="400" text-anchor="start" font-size="12" font-weight="700" fill="#f0f0f0">99.84–99.90%   PASS</text>
 </svg>
