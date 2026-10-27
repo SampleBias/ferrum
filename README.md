@@ -257,6 +257,12 @@ Each decision emits `FERRUM_EXPLAIN` in the guest and `EXPLAIN seq=...` in `aik_
 
 Acceptance measurements, charts, and kernel traces: [docs/14-s3-acceptance.md](docs/14-s3-acceptance.md), [docs/15-test-results.md](docs/15-test-results.md).
 
+## License
+
+Ferrum is licensed under the [Apache License, Version 2.0](LICENSE). Copyright 2026 Dr. James Utley, PhD (S4MPL3BI4S), Syndicate Laboratories, Las Vegas, Nevada. Redistributions keep this copyright and the attribution in [NOTICE](NOTICE).
+
+Hermit in `vendor/hermit-rs/` remains under `MIT OR Apache-2.0`.
+
 ## Documentation
 
 | Document | Purpose |

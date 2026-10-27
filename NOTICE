@@ -1,0 +1,11 @@
+Ferrum
+Copyright 2026 Dr. James Utley, PhD (S4MPL3BI4S)
+Syndicate Laboratories, Las Vegas, Nevada
+
+Ferrum is an adaptive sensor kernel. Products, deployments, and papers
+that use it should credit Dr. James Utley, PhD (S4MPL3BI4S) and
+Syndicate Laboratories, Las Vegas, Nevada.
+
+This product includes software from Hermit
+(https://github.com/hermit-os/hermit-rs), which remains licensed under
+MIT OR Apache-2.0. Those license texts stay in vendor/hermit-rs/.
