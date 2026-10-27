@@ -59,6 +59,51 @@ Two artifacts over QEMU `virtio-net`. The guest is the kernel. The host is the d
 2. **Host (`controller/`, `apps/policy-controller/`).** Authenticated frames (`HMAC-SHA256`), feature encoders (`features-v0`, `features-v1`), and a catalog profile or an abstention. Live default is `heuristic-v1`, which holds `balanced` through overload so batch keeps its 95% floor. Also frozen threshold and logistic candidates, `distilled-joint`, shadow scoring, and live Laya.
 3. **Deployments (`deployments/`).** Freestanding apps such as `air-biosensor` link `hermit-policy-abi` and `policy-core`. Domain logic stays out of the kernel.
 
+```mermaid
+flowchart TD
+  boot[Guest boots on balanced] --> work[Workloads run]
+  work --> snap[Snapshot: queues, waits, CPU, cache]
+  snap --> session{Session}
+  session -->|default| h[heuristic-v1]
+  session -->|experiment| l[Laya: one CPU float32 forward]
+  h --> win750{Reply inside 750 ms?}
+  l --> named{A catalog profile?}
+  named -->|no: busy, truncated, or expired| abstain[Abstain. No proposal]
+  named -->|yes| win5{Reply inside 5 s?}
+  win750 -->|yes| proposal[Signed proposal: one profile]
+  win5 -->|yes| proposal
+  win750 -->|no| miss[Logged. Not staged]
+  win5 -->|no| miss
+  abstain --> keep[Guest keeps the current profile]
+  miss --> keep
+  proposal --> check[Guest checks generation, deadline, and lease]
+  check -->|accept| apply[Apply CPU weights, cache target, and admission]
+  check -->|reject| keep
+  keep --> lease{Lease still valid?}
+  lease -->|yes| work
+  lease -->|no| fallback[Install balanced]
+  apply --> work
+  fallback --> work
+```
+
+The guest is what runs. `heuristic-v1` is the default session. Laya is a separate experiment on the same path: one forward, then the guest still accepts or rejects the answer. A late, missing, or rejected reply leaves the current profile in place until its lease ends, and expiry installs `balanced`.
+
+```mermaid
+sequenceDiagram
+  participant Guest
+  participant Heuristic as heuristic-v1
+  participant Laya
+  Guest->>Heuristic: snapshot
+  Guest->>Laya: same snapshot
+  Heuristic-->>Guest: latency
+  Note over Laya: forward 3.95 s
+  Laya-->>Guest: balanced
+  Note over Guest: 3.96 s after capture, inside the 5 s window
+  Guest->>Guest: apply balanced
+```
+
+One Laya round on the Ryzen, 7 Oct 2026. The heuristic on that snapshot was `latency`. Laya returned `balanced`, and the guest installed `balanced`. The forward was past the 750 ms heuristic deadline and inside the 5 s Laya window. Confidence was 0.48, recorded and not used as a gate. Detail in [docs/05](docs/05-laya-controller.md).
+
 ## Repository Layout
 
 | Path | Description |
