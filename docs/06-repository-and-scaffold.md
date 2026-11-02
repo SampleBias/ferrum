@@ -2,7 +2,9 @@
 
 ## Current versus proposed contents
 
-The delivered repository contains Markdown planning documents only. The tree below is the **implementation target**. Paths, crate names, and scripts in this document are proposed interfaces; they do not already exist.
+> **Historical scaffold plan:** this document describes an earlier proposed repository shape. Ferrum now has the Rust workspace and policy components described in the repository README. For current offline-policy build and run instructions, use [Autonomous Policy Engine v1](16-autonomous-policy-engine.md). In particular, the toolchain steps below are historical proposals, not the currently validated build recipe.
+
+The tree below is the original **implementation target**. Paths, crate names, and scripts shown here were proposed interfaces at the time this plan was written; consult the current README and implementation docs before using them as commands.
 
 ```text
 ai-as-a-kernel/

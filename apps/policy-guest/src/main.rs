@@ -1,4 +1,4 @@
-//! Hermit guest that asks the host mock controller for one CPU profile.
+//! Hermit guest with offline local-policy and optional controller experiments.
 
 #[cfg(target_os = "hermit")]
 use hermit as _;
@@ -16,6 +16,9 @@ mod joint_abi;
 
 fn main() -> ExitCode {
     println!("FERRUM_START policy-guest");
+    if env::args().skip(1).any(|arg| arg == "--autonomous") {
+        return joint_abi::offline_exit();
+    }
     if env::args().skip(1).any(|arg| arg == "--joint-abi") {
         return joint_abi::exit();
     }

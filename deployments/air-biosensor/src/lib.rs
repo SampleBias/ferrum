@@ -115,6 +115,105 @@ pub fn biosensor_v1() -> &'static [BiosensorPhaseSpec] {
     BIOSENSOR_V1
 }
 
+/// Autonomous demonstrator phases. The first four entries model a complete
+/// sensor event lifecycle; the final entry exercises the existing reclaim
+/// profile under simulated pressure. Phase telemetry is a workload input, not
+/// a kernel queue snapshot.
+pub const AUTONOMOUS_SAMPLE_US: u64 = 1_000_000;
+pub const AUTONOMOUS_PHASE_US: u64 = 2_500_000;
+
+pub const AUTONOMOUS_V1: &[BiosensorPhaseSpec] = &[
+    BiosensorPhaseSpec {
+        name: "patrol",
+        duration_us: AUTONOMOUS_PHASE_US,
+        latency_queue: 0,
+        latency_max_wait_us: 0,
+        latency_wait_samples: 0,
+        batch_queue: 0,
+        maintenance_runnable: false,
+        managed_used_bytes: 8 * 1024 * 1024,
+        headroom_bytes: 128 * 1024 * 1024,
+        evictable_backlog_bytes: 0,
+        emergency: false,
+        true_plume_events: 0,
+        clutter_candidates: 0,
+        capture_deadline_us: 35_000,
+        expected_profile: ProfileId::Balanced,
+    },
+    BiosensorPhaseSpec {
+        name: "capture",
+        duration_us: AUTONOMOUS_PHASE_US,
+        latency_queue: 8,
+        latency_max_wait_us: 18_000,
+        latency_wait_samples: 8,
+        batch_queue: 2,
+        maintenance_runnable: false,
+        managed_used_bytes: 48 * 1024 * 1024,
+        headroom_bytes: 112 * 1024 * 1024,
+        evictable_backlog_bytes: 0,
+        emergency: false,
+        true_plume_events: 12,
+        clutter_candidates: 4,
+        capture_deadline_us: 35_000,
+        expected_profile: ProfileId::Latency,
+    },
+    BiosensorPhaseSpec {
+        name: "confirmation",
+        duration_us: AUTONOMOUS_PHASE_US,
+        latency_queue: 0,
+        latency_max_wait_us: 2_000,
+        latency_wait_samples: 4,
+        batch_queue: 10,
+        maintenance_runnable: false,
+        managed_used_bytes: 84 * 1024 * 1024,
+        headroom_bytes: 96 * 1024 * 1024,
+        evictable_backlog_bytes: 0,
+        emergency: false,
+        true_plume_events: 4,
+        clutter_candidates: 12,
+        capture_deadline_us: 35_000,
+        expected_profile: ProfileId::Throughput,
+    },
+    BiosensorPhaseSpec {
+        name: "recovery",
+        duration_us: AUTONOMOUS_PHASE_US,
+        latency_queue: 0,
+        latency_max_wait_us: 0,
+        latency_wait_samples: 0,
+        batch_queue: 0,
+        maintenance_runnable: false,
+        managed_used_bytes: 32 * 1024 * 1024,
+        headroom_bytes: 128 * 1024 * 1024,
+        evictable_backlog_bytes: 0,
+        emergency: false,
+        true_plume_events: 0,
+        clutter_candidates: 0,
+        capture_deadline_us: 35_000,
+        expected_profile: ProfileId::Balanced,
+    },
+    BiosensorPhaseSpec {
+        name: "pressure_reclaim",
+        duration_us: AUTONOMOUS_PHASE_US,
+        latency_queue: 22,
+        latency_max_wait_us: 420_000,
+        latency_wait_samples: 16,
+        batch_queue: 6,
+        maintenance_runnable: true,
+        managed_used_bytes: 236 * 1024 * 1024,
+        headroom_bytes: 48 * 1024 * 1024,
+        evictable_backlog_bytes: 64 * 1024 * 1024,
+        emergency: false,
+        true_plume_events: 4,
+        clutter_candidates: 8,
+        capture_deadline_us: 35_000,
+        expected_profile: ProfileId::Reclaim,
+    },
+];
+
+pub fn autonomous_v1() -> &'static [BiosensorPhaseSpec] {
+    AUTONOMOUS_V1
+}
+
 /// Build the kernel telemetry [`Observation`] corresponding to `phase`.
 pub fn biosensor_observation(phase: BiosensorPhaseSpec, service_us: [u64; 3]) -> Observation {
     let mut obs = Observation::quiet(phase.duration_us);
@@ -212,7 +311,7 @@ impl BiosensorMetrics {
 mod tests {
     use super::*;
     use policy_core::resources::SmallDeviceEnvelope;
-    use policy_core::{evaluate_distilled, DISTILLED_JOINT_V1};
+    use policy_core::{evaluate_distilled, HeuristicSession, DISTILLED_JOINT_V1, HEURISTIC_V1};
 
     #[test]
     fn biosensor_v1_phases_cover_all_four_joint_profiles() {
@@ -244,5 +343,17 @@ mod tests {
         assert_eq!(m.sensitivity_bp, 10_000);
         assert_eq!(m.specificity_bp, 10_000);
         assert!(m.patrol_coalesced_wakeups > m.patrol_timer_wakeups * 10);
+    }
+
+    #[test]
+    fn autonomous_v1_uses_heuristic_v1_for_the_sensor_lifecycle() {
+        let mut session = HeuristicSession::new(HEURISTIC_V1);
+        let mut current = ProfileId::Balanced;
+        for phase in autonomous_v1() {
+            let observation = biosensor_observation(*phase, [100_000, 100_000, 50_000]);
+            let decision = session.decide(&observation, current);
+            assert_eq!(decision.profile, phase.expected_profile, "{}", phase.name);
+            current = decision.profile;
+        }
     }
 }

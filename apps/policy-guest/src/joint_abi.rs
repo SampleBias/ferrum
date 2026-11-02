@@ -23,6 +23,17 @@ pub fn exit() -> ExitCode {
     }
 }
 
+/// Run the in-guest mixed workload with the local heuristic and refuse an
+/// external endpoint so this mode cannot silently become a connected run.
+pub fn offline_exit() -> ExitCode {
+    #[cfg(target_os = "hermit")]
+    if env::args().any(|arg| arg.starts_with("--controller=")) {
+        println!("FERRUM_AUTONOMOUS_FAIL --autonomous cannot be combined with --controller");
+        return ExitCode::from(1);
+    }
+    exit()
+}
+
 #[cfg(not(target_os = "hermit"))]
 fn run() -> Result<(), String> {
     Err("joint-abi runs inside the hermit guest".to_string())
@@ -39,7 +50,8 @@ fn run() -> Result<(), String> {
         Submit, WorkClass,
     };
     use policy_core::{
-        catalog_spec, choose_heuristic, evaluate_distilled, DISTILLED_JOINT_V1, HEURISTIC_V0,
+        catalog_spec, choose_heuristic, evaluate_distilled, HeuristicSession,
+        DISTILLED_JOINT_V1, HEURISTIC_V0, HEURISTIC_V1,
     };
     use policy_guest::LiveSession;
     use policy_types::{
@@ -263,6 +275,7 @@ fn run() -> Result<(), String> {
     let mut reclaimed_bytes = 0u64;
     let mut current_gen = read_joint()?.generation;
     let mut last_non_renewal_us: Option<u64> = None;
+    let mut local_heuristic = HeuristicSession::new(HEURISTIC_V1);
 
     for (step, phase) in workloads::mixed_v1().iter().enumerate() {
         let obs = workloads::measured(*phase, workloads::SAMPLE_US, [120_000, 120_000, 40_000]);
@@ -276,6 +289,15 @@ fn run() -> Result<(), String> {
                 heuristic_choice.as_str()
             ));
         }
+        let active_before = read_joint()?;
+        let current_profile = match active_before.profile_id {
+            0 => ProfileId::Balanced,
+            1 => ProfileId::Latency,
+            2 => ProfileId::Throughput,
+            3 => ProfileId::Reclaim,
+            other => return Err(format!("kernel returned unknown profile id {other}")),
+        };
+        let local_decision = local_heuristic.decide(&obs, current_profile);
 
         if phase.emergency {
             if unsafe { sys_policy_install_emergency() } != 0 {
@@ -328,8 +350,7 @@ fn run() -> Result<(), String> {
             current_gen = read_joint()?.generation;
             last_non_renewal_us = Some(now_us());
         } else {
-            let active_before = read_joint()?;
-            if active_before.profile_id != distilled.profile as u8 {
+            if active_before.profile_id != local_decision.profile as u8 {
                 if let Some(changed_at) = last_non_renewal_us {
                     let elapsed = now_us().saturating_sub(changed_at);
                     if elapsed < MIN_DWELL_US + 25_000 {
@@ -360,10 +381,10 @@ fn run() -> Result<(), String> {
                 .map_err(|e| format!("report_applied: {e}"))?;
                 ticket.profile
             } else {
-                let j_status = stage_joint_profile(distilled.profile, current_gen)?;
+                let j_status = stage_joint_profile(local_decision.profile, current_gen)?;
                 current_gen = j_status.generation;
                 let _ = j_status;
-                distilled.profile
+                local_decision.profile
             };
             if active_before.profile_id != chosen_profile as u8 {
                 last_non_renewal_us = Some(now_us());
@@ -375,11 +396,11 @@ fn run() -> Result<(), String> {
                 batch: j_status.inflight_batch,
             });
             println!(
-                "FERRUM_JOINT_ABI phase={} profile={} regime={} confidence_bp={} gen={} weights={}:{}:{} cache_target_mib={} inflight={}/{} override={}",
+                "FERRUM_JOINT_ABI phase={} profile={} regime={} rule={} gen={} weights={}:{}:{} cache_target_mib={} inflight={}/{} override={}",
                 phase.name,
                 chosen_profile.as_str(),
-                distilled.regime.as_str(),
-                distilled.confidence_bp,
+                local_decision.regime.as_str(),
+                local_decision.rule.as_str(),
                 j_status.generation,
                 j_status.weight_latency,
                 j_status.weight_batch,

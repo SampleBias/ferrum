@@ -6,7 +6,7 @@
 
 **The future of sensors is AI adaptive.**
 
-Ferrum is an adaptive kernel for autonomous sensor systems. A decision model reads live telemetry and picks one named profile from a fixed catalog (heuristic, frozen threshold, distilled joint policy, or [Laya](https://github.com/NandhaKishorM/laya)). A Rust unikernel on [Hermit](https://github.com/hermit-os) applies that profile to CPU, managed cache, and admission, and falls back to `balanced` when the model is late, absent, or wrong. Inference stays out of the interrupt handler, the allocator, and kernel code.
+Ferrum is an adaptive kernel for autonomous sensor systems. Its freestanding Rust application can select a named profile locally with deterministic `heuristic-v1` logic, then submit it through the same validated policy ABI used by the optional host controller. The host controller, Python integration, and [Laya](https://github.com/NandhaKishorM/laya) remain available for experiments. [Hermit](https://github.com/hermit-os) owns validation, enforcement, and the `balanced` lease fallback; policy selection stays in the application layer.
 
 On a sensor that split is sleep time and compute aimed at the measurement that matters:
 
@@ -14,7 +14,7 @@ On a sensor that split is sleep time and compute aimed at the measurement that m
 - **Wake.** Mode `3` (off at boot) gives a waking class at most four missed slices and `4 ms` in-class FIFO turns. Latency-profile RPC p99 falls from **`18.5 ms` to `12.1 ms`**.
 - **Speed.** Sealed RPC, `balanced` (1:1:1) to `latency` (6:2:2): p99 **`45.7 ms` to `25.6 ms`** (`1.78x`) at **`99.6%`** batch HMAC.
 
-`deployments/air-biosensor` is the worked example: patrol, capture, confirmation, reclaim. Sensitivity and specificity there are phase objectives. The numbers above are unikernel measurements.
+`deployments/air-biosensor` is the worked example: its offline mode runs patrol, capture, confirmation, recovery, and a pressure-reclaim check. Sensitivity and specificity there are phase objectives. The numbers above are existing unikernel measurements and do not measure the new local controller path.
 
 ## Use cases
 
@@ -33,7 +33,7 @@ The development host builds and boots the unikernel. A field node would run it n
 | Guest CPU | 1 vCPU. KVM: `-cpu host`. TCG: `qemu64` plus `apic`, `fsgsbase`, `fxsr`, `rdrand`, `rdtscp`, `xsave`, `xsaveopt` |
 | Guest RAM | 512 MiB (`-m 512M` in `tools/run-qemu.sh`) |
 | Network | virtio-net, static `10.0.2.15`, when a controller is attached |
-| Rust | `1.94.0` with `rust-std` for `x86_64-unknown-hermit`. Kernel pin `nightly-2026-02-01` |
+| Rust | `nightly-2026-02-01` with `rust-src` and `llvm-tools`; the Tier 3 Hermit target is built with `-Z build-std=std,panic_abort` |
 | Loader | `hermit-loader-x86_64` v0.5.6 |
 | Controller | Python 3. Heuristic, threshold, and distilled policies are small. A live Laya checkpoint is the large one |
 | Host RAM | 16 GB planning figure for a Laya session. The 421 M-weight checkpoint is about 1.7 GB at fp32 before activations, runtime, and copies ([docs/05](docs/05-laya-controller.md)) |
@@ -53,29 +53,23 @@ This image is x86-64. Upstream Hermit also builds aarch64 and riscv64; the [load
 
 ## How It Works
 
-Two artifacts over QEMU `virtio-net`. The guest is the kernel. The host is the decision model.
+The Hermit guest can select policies locally with networking disabled. An optional host controller can also connect over QEMU `virtio-net` for experiments.
 
 1. **Guest (`apps/policy-guest`, `vendor/hermit-rs`).** Opt-in fair-share scheduler (`ai-policy`) across `latency`, `batch`, and `maintenance`, plus a reserved `system` budget; tickless idle; opt-in wake mode (`sys_policy_set_wake`, off at boot). See [docs/03](docs/03-kernel-mechanisms-and-policies.md) and the [wake-mode results](#3-scheduler-wake-mode-sys_policy_set_wake-kvm-ab). Narrow C ABI (`crates/hermit-policy-abi`) stages CPU weights, cache targets, and admission together (`joint-v1`). Dwell, generation, and deadline checks. Lease expiry or controller loss falls back to `balanced`.
-2. **Host (`controller/`, `apps/policy-controller/`).** Authenticated frames (`HMAC-SHA256`), feature encoders (`features-v0`, `features-v1`), and a catalog profile or an abstention. Live default is `heuristic-v1`, which holds `balanced` through overload so batch keeps its 95% floor. Also frozen threshold and logistic candidates, `distilled-joint`, shadow scoring, and live Laya.
+2. **Optional host (`controller/`, `apps/policy-controller/`).** Authenticated frames (`HMAC-SHA256`), feature encoders (`features-v0`, `features-v1`), and a catalog profile or an abstention. The experimental controller offers `heuristic-v1`, frozen threshold and logistic candidates, `distilled-joint`, shadow scoring, and live Laya.
 3. **Deployments (`deployments/`).** Freestanding apps such as `air-biosensor` link `hermit-policy-abi` and `policy-core`. Domain logic stays out of the kernel.
 
 ```mermaid
 flowchart TD
   boot[Guest boots on balanced] --> work[Workloads run]
-  work --> snap[Snapshot: queues, waits, CPU, cache]
-  snap --> session{Session}
-  session -->|default| h[heuristic-v1]
-  session -->|experiment| l[Laya: one CPU float32 forward]
-  h --> win750{Reply inside 750 ms?}
-  l --> named{A catalog profile?}
-  named -->|no: busy, truncated, or expired| abstain[Abstain. No proposal]
-  named -->|yes| win5{Reply inside 5 s?}
-  win750 -->|yes| proposal[Signed proposal: one profile]
-  win5 -->|yes| proposal
-  win750 -->|no| miss[Logged. Not staged]
-  win5 -->|no| miss
-  abstain --> keep[Guest keeps the current profile]
-  miss --> keep
+  work --> snap[Telemetry and phase inputs]
+  snap --> source{Policy source}
+  source -->|offline| h[heuristic-v1 in guest application]
+  source -->|experiment| host[Optional host controller or Laya]
+  h --> proposal[Named catalog profile]
+  host --> reply{Valid profile inside its deadline?}
+  reply -->|yes| proposal
+  reply -->|no or abstain| keep[Guest keeps the current profile]
   proposal --> check[Guest checks generation, deadline, and lease]
   check -->|accept| apply[Apply CPU weights, cache target, and admission]
   check -->|reject| keep
@@ -86,7 +80,7 @@ flowchart TD
   fallback --> work
 ```
 
-The guest is what runs. `heuristic-v1` is the default session. Laya is a separate experiment on the same path: one forward, then the guest still accepts or rejects the answer. A late, missing, or rejected reply leaves the current profile in place until its lease ends, and expiry installs `balanced`.
+The autonomous guest is what runs. `heuristic-v1` uses the same no_std Rust policy core whether it is evaluated in the guest or by the optional controller. `policy-guest --autonomous` and `air-biosensor --autonomous` do not open a socket; the kernel still accepts or rejects every profile through the joint ABI. The connected Laya session remains a separate experiment. Lease expiry installs `balanced`.
 
 ```mermaid
 sequenceDiagram
@@ -110,11 +104,11 @@ One Laya round on the Ryzen, 7 Oct 2026. The heuristic on that snapshot was `lat
 | --- | --- |
 | `vendor/hermit-rs/` | Patched Hermit 0.13.0: `ai-policy` scheduler, wake mode, tickless coalescing, joint ABI |
 | `crates/policy-types/` | `no_std` identifiers, catalog types, telemetry |
-| `crates/policy-core/` | Lease engine, scheduler model, ledgers, cache table, distilled and threshold policies |
+| `crates/policy-core/` | no_std heuristic-v1, lease engine, scheduler model, ledgers, cache table, distilled and threshold policies |
 | `crates/policy-wire/` | Authenticated framing and strict JSON |
 | `crates/hermit-policy-abi/` | C ABI (`AbiStageJointIn`, `AbiJointStatus`, `AbiSnapshot`) |
 | `crates/workloads/` | Phase definitions (`mixed-v1`) and open-loop schedules (`jobs-v1`, `jobs-v2`) |
-| `apps/policy-guest/` | Unikernel guest: functional, fault, joint-ABI, branch, and soak modes |
+| `apps/policy-guest/` | Unikernel guest: autonomous heuristic-v1, functional, fault, joint-ABI, branch, and soak modes |
 | `apps/policy-controller/` | Rust host controller: `pending-threshold`, `distilled-joint`, `heuristic-v0`, `heuristic-v1` |
 | `deployments/air-biosensor/` | Air Biological Sampling Sensor on `hermit-policy-abi` |
 | `controller/` | Python server, Laya adapters, branch labels, explainability |
@@ -132,7 +126,7 @@ PYTHONPATH=controller/src python3 -m unittest discover -s controller/tests
 
 ### 2. Build the Unikernel Guest (or Embedded Deployments)
 
-Rust `1.94.0` (`rust-std` for `x86_64-unknown-hermit`) and `nightly-2026-02-01` for the kernel:
+Pinned Rust `nightly-2026-02-01` with `rust-src` and `llvm-tools`:
 
 ```bash
 ./tools/build-policy-guest.sh --release
@@ -158,6 +152,14 @@ AIK_GUEST=target/x86_64-unknown-hermit/release/policy-guest \
 AIK_APPEND="-- --joint-abi" \
 ./tools/run-qemu.sh
 
+# Generic guest local heuristic-v1 run (no controller and no network device)
+AIK_ACCEL=tcg \
+AIK_NET=0 \
+AIK_LOADER=artifacts/loader/hermit-loader-x86_64-v0.5.6 \
+AIK_GUEST=target/x86_64-unknown-hermit/release/policy-guest \
+AIK_APPEND="-- --autonomous" \
+./tools/run-qemu.sh
+
 # Real-payload RPC with wake mode 3 (mode 0 is the scheduler behind the labels)
 AIK_ACCEL=kvm \
 AIK_LOADER=artifacts/loader/hermit-loader-x86_64-v0.5.6 \
@@ -172,7 +174,29 @@ AIK_GUEST=target/x86_64-unknown-hermit/release/air-biosensor \
 ./tools/run-qemu.sh
 ```
 
-Connected session. `heuristic-v1` is the default; `--heuristic heuristic-v0` restores the previous rule.
+### 4. Run the autonomous policy engine offline
+
+The host command below prints the deterministic phase decisions for inspection. The QEMU command boots the actual Hermit application with `AIK_NET=0`, which disables the network device even if the shell has a different default.
+
+```bash
+# Host-side decision trace only
+cargo run -p air-biosensor -- --autonomous
+
+# Freestanding guest: local heuristic-v1, no controller, no network
+AIK_ACCEL=tcg \
+AIK_NET=0 \
+AIK_TIMEOUT_S=60 \
+AIK_LOADER=artifacts/loader/hermit-loader-x86_64-v0.5.6 \
+AIK_GUEST=target/x86_64-unknown-hermit/release/air-biosensor \
+AIK_APPEND="-- --autonomous --cycles=1" \
+./tools/run-qemu.sh
+```
+
+Pass `--cycles=0` for continuous operation, with `AIK_TIMEOUT_S` set to the desired run limit. Queue, wait, and pressure features in this demonstrator come from simulated phase definitions; class CPU service and the active kernel profile/generation are read from Hermit. See [the autonomous policy guide](docs/16-autonomous-policy-engine.md) for the ABI limitation and reproducible benchmark plan.
+
+### 5. Optional connected controller session
+
+Pass `--controller=ADDRESS` to the regular air-biosensor mode and enable `AIK_NET=1`. The existing host server workflow remains experimental and unchanged.
 
 ```bash
 # Terminal 1
@@ -185,7 +209,7 @@ AIK_GUEST=target/x86_64-unknown-hermit/release/policy-guest \
 ./tools/run-qemu.sh
 ```
 
-### 4. Full Verification, Real-Data Benchmark & Explainability
+### 6. Full Verification, Real-Data Benchmark & Explainability
 
 Rust tests, Python tests, QEMU mechanism and fault boots, the RPC/HMAC benchmark, a closed-loop branch, and the live soak. Refreshes [docs/15-test-results.md](docs/15-test-results.md) and `docs/figures/`.
 
@@ -283,3 +307,4 @@ Hermit in `vendor/hermit-rs/` remains under `MIT OR Apache-2.0`.
 | [13 — In-guest evolution](docs/13-in-guest-evolution.md) | Requirements for self-contained in-guest inference |
 | [14 — S3 acceptance record](docs/14-s3-acceptance.md) | Recorded S3 gates, sealed evaluations, pause behavior, and soak |
 | [15 — Test guide & verification results](docs/15-test-results.md) | Automated test runner guide, visual charts, scorecard, and captured kernel traces |
+| [16 — Autonomous policy engine](docs/16-autonomous-policy-engine.md) | Offline mode, telemetry limits, build/run commands, and benchmark plan |
