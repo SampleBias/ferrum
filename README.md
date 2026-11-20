@@ -14,7 +14,13 @@ On a sensor that split is sleep time and compute aimed at the measurement that m
 - **Wake.** Mode `3` (off at boot) gives a waking class at most four missed slices and `4 ms` in-class FIFO turns. Latency-profile RPC p99 falls from **`18.5 ms` to `12.1 ms`**.
 - **Speed.** Sealed RPC, `balanced` (1:1:1) to `latency` (6:2:2): p99 **`45.7 ms` to `25.6 ms`** (`1.78x`) at **`99.6%`** batch HMAC.
 
-`deployments/air-biosensor` is the worked example: its offline mode runs patrol, capture, confirmation, recovery, and a pressure-reclaim check. Sensitivity and specificity there are phase objectives. The numbers above are existing unikernel measurements and do not measure the new local controller path.
+`deployments/air-biosensor` is the worked example. Its offline mode runs patrol, capture, confirmation, recovery, and a pressure-reclaim check. Sensitivity and specificity are phase objectives. The local controller has its own [offline guest test results](#offline-air-biosensor-test-results).
+
+## Learn Ferrum
+
+1. **Basic.** Run the host demo and connect each phase to a scheduler profile. [Follow a policy decision](docs/lessons/basic/README.md)
+2. **Intermediate.** Calculate CPU service from two counter readings and explain why a busy capture queue can still select `balanced`. [Read a telemetry window](docs/lessons/intermediate/README.md)
+3. **Advanced.** Follow a proposal through kernel activation, renewal, and lease expiry, then interpret a real guest trace. [Trace a policy through Hermit](docs/lessons/advanced/README.md)
 
 ## Use cases
 
@@ -37,9 +43,9 @@ The development host builds and boots the unikernel. A field node would run it n
 | Loader | `hermit-loader-x86_64` v0.5.6 |
 | Controller | Python 3. Heuristic, threshold, and distilled policies are small. A live Laya checkpoint is the large one |
 | Host RAM | 16 GB planning figure for a Laya session. The 421 M-weight checkpoint is about 1.7 GB at fp32 before activations, runtime, and copies ([docs/05](docs/05-laya-controller.md)) |
-| KVM | Required for the timing numbers (`/dev/kvm`, `kvm_amd` or `kvm_intel`). Functional boots run under TCG |
+| KVM | Used for the scheduler and RPC benchmarks (`/dev/kvm`, `kvm_amd` or `kvm_intel`). The offline air-biosensor comparison used QEMU software emulation (TCG) |
 
-Hermit requires `FSGSBASE` and `RDTSCP` ([Hermit QEMU notes](https://github.com/hermit-os/hermit-rs/wiki/Running-HermitOS)). Published numbers are from an AMD Ryzen 5 1600 and an Intel Core i7-10750H, both on QEMU 11.1.1. The 512 MiB guest budget is 128 MiB image and kernel, 256 MiB arenas, 128 MiB headroom. Emergency reclaim fires below 64 MiB of unreserved headroom ([docs/03](docs/03-kernel-mechanisms-and-policies.md)).
+Hermit requires `FSGSBASE` and `RDTSCP` ([Hermit QEMU notes](https://github.com/hermit-os/hermit-rs/wiki/Running-HermitOS)). The KVM benchmarks used an AMD Ryzen 5 1600 and an Intel Core i7-10750H, both on QEMU 11.1.1. The 512 MiB guest budget is 128 MiB image and kernel, 256 MiB arenas, 128 MiB headroom. Emergency reclaim fires below 64 MiB of unreserved headroom ([docs/03](docs/03-kernel-mechanisms-and-policies.md)).
 
 ### Sensor node
 
@@ -223,6 +229,21 @@ PYTHONPATH=controller/src python3 -m aik_controller.explain --host i7-10750h
 ```
 
 ## Performance, Benchmarks & Explainability
+
+### Offline air-biosensor test results
+
+The updated autonomous sampler and workers used **26% less median host CPU time per boot**. Three pairs of boots compared the release build at `b8102bf` with the updated build, alternating run order. All six boots completed one five-phase cycle on an Intel Core i7-6700 under QEMU 11.1.2 TCG with one vCPU, 512 MiB RAM, and networking disabled.
+
+| Per one-cycle boot | Baseline | Updated |
+| --- | ---: | ---: |
+| Median host CPU time, user + system | 10.49 s | 7.76 s |
+| Median elapsed time, startup through exit | 15.32 s | 12.86 s |
+| Median guest timer interrupts | 5,947 | 7,512 |
+| Boots that applied the expected `latency` profile during capture | 0/3 | 2/3 |
+
+Respecting the 2.5-second phase deadlines shortened the run. Blocking workers between bursts reduced busy-waiting and increased timer interrupts. In the two boots that applied `latency`, the change took about two seconds from capture-phase entry. The third boot held `balanced` on its first sample to protect batch work. Battery energy, physical detection accuracy, and the simulator’s 35 ms capture deadline remain unverified on hardware. [Measurements and limitations](docs/16-autonomous-policy-engine.md#current-host-and-known-limits)
+
+The host suites passed **108 Rust tests and 148 Python tests**. A separate two-cycle Hermit boot recorded **11 accepted proposals, zero rejections, and nine profile switches**, then exited successfully (raw QEMU status `3`). [Build and run the offline guest](#4-run-the-autonomous-policy-engine-offline)
 
 ### 1. Kernel Enforcement Timings & Soak Qualification
 

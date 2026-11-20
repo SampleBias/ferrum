@@ -7,13 +7,46 @@
 
 use std::process::ExitCode;
 
-#[cfg(target_os = "hermit")]
+#[cfg(any(target_os = "hermit", test))]
 use air_biosensor::AUTONOMOUS_SAMPLE_US;
 use air_biosensor::{autonomous_v1, biosensor_observation};
 use policy_core::{HeuristicSession, HEURISTIC_V1};
 use policy_types::ProfileId;
 #[cfg(target_os = "hermit")]
 use policy_types::{CatalogId, MIN_DWELL_US};
+
+#[cfg(any(target_os = "hermit", test))]
+struct ServiceReading {
+    at_us: u64,
+    counters: Option<[u64; 3]>,
+}
+
+#[cfg(any(target_os = "hermit", test))]
+impl ServiceReading {
+    fn next_sample_at(&self, phase_end: u64) -> Option<u64> {
+        self.at_us
+            .checked_add(AUTONOMOUS_SAMPLE_US)
+            .filter(|&at| at <= phase_end)
+    }
+
+    fn window_since(&self, previous: &Self) -> Result<(u64, [u64; 3]), &'static str> {
+        let window_us = self.at_us.saturating_sub(previous.at_us);
+        if window_us == 0 || window_us > 2 * AUTONOMOUS_SAMPLE_US {
+            return Err("FERRUM_TELEMETRY_STALE");
+        }
+        let (Some(before), Some(after)) = (previous.counters, self.counters) else {
+            return Err("FERRUM_TELEMETRY_INCOMPLETE");
+        };
+        let mut service = [0; 3];
+        for (i, delta) in service.iter_mut().enumerate() {
+            *delta = after[i]
+                .checked_sub(before[i])
+                .filter(|&us| us <= 2 * window_us)
+                .ok_or("FERRUM_TELEMETRY_INVALID")?;
+        }
+        Ok((window_us, service))
+    }
+}
 
 pub fn exit() -> ExitCode {
     match run() {
@@ -93,6 +126,7 @@ fn run() -> Result<(), String> {
         fn sys_policy_staged() -> i32;
         fn sys_clock_gettime(clock_id: i32, tp: *mut Timespec) -> i32;
         fn sys_usleep(usecs: u64);
+        fn sys_block_current_task_with_timeout(timeout_ms: u64);
         fn sys_yield();
     }
 
@@ -117,14 +151,26 @@ fn run() -> Result<(), String> {
             .saturating_add((time.tv_nsec / 1000) as u64))
     }
 
-    fn sleep_until(target_us: u64) -> Result<(), String> {
+    fn sleep_us(duration_us: u64) {
+        // SAFETY: Hermit's short usleep busy-waits. Arm a timer for this task
+        // and yield so the scheduler can actually park it for the interval.
+        unsafe {
+            if duration_us < 10_000 {
+                sys_block_current_task_with_timeout(duration_us.div_ceil(1_000));
+                sys_yield();
+            } else {
+                sys_usleep(duration_us);
+            }
+        }
+    }
+
+    fn sleep_until(target_us: u64) -> Result<u64, String> {
         loop {
             let now = now_us()?;
             if now >= target_us {
-                return Ok(());
+                return Ok(now);
             }
-            let rest = target_us - now;
-            unsafe { sys_usleep(rest.min(100_000)) };
+            sleep_us(target_us - now);
         }
     }
 
@@ -181,6 +227,13 @@ fn run() -> Result<(), String> {
             read_service(BATCH)?,
             read_service(MAINTENANCE)?,
         ])
+    }
+
+    fn service_reading(at_us: u64, phase: &str) -> ServiceReading {
+        let counters = service_counters()
+            .inspect_err(|err| println!("FERRUM_TELEMETRY_MISSING phase={phase} reason={err}"))
+            .ok();
+        ServiceReading { at_us, counters }
     }
 
     fn drain_acks() {
@@ -270,7 +323,7 @@ fn run() -> Result<(), String> {
             if unsafe { sys_policy_staged() } == 0 {
                 return Ok((false, now.saturating_sub(started_us), 0));
             }
-            unsafe { sys_usleep(2_000) };
+            sleep_us(2_000);
         }
     }
 
@@ -327,9 +380,9 @@ fn run() -> Result<(), String> {
                         for _ in 0..4_000 {
                             spin_loop();
                         }
-                        unsafe { sys_usleep(1_000) };
+                        sleep_us(1_000);
                     } else {
-                        unsafe { sys_usleep(10_000) };
+                        thread::park();
                     }
                 }
             }));
@@ -342,13 +395,14 @@ fn run() -> Result<(), String> {
         {
             break;
         }
-        unsafe { sys_usleep(10_000) };
+        sleep_us(10_000);
     }
     if control.failed.load(Ordering::Acquire)
         || control.ready.load(Ordering::Acquire) != usize::from(workload_threads)
     {
         control.stop.store(true, Ordering::Release);
         for worker in workers {
+            worker.thread().unpark();
             let _ = worker.join();
         }
         return Err(
@@ -358,8 +412,6 @@ fn run() -> Result<(), String> {
 
     let mut session = HeuristicSession::new(HEURISTIC_V1);
     let mut last_profile_change_us = 0u64;
-    let mut pending_profile = None;
-    let mut pending_streak = 0u8;
     let mut accepted = 0u64;
     let mut rejected = 0u64;
     let mut switches = 0u64;
@@ -373,12 +425,7 @@ fn run() -> Result<(), String> {
             break;
         }
         cycle = cycle.saturating_add(1);
-        for phase in autonomous_v1() {
-            let phase_index = autonomous_v1()
-                .iter()
-                .position(|candidate| candidate.name == phase.name)
-                .unwrap_or(0) as u8;
-            control.phase.store(phase_index, Ordering::Release);
+        for (phase_index, phase) in autonomous_v1().iter().enumerate() {
             let phase_start = match now_us() {
                 Ok(now) => now,
                 Err(err) => {
@@ -386,77 +433,44 @@ fn run() -> Result<(), String> {
                     break 'cycles;
                 }
             };
-            let mut sample_start = phase_start;
-            let mut service_before = match service_counters() {
-                Ok(counters) => counters,
-                Err(err) => {
-                    println!("FERRUM_TELEMETRY_MISSING phase={} reason={err}", phase.name);
-                    [0, 0, 0]
-                }
-            };
+            let phase_end = phase_start.saturating_add(phase.duration_us);
+            let mut last_reading = service_reading(phase_start, phase.name);
+            control.phase.store(phase_index as u8, Ordering::Release);
+            for worker in &workers {
+                worker.thread().unpark();
+            }
+            let mut pending_profile = None;
             if phase.name == "capture" {
                 event_start_us = phase_start;
                 capture_policy_activation_us = None;
             }
 
             loop {
-                let phase_now = match now_us() {
+                let next_sample = last_reading.next_sample_at(phase_end);
+                let sample_end = match sleep_until(next_sample.unwrap_or(phase_end)) {
                     Ok(now) => now,
                     Err(err) => {
                         failure = Some(err);
                         break 'cycles;
                     }
                 };
-                if phase_now >= phase_start.saturating_add(phase.duration_us) {
+                if next_sample.is_none() || sample_end > phase_end {
                     break;
                 }
-                let target = sample_start.saturating_add(AUTONOMOUS_SAMPLE_US);
-                if let Err(err) = sleep_until(target) {
-                    failure = Some(err);
-                    break 'cycles;
-                }
-                let sample_end = match now_us() {
-                    Ok(now) => now,
-                    Err(err) => {
-                        failure = Some(err);
-                        break 'cycles;
-                    }
-                };
-                let service_after = match service_counters() {
-                    Ok(counters) => counters,
-                    Err(err) => {
-                        println!("FERRUM_TELEMETRY_MISSING phase={} reason={err}", phase.name);
-                        sample_start = sample_end;
+                let previous_profile = pending_profile.take();
+                let previous =
+                    std::mem::replace(&mut last_reading, service_reading(sample_end, phase.name));
+                let (window_us, service) = match last_reading.window_since(&previous) {
+                    Ok(window) => window,
+                    Err(event) => {
+                        println!(
+                            "{event} phase={} window_us={} action=skip",
+                            phase.name,
+                            sample_end.saturating_sub(previous.at_us)
+                        );
                         continue;
                     }
                 };
-                let window_us = sample_end.saturating_sub(sample_start);
-                if window_us == 0 || window_us > AUTONOMOUS_SAMPLE_US.saturating_mul(2) {
-                    println!(
-                        "FERRUM_TELEMETRY_STALE phase={} window_us={window_us} action=skip",
-                        phase.name
-                    );
-                    sample_start = sample_end;
-                    service_before = service_after;
-                    continue;
-                }
-                let service = [
-                    service_after[0].saturating_sub(service_before[0]),
-                    service_after[1].saturating_sub(service_before[1]),
-                    service_after[2].saturating_sub(service_before[2]),
-                ];
-                sample_start = sample_end;
-                service_before = service_after;
-                if service
-                    .iter()
-                    .any(|value| *value > window_us.saturating_mul(2))
-                {
-                    println!(
-                        "FERRUM_TELEMETRY_INVALID phase={} window_us={window_us} service={}:{}:{} action=skip",
-                        phase.name, service[0], service[1], service[2]
-                    );
-                    continue;
-                }
 
                 let mut observation = biosensor_observation(*phase, service);
                 observation.window_us = window_us;
@@ -487,33 +501,18 @@ fn run() -> Result<(), String> {
                 }
                 let decision = session.decide(&observation, current);
                 let now = sample_end;
-                if decision.profile == current {
-                    pending_profile = None;
-                    pending_streak = 0;
-                } else if decision.profile == ProfileId::Reclaim {
-                    // Reclaim is the catalog's pressure response. Do not delay
-                    // it behind the stability filter.
-                    pending_profile = None;
-                    pending_streak = 0;
-                } else if pending_profile == Some(decision.profile) {
-                    pending_streak = pending_streak.saturating_add(1);
-                } else {
+                if decision.profile != current && decision.profile != ProfileId::Reclaim {
                     pending_profile = Some(decision.profile);
-                    pending_streak = 1;
-                }
-                if decision.profile != current
-                    && decision.profile != ProfileId::Reclaim
-                    && pending_streak < 2
-                {
-                    println!(
-                        "FERRUM_LOCAL_DECISION phase={} choice={} rule={} regime={} action=stability-deferred streak={}",
-                        phase.name,
-                        decision.profile.as_str(),
-                        decision.rule.as_str(),
-                        decision.regime.as_str(),
-                        pending_streak
-                    );
-                    continue;
+                    if previous_profile != pending_profile {
+                        println!(
+                            "FERRUM_LOCAL_DECISION phase={} choice={} rule={} regime={} action=stability-deferred streak=1",
+                            phase.name,
+                            decision.profile.as_str(),
+                            decision.rule.as_str(),
+                            decision.regime.as_str()
+                        );
+                        continue;
+                    }
                 }
                 if decision.profile != current
                     && now.saturating_sub(last_profile_change_us) < MIN_DWELL_US
@@ -550,7 +549,6 @@ fn run() -> Result<(), String> {
                         switches = switches.saturating_add(1);
                         last_profile_change_us = now_us().unwrap_or(now);
                         pending_profile = None;
-                        pending_streak = 0;
                     }
                     if phase.name == "capture"
                         && decision.profile == ProfileId::Latency
@@ -585,6 +583,7 @@ fn run() -> Result<(), String> {
 
     control.stop.store(true, Ordering::Release);
     for worker in workers {
+        worker.thread().unpark();
         let _ = worker.join();
     }
     if let Some(err) = failure {
@@ -604,4 +603,77 @@ fn run() -> Result<(), String> {
         final_status.generation
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use air_biosensor::AUTONOMOUS_PHASE_US;
+
+    #[test]
+    fn sampling_stops_at_the_phase_deadline() {
+        let start = 314_000;
+        let end = start + AUTONOMOUS_PHASE_US;
+        let mut reading = ServiceReading {
+            at_us: start,
+            counters: None,
+        };
+        let mut samples = Vec::new();
+        while let Some(at) = reading.next_sample_at(end) {
+            samples.push(at);
+            reading.at_us = at;
+        }
+        assert_eq!(samples, [start + 1_000_000, start + 2_000_000]);
+        assert_eq!(
+            reading.next_sample_at(start + 3_000_000),
+            Some(start + 3_000_000)
+        );
+    }
+
+    #[test]
+    fn a_missing_endpoint_requires_a_fresh_baseline() {
+        let initial = ServiceReading {
+            at_us: 0,
+            counters: Some([1_000, 2_000, 3_000]),
+        };
+        let missing = ServiceReading {
+            at_us: 1_000_000,
+            counters: None,
+        };
+        let recovered = ServiceReading {
+            at_us: 2_000_000,
+            counters: Some([5_000, 8_000, 12_000]),
+        };
+        let next = ServiceReading {
+            at_us: 3_000_125,
+            counters: Some([5_100, 8_045, 12_000]),
+        };
+        assert_eq!(
+            missing.window_since(&initial),
+            Err("FERRUM_TELEMETRY_INCOMPLETE")
+        );
+        assert_eq!(
+            recovered.window_since(&missing),
+            Err("FERRUM_TELEMETRY_INCOMPLETE")
+        );
+        assert_eq!(next.window_since(&recovered), Ok((1_000_125, [100, 45, 0])));
+    }
+
+    #[test]
+    fn rejects_reset_counters_and_stale_or_implausible_intervals() {
+        let before = ServiceReading {
+            at_us: 100,
+            counters: Some([0, 50, 0]),
+        };
+        let mut after = ServiceReading {
+            at_us: 100 + AUTONOMOUS_SAMPLE_US,
+            counters: Some([0, 49, 0]),
+        };
+        assert_eq!(after.window_since(&before), Err("FERRUM_TELEMETRY_INVALID"));
+        after.counters = Some([0, 50, 2 * AUTONOMOUS_SAMPLE_US + 1]);
+        assert_eq!(after.window_since(&before), Err("FERRUM_TELEMETRY_INVALID"));
+        after.at_us = before.at_us + 2 * AUTONOMOUS_SAMPLE_US + 1;
+        assert_eq!(after.window_since(&before), Err("FERRUM_TELEMETRY_STALE"));
+        assert_eq!(before.window_since(&before), Err("FERRUM_TELEMETRY_STALE"));
+    }
 }

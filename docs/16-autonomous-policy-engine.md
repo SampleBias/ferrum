@@ -23,7 +23,11 @@ The same fixed-point implementation is used by `apps/policy-controller`; the gue
 
 The new `air-biosensor --autonomous` path has no controller argument and does not open a socket. It runs patrol, capture, confirmation, recovery, and a pressure-reclaim phase. It periodically reads the Hermit CPU-service counters, combines their deltas with the sensor simulator's queue, wait, and memory-pressure values, evaluates the shared v1 session, and submits the selected profile using the existing joint ABI. The kernel status and acknowledgment determine whether the change was accepted. Rejected or unconfirmed changes are logged and the current kernel policy remains authoritative.
 
-Ordinary changes require the same candidate in two consecutive one-second samples. `reclaim` is submitted immediately when v1 selects it. The guest also observes the two-second dwell interval before attempting a different profile. Hermit independently checks generation, its 750 ms acceptance window, the dwell interval, and the three-second lease; lease expiry installs `balanced`. If telemetry is unavailable or stale, the guest skips that proposal. It does not extend a profile lease using missing samples, so repeated telemetry failure eventually returns the kernel to `balanced`.
+The controller sleeps until the next one-second sample or the phase deadline. Each 2.5-second phase has room for two full samples. The remaining half-second belongs to that phase and produces no proposal. A CPU-service delta requires two adjacent successful counter reads. After a missed read, the first successful read establishes a fresh baseline.
+
+Inactive workers park until a phase change or shutdown. Active workers block on a timer between bursts of work. Hermit's `sys_usleep` busy-waits for delays under 10 ms, which previously charged the one-millisecond worker waits as CPU service and could trigger the overload rule during capture.
+
+Ordinary changes require the same candidate in two consecutive valid samples within the phase. A skipped sample clears that pending candidate. `reclaim` bypasses the two-sample filter. The guest also observes the two-second dwell interval before attempting a different profile. Hermit independently checks generation, its 750 ms acceptance window, the dwell interval, and the three-second lease. Repeated telemetry failure lets the lease expire and returns the kernel to `balanced`.
 
 The current kernel ABI does **not** expose one complete `AbiSnapshot` read operation. It exposes cumulative per-class CPU-service counters and joint-policy status. Queue length, wait age, and memory pressure in this demonstrator are therefore simulated from the declared sensor phase. CPU service and active policy status are measured in the guest. This keeps the change above the kernel while making the telemetry boundary explicit. It is not yet a general-purpose live queue or allocator telemetry pipeline.
 
@@ -66,12 +70,23 @@ cargo test -p policy-core -p air-biosensor
 cargo check -p policy-guest -p air-biosensor
 ```
 
-The existing golden-vector test verifies heuristic-v1 decision parity. The biosensor tests verify the local phase sequence. The pinned Hermit target build now succeeds for both `policy-guest` and `air-biosensor`; a QEMU boot is still required to confirm the actual freestanding ABI call path.
+The golden-vector test checks heuristic-v1 decision parity. The biosensor tests cover the expected host phase sequence, sampling deadlines, missing counter reads, counter resets, and stale intervals.
 
 For comparable results, use the same QEMU version, guest CPU, vCPU count, memory, workload seed, phase durations, and host power state for three modes: fixed `balanced`, the external controller, and `--autonomous`. Record policy evaluation and activation time, RPC p50/p95/p99, CPU service, idle residency, timer wakes, throughput, image/guest memory, and switch count. The autonomous demo currently logs capture-policy activation delay; it does not yet measure full event processing latency. Do not attribute an end-to-end latency change to controller removal without measuring the workload and scheduler effects. Keep host-controller records distinct from local mode records.
 
 ## Current host and known limits
 
-The development host used for this change reports an Intel Core i7-6700. This is a different processor from the existing i7-10750H result set. The pinned `nightly-2026-02-01` toolchain with `rust-src` is installed, and both release guests compile for Hermit. The current environment has no `qemu-system-x86_64`, no `/dev/kvm`, and no staged loader at `artifacts/loader/hermit-loader-x86_64-v0.5.6`, so neither a guest boot nor runtime ABI behavior has been verified here. Installing QEMU through the system package manager was blocked because sudo requires an interactive password. The Rust target is Tier 3 and does not ship a precompiled standard library; the build scripts use the pinned nightly with `-Z build-std=std,panic_abort`. The Core i7 model does not change heuristic decisions; it matters for QEMU acceleration and benchmark reproducibility. Do not compare future measurements directly with the i7-10750H data without recording the distinct CPU and QEMU lane.
+The autonomous air-biosensor release guest booted on an Intel Core i7-6700 under QEMU 11.1.2 TCG with one vCPU, 512 MiB RAM, networking disabled, and the v0.5.6 Hermit loader. The build used the pinned `nightly-2026-02-01` toolchain with `-Z build-std=std,panic_abort`. KVM was unavailable on this host.
 
-Still required for the full sprint definition of done: a supported kernel telemetry snapshot or equivalent live queue/wait/memory collection, offline QEMU boot, controller-loss and fault-injection runs, a one-hour soak, and captured comparative benchmark results. The optional external workflow remains intact.
+Three pairs of one-cycle boots compared the `b8102bf` guest with the updated sampler and workers. The run order alternated between pairs. Every boot completed all five phases and returned raw QEMU status 3.
+
+| Per boot | `b8102bf` | Updated |
+| --- | ---: | ---: |
+| Median elapsed time, startup through exit | 15.32 s | 12.86 s |
+| Median host CPU time, user + system | 10.49 s | 7.76 s |
+| Median guest timer interrupts | 5,947 | 7,512 |
+| Boots that applied the expected `latency` profile during capture | 0/3 | 2/3 |
+
+The shorter cycle includes the correction to the five 2.5-second phase deadlines. Blocking short worker waits also trades CPU time for more timer interrupts. Battery energy was unmeasured. On the third updated boot the batch-floor rule kept `balanced` on the first capture sample, leaving only one `latency` sample before the phase ended. The other two boots applied `latency` about two seconds into capture. The simulator's 35 ms capture deadline and physical detection accuracy require separate sensor measurements.
+
+Live queue, wait, and memory measurements, controller-loss and fault-injection runs, a one-hour soak, and a comparison against fixed and external control are still open.

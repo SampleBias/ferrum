@@ -52,10 +52,9 @@ if [[ -n "${AIK_MONITOR:-}" ]]; then
   monitor_arg=(-monitor "unix:${AIK_MONITOR},server,nowait")
 fi
 
-net_arg=()
+net_arg=(-nic none)
 if [[ "${AIK_NET:-0}" == "1" ]]; then
-  net_arg=(
-    -nic none
+  net_arg+=(
     -netdev user,id=net0,net=10.0.2.0/24,host=10.0.2.2,ipv6=off
     -device virtio-net-pci,netdev=net0,disable-legacy=on
   )
